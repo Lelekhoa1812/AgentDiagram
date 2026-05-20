@@ -13,6 +13,8 @@ import {
   addStoredProject,
   readStoredProjects,
   removeStoredProject,
+  writeStoredProjects,
+  renameStoredProject,
   readActiveProjectId,
   writeActiveProjectId,
 } from './projectStorage';
@@ -122,6 +124,8 @@ interface State {
   addGeneratedProject: (name: string, dsl: string) => void;
   removeGeneratedProject: (id: string) => void;
   setActiveProjectId: (id: string | null) => void;
+  renameGeneratedProject: (id: string, name: string) => void;
+  reorderGeneratedProjects: (projects: StoredProject[]) => void;
 }
 
 export const useDiagramStore = create<State>()(
@@ -242,7 +246,7 @@ export const useDiagramStore = create<State>()(
         const project = addStoredProject(name, dsl);
         writeActiveProjectId(project.id);
         set((state) => ({
-          generatedProjects: [...state.generatedProjects, project],
+          generatedProjects: [project, ...state.generatedProjects],
           activeProjectId: project.id,
         }));
       },
@@ -258,6 +262,16 @@ export const useDiagramStore = create<State>()(
       setActiveProjectId: (id) => {
         writeActiveProjectId(id);
         set({ activeProjectId: id });
+      },
+      renameGeneratedProject: (id, name) => {
+        renameStoredProject(id, name);
+        set((state) => ({
+          generatedProjects: state.generatedProjects.map((p) => (p.id === id ? { ...p, name } : p)),
+        }));
+      },
+      reorderGeneratedProjects: (projects) => {
+        writeStoredProjects(projects);
+        set({ generatedProjects: projects });
       },
     }),
     {

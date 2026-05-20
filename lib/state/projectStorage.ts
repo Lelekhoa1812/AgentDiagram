@@ -58,8 +58,13 @@ export function addStoredProject(name: string, dsl: string): StoredProject {
     dsl,
     createdAt: Date.now(),
   };
-  writeStoredProjects([...projects, project]);
+  writeStoredProjects([project, ...projects]);
   return project;
+}
+
+export function renameStoredProject(id: string, name: string): void {
+  const projects = readStoredProjects().map((p) => (p.id === id ? { ...p, name } : p));
+  writeStoredProjects(projects);
 }
 
 export function removeStoredProject(id: string): void {
