@@ -7,10 +7,10 @@ Two modes share a single shell:
 - **Code Editor Render** — paste DSL into Monaco, render it to a dark Eraser-style SVG diagram with nested colored groups and orthogonal edges, drag nodes/groups around, edit properties in the inspector, export PNG / SVG / JSON.
 - **Agentic Repo Explorer** — pick OpenAI / Anthropic / Gemini / Azure Foundry, point at the repo you cloned this into, watch a polishe staged-analysis animation, then edit the generated diagram.
 
-The reference example [`template`](examples/flow.txt) renders in a style matching [`diagram`](examples/flow.png): near-black canvas, nested rounded containers with thin colored borders and tinted fills, small title pills on each group, compact icon+label nodes, and dense orthogonal connectors.
+The reference example [`template`](examples/flow.txt) renders in a style matching [`diagram`](examples/diagram.png): near-black canvas, nested rounded containers with thin colored borders and tinted fills, small title pills on each group, compact icon+label nodes, and dense orthogonal connectors.
 
 
-![Example Diagram](examples/flow.png)
+![Example Diagram](examples/diagram.png)
 
 
 ## Quick start
