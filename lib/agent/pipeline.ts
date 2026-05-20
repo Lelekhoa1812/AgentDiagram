@@ -20,7 +20,7 @@ import { generatePlan } from './planner';
 import { planToDsl } from './dslCompiler';
 import { tryRepair } from './repair';
 import { compile } from '../dsl/compiler';
-import { makeProvider, type ProviderSession } from './providers';
+import { validateWithRetry, type ProviderSession } from './providers';
 import type { SseEvent } from '../util/stream';
 import { extractImportGraph, topClusters } from './importGraph';
 import { readDocPriors } from './docReader';
@@ -46,11 +46,10 @@ export async function runPipeline(
   try {
     // 1. Validate
     send({ type: 'stage', stage: 'validate', status: 'start', message: 'Checking provider credentials…' });
-    const provider = makeProvider(input.session.id, {
-      apiKey: input.session.apiKey,
-      endpoint: input.session.endpoint,
+    const v = await validateWithRetry(input.session, {
+      signal: input.signal,
+      onRetry: onRetry('validate'),
     });
-    const v = await provider.validate(input.session.model);
     if (!v.ok) {
       send({ type: 'error', stage: 'validate', message: v.error ?? 'Provider validation failed' });
       send({ type: 'done' });

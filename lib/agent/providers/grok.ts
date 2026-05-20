@@ -1,4 +1,5 @@
 import type { Provider, ChatParams, ValidationResult, ProviderConfig } from './types';
+import { makeRetryError } from './retry';
 
 const DEFAULT_BASE_URL = 'https://api.x.ai/v1';
 
@@ -57,8 +58,7 @@ export class GrokProvider implements Provider {
       signal: params.signal,
     });
     if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(text || `Grok API responded with ${res.status}`);
+      throw await makeRetryError(res);
     }
     const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
     return json.choices?.[0]?.message?.content ?? '';

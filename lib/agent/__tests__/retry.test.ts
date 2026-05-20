@@ -29,6 +29,40 @@ describe('withRetry', () => {
     expect(notices[0]?.reason).toContain('429');
   });
 
+  it('retries provider errors that only expose a transient message', async () => {
+    let calls = 0;
+    const fn = async () => {
+      calls++;
+      if (calls === 1) {
+        throw new Error('500 The server had an error while processing your request. Sorry about that!');
+      }
+      return 'ok after provider hiccup';
+    };
+    const notices: Array<{ attempt: number; delayMs: number; reason: string }> = [];
+
+    const result = await withRetry(fn, { onRetry: (n) => notices.push(n), baseDelayMs: 1, capDelayMs: 1 });
+
+    expect(result).toBe('ok after provider hiccup');
+    expect(calls).toBe(2);
+    expect(notices[0]?.reason).toBe('HTTP 500');
+  });
+
+  it('retries transient network exception codes', async () => {
+    let calls = 0;
+    const fn = async () => {
+      calls++;
+      if (calls === 1) {
+        const err: Error & { code?: string } = new Error('socket closed');
+        err.code = 'ECONNRESET';
+        throw err;
+      }
+      return 'ok after reset';
+    };
+
+    await expect(withRetry(fn, { baseDelayMs: 1, capDelayMs: 1 })).resolves.toBe('ok after reset');
+    expect(calls).toBe(2);
+  });
+
   it('throws non-retryable errors immediately', async () => {
     const fn = vi.fn().mockRejectedValue(new Error('bad request'));
     await expect(

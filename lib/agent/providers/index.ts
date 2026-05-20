@@ -3,8 +3,8 @@ import { AnthropicProvider } from './anthropic';
 import { GeminiProvider } from './gemini';
 import { FoundryProvider } from './foundry';
 import { GrokProvider } from './grok';
-import type { Provider, ProviderId, ProviderConfig, ChatParams, ChatMessage, RetryListener } from './types';
-import { withRetry } from './retry';
+import type { Provider, ProviderId, ProviderConfig, ChatParams, ChatMessage, RetryListener, ValidationResult } from './types';
+import { defaultIsRetryable, withRetry, type RetryError } from './retry';
 
 export {
   OPENAI_MODELS,
@@ -52,6 +52,28 @@ export interface ProviderSession {
   apiKey: string;
 }
 
+/** Wraps provider validation with the same transient-error retry policy as chat calls. */
+export async function validateWithRetry(
+  session: ProviderSession,
+  opts: {
+    signal?: AbortSignal;
+    onRetry?: RetryListener;
+  } = {},
+): Promise<ValidationResult> {
+  const provider = makeProvider(session.id, { apiKey: session.apiKey, endpoint: session.endpoint });
+  return withRetry(
+    async () => {
+      const result = await provider.validate(session.model);
+      if (!result.ok) {
+        const err: RetryError = new Error(result.error ?? 'Provider validation failed');
+        if (defaultIsRetryable(err)) throw err;
+      }
+      return result;
+    },
+    { signal: opts.signal, onRetry: opts.onRetry },
+  );
+}
+
 /** Wraps a provider call with infinite retry + cancellation. */
 export async function chatWithRetry(
   session: ProviderSession,
@@ -78,4 +100,4 @@ export async function chatWithRetry(
   );
 }
 
-export type { Provider, ProviderId, ProviderConfig, ChatMessage, ChatParams, RetryListener };
+export type { Provider, ProviderId, ProviderConfig, ChatMessage, ChatParams, RetryListener, ValidationResult };
