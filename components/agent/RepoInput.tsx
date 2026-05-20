@@ -152,15 +152,31 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
 
   const ignoredSet = useMemo(() => new Set(ignoredFolders), [ignoredFolders]);
 
+  // Motivation vs Logic: once a path is on the ignore list the agent never reads it, so leaving
+  // it in the browser just adds noise. We hide both direct matches and any descendants of an
+  // ignored folder — the chip row at the top is the single, authoritative place to unignore.
+  const isPathIgnored = useCallback(
+    (relPath: string): boolean => {
+      if (ignoredSet.has(relPath)) return true;
+      for (const ignored of ignoredFolders) {
+        if (relPath.startsWith(`${ignored}/`)) return true;
+      }
+      return false;
+    },
+    [ignoredFolders, ignoredSet],
+  );
+
+  const visibleEntries = useMemo(
+    () => entries.filter((entry) => !isPathIgnored(entry.path)),
+    [entries, isPathIgnored],
+  );
+
+  const hiddenCount = entries.length - visibleEntries.length;
+
   const onIgnoreEntry = (entry: BrowseEntry) => {
     setActiveMenu(null);
     if (ignoredSet.has(entry.path)) return;
     updateIgnoredFolders([...ignoredFolders, entry.path]);
-  };
-
-  const onUnignoreEntry = (entry: BrowseEntry) => {
-    setActiveMenu(null);
-    updateIgnoredFolders(ignoredFolders.filter((item) => item !== entry.path));
   };
 
   const onOpenEntry = (entry: BrowseEntry) => {
@@ -288,17 +304,14 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
         <div className="max-h-72 space-y-0.5 overflow-y-auto rounded border border-ink-800 bg-ink-900/70 p-1">
           {loadingEntries ? (
             <div className="p-2 text-ink-400">Loading…</div>
-          ) : entries.length ? (
-            entries.map((entry) => {
-              const isIgnored = ignoredSet.has(entry.path);
+          ) : visibleEntries.length ? (
+            visibleEntries.map((entry) => {
               const menuOpen = activeMenu === entry.path;
               const isDir = entry.type === 'dir';
               return (
                 <div
                   key={entry.path}
-                  className={`group relative flex items-center gap-2 rounded px-2 py-1 ${
-                    isIgnored ? 'opacity-50' : 'hover:bg-ink-800'
-                  }`}
+                  className="group relative flex items-center gap-2 rounded px-2 py-1 hover:bg-ink-800"
                 >
                   <span className="w-4 shrink-0 text-center text-[11px] text-ink-500">
                     {isDir ? '📁' : '📄'}
@@ -318,11 +331,6 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
                       title={entry.path}
                     >
                       {entry.name}
-                    </span>
-                  )}
-                  {isIgnored && (
-                    <span className="shrink-0 rounded-full border border-coral/40 bg-coral/10 px-1.5 py-0.5 text-[9px] uppercase tracking-widest text-coral">
-                      ignored
                     </span>
                   )}
                   <button
@@ -350,25 +358,14 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
                           Open folder
                         </button>
                       )}
-                      {isIgnored ? (
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => onUnignoreEntry(entry)}
-                          className="rounded border border-accent/40 bg-accent/10 px-2 py-1 text-left text-[11px] text-accent hover:bg-accent/20"
-                        >
-                          Unignore
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => onIgnoreEntry(entry)}
-                          className="rounded border border-coral/40 bg-coral/10 px-2 py-1 text-left text-[11px] text-coral hover:bg-coral/20"
-                        >
-                          Ignore
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => onIgnoreEntry(entry)}
+                        className="rounded border border-coral/40 bg-coral/10 px-2 py-1 text-left text-[11px] text-coral hover:bg-coral/20"
+                      >
+                        Ignore
+                      </button>
                       <button
                         type="button"
                         role="menuitem"
@@ -383,11 +380,14 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
               );
             })
           ) : (
-            <div className="p-2 text-ink-500">Empty folder.</div>
+            <div className="p-2 text-ink-500">
+              {entries.length ? 'All entries here are ignored.' : 'Empty folder.'}
+            </div>
           )}
         </div>
         <div className="text-[10px] text-ink-500">
-          AgentDiagram’s own folder and common build/cache directories are hidden automatically.
+          AgentDiagram’s own folder, common build/cache directories
+          {hiddenCount > 0 ? `, and ${hiddenCount} ignored entr${hiddenCount === 1 ? 'y' : 'ies'}` : ''} are hidden automatically.
         </div>
       </div>
 
