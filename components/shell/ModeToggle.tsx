@@ -7,7 +7,7 @@ const MODES: Array<{ id: Mode; label: string; hint: string; icon: typeof Code2 }
   { id: 'editor', label: 'Code Editor', hint: 'DSL → diagram', icon: Code2 },
   { id: 'agent', label: 'Agentic Repo', hint: 'Repo → diagram', icon: Bot },
   { id: 'multi-layer', label: 'Multi Layer', hint: 'Repo → layered diagrams', icon: Layers3 },
-  { id: 'custom-prompt', label: 'Custom Prompt', hint: 'Describe → ask → diagram', icon: Sparkles },
+  { id: 'custom-prompt', label: 'Custom App', hint: 'Describe → ask → diagram', icon: Sparkles },
 ];
 
 export function ModeToggle() {
