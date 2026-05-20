@@ -1,0 +1,403 @@
+// ==========================================================
+// Comprehensive SaaS Platform — Reference Architecture
+// ==========================================================
+// Scope: a production-grade multi-tenant SaaS with web + mobile clients,
+// gateway, microservices, async pipeline, observability, AI services,
+// infrastructure, third-party integrations, and a data plane covering
+// transactional, analytical, search, and object storage workloads.
+//
+// Diagram conventions used below:
+//   `>`  forward call / dependency / event publish
+//   `<`  reverse call (used to emphasise read paths)
+//   `<>` bidirectional / sync subscription
+//   `--` weak coupling / observed-only
+//   `=>` primary path (e.g. ingress hot path)
+//
+// Color legend (kept consistent across groups):
+//   sky    = clients / edge
+//   indigo = gateway + identity
+//   purple = product microservices
+//   coral  = async + workers + scheduling
+//   teal   = data plane
+//   green  = object & blob storage
+//   amber  = search / vector / analytics
+//   red    = AI services
+//   slate  = observability
+//   blue   = infrastructure / platform
+//   orange = third-party integrations
+//   yellow = ci/cd & developer tooling
+//   lime   = pricing / billing (kept distinct for emphasis)
+// ==========================================================
+
+
+// ---------- Clients ----------
+Clients [color: sky, icon: monitor] {
+  Web App [icon: layout, color: sky]
+  Mobile App [icon: monitor, color: sky]
+  Public API Consumers [icon: plug, color: sky]
+  Partner Embeds [icon: code, color: sky]
+}
+
+// ---------- Edge / CDN ----------
+Edge [color: sky, icon: workflow] {
+  CDN [icon: workflow, color: sky]
+  WAF [icon: shield, color: sky]
+  Edge Cache [icon: archive, color: sky]
+  Bot Defense [icon: shield, color: sky]
+}
+
+// ---------- API Gateway & Identity ----------
+Gateway [color: indigo, icon: server] {
+  API Gateway [icon: server, color: indigo]
+  GraphQL Federation [icon: git-branch, color: indigo]
+  Rate Limiter [icon: filter, color: indigo]
+  Request Router [icon: workflow, color: indigo]
+}
+
+Identity [color: indigo, icon: shield] {
+  Auth Service [icon: shield, color: indigo]
+  Sessions [icon: clock, color: indigo]
+  OAuth Bridge [icon: plug, color: indigo]
+  RBAC Policy [icon: book-open, color: indigo]
+  MFA [icon: check-square, color: indigo]
+}
+
+// ---------- Product microservices ----------
+Services [color: purple, icon: cpu] {
+  Users [icon: list, color: purple]
+  Tenants [icon: folder, color: purple]
+  Org & Roles [icon: tableau, color: purple]
+  Catalog [icon: package, color: purple]
+  Cart [icon: archive, color: purple]
+  Orders [icon: briefcase, color: purple]
+  Inventory [icon: tableau, color: purple]
+  Fulfillment [icon: workflow, color: purple]
+  Reviews [icon: message-square, color: purple]
+  Notifications [icon: message-circle, color: purple]
+  Files [icon: file, color: purple]
+  Audit Log [icon: file-text, color: purple]
+  Reports Service [icon: file-spreadsheet, color: purple]
+  Feature Flags [icon: settings, color: purple]
+  Webhooks [icon: workflow, color: purple]
+}
+
+// ---------- Billing / Pricing (separate concern) ----------
+Billing [color: lime, icon: dollar-sign] {
+  Pricing Engine [icon: scale, color: lime]
+  Subscriptions [icon: refresh-cw, color: lime]
+  Invoicing [icon: file-text, color: lime]
+  Tax Calculator [icon: columns, color: lime]
+  Revenue Reports [icon: activity, color: lime]
+}
+
+// ---------- AI Services ----------
+AI Plane [color: red, icon: brain] {
+  LLM Router [icon: git-branch, color: red]
+  RAG Service [icon: search, color: red]
+  Embedder [icon: cpu, color: red]
+  Summarizer [icon: sparkles, color: red]
+  Moderation [icon: shield, color: red]
+  Prompt Store [icon: book-open, color: red]
+  Eval Harness [icon: check-square, color: red]
+}
+
+// ---------- Async & Workers ----------
+Async [color: coral, icon: refresh-cw] {
+  Event Bus [icon: workflow, color: coral]
+  Job Queue [icon: list, color: coral]
+  Scheduler [icon: clock, color: coral]
+  Outbox Relay [icon: refresh-cw, color: coral]
+  Saga Coordinator [icon: git-branch, color: coral]
+  Workers [color: coral, icon: cpu] {
+    Order Worker [icon: briefcase, color: coral]
+    Email Worker [icon: message-square, color: coral]
+    SMS Worker [icon: message-circle, color: coral]
+    Index Worker [icon: search, color: coral]
+    Export Worker [icon: download, color: coral]
+    Image Worker [icon: scan, color: coral]
+    Embedding Worker [icon: cpu, color: coral]
+  }
+}
+
+// ---------- Data plane (OLTP) ----------
+Data [color: teal, icon: hard-drive] {
+  Postgres Primary [icon: table, color: teal]
+  Postgres Replicas [icon: table, color: teal]
+  Redis Cache [icon: cpu, color: teal]
+  Feature Store [icon: tableau, color: teal]
+  Outbox Table [icon: archive, color: teal]
+  Tenant Shards [icon: columns, color: teal]
+}
+
+// ---------- Analytics / Search / Vector ----------
+Analytics [color: amber, icon: tableau] {
+  ClickHouse [icon: table, color: amber]
+  Warehouse Mirror [icon: tableau, color: amber]
+  Streaming Ingest [icon: workflow, color: amber]
+  OpenSearch [icon: search, color: amber]
+  Vector DB [icon: cpu, color: amber]
+}
+
+// ---------- Object Storage ----------
+Storage [color: green, icon: archive] {
+  S3 Uploads [icon: archive, color: green]
+  S3 Exports [icon: download, color: green]
+  Image CDN Bucket [icon: scan, color: green]
+  Document Store [icon: file-text, color: green]
+  Backups [icon: hard-drive, color: green]
+}
+
+// ---------- Observability ----------
+Observability [color: slate, icon: activity] {
+  Log Aggregator [icon: file-text, color: slate]
+  Metrics [icon: activity, color: slate]
+  Traces [icon: git-branch, color: slate]
+  Alerts [icon: help-circle, color: slate]
+  Dashboards [icon: layout, color: slate]
+  SLO Tracker [icon: scale, color: slate]
+  Incident Bridge [icon: message-square, color: slate]
+}
+
+// ---------- Platform / Infrastructure ----------
+Platform [color: blue, icon: server] {
+  Kubernetes [icon: server, color: blue]
+  Service Mesh [icon: git-branch, color: blue]
+  Secrets Manager [icon: shield, color: blue]
+  Config Service [icon: settings, color: blue]
+  Service Registry [icon: list, color: blue]
+  Load Balancer [icon: workflow, color: blue]
+}
+
+// ---------- CI / CD / Developer experience ----------
+DevX [color: yellow, icon: tool] {
+  CI Pipeline [icon: workflow, color: yellow]
+  CD Deployer [icon: refresh-cw, color: yellow]
+  Preview Envs [icon: monitor, color: yellow]
+  Test Harness [icon: check-circle, color: yellow]
+  Artifact Registry [icon: package, color: yellow]
+  Migration Runner [icon: edit, color: yellow]
+}
+
+// ---------- Third-party integrations ----------
+Third Party [color: orange, icon: plug] {
+  Stripe [icon: dollar-sign, color: orange]
+  SES Email [icon: message-square, color: orange]
+  Twilio SMS [icon: message-circle, color: orange]
+  Google OAuth [icon: shield, color: orange]
+  GitHub OAuth [icon: shield, color: orange]
+  Segment Analytics [icon: activity, color: orange]
+  PagerDuty [icon: help-circle, color: orange]
+  Slack Webhooks [icon: message-square, color: orange]
+}
+
+
+// ==========================================================
+// ===================== INGRESS HOT PATH ===================
+// ==========================================================
+Web App => CDN
+Mobile App => CDN
+Public API Consumers => CDN
+Partner Embeds => CDN
+CDN => WAF
+WAF => Bot Defense
+Bot Defense => Edge Cache
+Edge Cache => API Gateway
+CDN -- Image CDN Bucket           // cached objects served direct
+API Gateway > Rate Limiter
+API Gateway > GraphQL Federation
+API Gateway > Request Router
+Request Router => Auth Service
+Auth Service > Sessions
+Auth Service > RBAC Policy
+Auth Service > MFA
+Auth Service <> OAuth Bridge
+OAuth Bridge <> Google OAuth
+OAuth Bridge <> GitHub OAuth
+
+// ==========================================================
+// ============= GATEWAY → MICROSERVICES (SYNC) =============
+// ==========================================================
+Request Router > Users
+Request Router > Tenants
+Request Router > Org & Roles
+Request Router > Catalog
+Request Router > Cart
+Request Router > Orders
+Request Router > Inventory
+Request Router > Fulfillment
+Request Router > Reviews
+Request Router > Notifications
+Request Router > Files
+Request Router > Audit Log
+Request Router > Reports Service
+Request Router > Feature Flags
+Request Router > Webhooks
+Request Router > Pricing Engine
+Request Router > Subscriptions
+Request Router > Invoicing
+Request Router > RAG Service
+Request Router > Summarizer
+
+// ==========================================================
+// ================ SERVICES → DATA (READ/WRITE) ============
+// ==========================================================
+Users > Postgres Primary
+Tenants > Postgres Primary
+Org & Roles > Postgres Primary
+Catalog > Postgres Primary
+Cart > Redis Cache
+Cart > Postgres Primary
+Orders > Postgres Primary
+Inventory > Postgres Primary
+Fulfillment > Postgres Primary
+Reviews > Postgres Primary
+Files > S3 Uploads
+Files > Document Store
+Notifications > Postgres Primary
+Audit Log > Postgres Primary
+Reports Service > Postgres Replicas
+Reports Service > ClickHouse
+Feature Flags > Redis Cache
+Webhooks > Postgres Primary
+
+Users < Postgres Replicas
+Catalog < Postgres Replicas
+Orders < Postgres Replicas
+Reviews < Postgres Replicas
+Reports Service < Warehouse Mirror
+
+// Outbox & saga
+Orders > Outbox Table
+Subscriptions > Outbox Table
+Invoicing > Outbox Table
+Outbox Relay < Outbox Table
+Outbox Relay > Event Bus
+Saga Coordinator <> Event Bus
+Saga Coordinator > Orders
+Saga Coordinator > Fulfillment
+Saga Coordinator > Inventory
+
+// ==========================================================
+// ====================== ASYNC PLANE =======================
+// ==========================================================
+Event Bus > Order Worker
+Event Bus > Email Worker
+Event Bus > SMS Worker
+Event Bus > Index Worker
+Event Bus > Export Worker
+Event Bus > Image Worker
+Event Bus > Embedding Worker
+
+Order Worker > Inventory
+Order Worker > Fulfillment
+Order Worker > Notifications
+Email Worker > SES Email
+SMS Worker > Twilio SMS
+Image Worker > S3 Uploads
+Image Worker > Image CDN Bucket
+Index Worker > OpenSearch
+Embedding Worker > Embedder
+Embedding Worker > Vector DB
+Export Worker > S3 Exports
+
+Scheduler > Job Queue
+Job Queue > Order Worker
+Job Queue > Export Worker
+Job Queue > Email Worker
+
+// ==========================================================
+// ================== BILLING PIPELINE ======================
+// ==========================================================
+Subscriptions > Pricing Engine
+Pricing Engine > Tax Calculator
+Subscriptions > Invoicing
+Invoicing > Stripe
+Invoicing > Revenue Reports
+Stripe <> Subscriptions: webhooks
+Revenue Reports > ClickHouse
+
+// ==========================================================
+// ==================== AI PIPELINE =========================
+// ==========================================================
+RAG Service > Vector DB
+RAG Service > LLM Router
+RAG Service > Prompt Store
+RAG Service < Document Store
+Summarizer > LLM Router
+Summarizer > Prompt Store
+Moderation > LLM Router
+LLM Router > Eval Harness
+Embedder > Vector DB
+Eval Harness -- Metrics
+
+// Files -> embedding pipeline
+Files > Event Bus: file.uploaded
+Event Bus > Embedding Worker
+Embedding Worker > Document Store
+
+// ==========================================================
+// ==================== ANALYTICS ===========================
+// ==========================================================
+Streaming Ingest < Event Bus
+Streaming Ingest > ClickHouse
+ClickHouse > Warehouse Mirror
+Warehouse Mirror > Segment Analytics
+Catalog > Streaming Ingest
+Orders > Streaming Ingest
+
+// ==========================================================
+// =================== OBSERVABILITY ========================
+// ==========================================================
+Services -- Metrics
+Services -- Log Aggregator
+Services -- Traces
+Async -- Metrics
+Async -- Log Aggregator
+Async -- Traces
+Data -- Metrics
+AI Plane -- Metrics
+Gateway -- Metrics
+Gateway -- Log Aggregator
+Billing -- Metrics
+Metrics > Alerts
+Traces > Dashboards
+Log Aggregator > Dashboards
+Metrics > Dashboards
+Metrics > SLO Tracker
+Alerts > PagerDuty
+Alerts > Slack Webhooks
+PagerDuty <> Incident Bridge
+
+// ==========================================================
+// =================== PLATFORM / INFRA =====================
+// ==========================================================
+Services -- Kubernetes
+Async -- Kubernetes
+Data -- Kubernetes
+AI Plane -- Kubernetes
+Billing -- Kubernetes
+Gateway -- Kubernetes
+Kubernetes > Service Mesh
+Service Mesh > Service Registry
+Kubernetes > Load Balancer
+Services -- Secrets Manager
+Services -- Config Service
+
+// ==========================================================
+// ===================== CI / CD / DEVX =====================
+// ==========================================================
+CI Pipeline > Test Harness
+CI Pipeline > Artifact Registry
+Artifact Registry > CD Deployer
+CD Deployer > Kubernetes
+CD Deployer > Preview Envs
+Migration Runner > Postgres Primary
+CI Pipeline -- Feature Flags
+
+// ==========================================================
+// ============ FILE UPLOAD CROSS-CUTTING FLOW ==============
+// ==========================================================
+Files > S3 Uploads
+Files > Image Worker
+Image Worker > Image CDN Bucket
+Files > Audit Log

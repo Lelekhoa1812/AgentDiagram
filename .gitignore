@@ -1,0 +1,16 @@
+node_modules
+.next
+.turbo
+dist
+build
+coverage
+.DS_Store
+*.log
+.env
+.env.local
+.env.*.local
+.agentdiagram-cache
+playwright-report
+test-results
+tests/visual/__snapshots__/*.actual.png
+tests/visual/__snapshots__/*.diff.png

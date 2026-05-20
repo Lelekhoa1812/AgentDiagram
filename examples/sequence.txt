@@ -1,0 +1,14 @@
+// Login sequence diagram.
+
+User [icon: monitor, color: sky]
+Web [icon: layout, color: indigo]
+API [icon: server, color: purple]
+DB [icon: table, color: green]
+
+User > Web: clicks login
+Web > API: POST /login
+API > DB: select user by email
+API < DB: row
+API > API: verify password
+Web < API: 200 + session
+User < Web: redirect to dashboard

@@ -1,0 +1,161 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('@fontsource/inter/400.css');
+@import url('@fontsource/inter/500.css');
+@import url('@fontsource/inter/600.css');
+
+:root {
+  --ink-950: 7 9 12;
+  --ink-900: 11 14 19;
+  --ink-850: 16 20 27;
+  --ink-800: 21 26 35;
+  --ink-700: 30 38 50;
+  --ink-600: 42 51 66;
+  --ink-500: 60 70 88;
+  --ink-400: 91 102 120;
+  --ink-300: 139 149 168;
+  --ink-200: 193 199 211;
+  --ink-100: 231 234 240;
+  --accent: 124 156 255;
+  --accent-warm: 255 179 124;
+  --accent-cool: 124 240 224;
+  --ink-bg: rgb(var(--ink-950));
+  --ink-panel: rgb(var(--ink-900));
+  --ink-border: rgb(var(--ink-700));
+  --ink-text: rgb(var(--ink-200));
+  --canvas-grid: rgba(124, 156, 255, 0.055);
+  --canvas-vignette: rgba(124, 156, 255, 0.12);
+}
+
+[data-theme='light'] {
+  --ink-950: 244 247 251;
+  --ink-900: 255 255 255;
+  --ink-850: 248 250 253;
+  --ink-800: 241 245 249;
+  --ink-700: 220 227 237;
+  --ink-600: 194 204 218;
+  --ink-500: 138 151 170;
+  --ink-400: 101 116 139;
+  --ink-300: 71 85 105;
+  --ink-200: 45 55 72;
+  --ink-100: 15 23 42;
+  --accent: 58 96 229;
+  --accent-warm: 224 115 49;
+  --accent-cool: 14 156 144;
+  --ink-bg: rgb(var(--ink-950));
+  --ink-panel: rgb(var(--ink-900));
+  --ink-border: rgb(var(--ink-700));
+  --ink-text: rgb(var(--ink-200));
+  --canvas-grid: rgba(58, 96, 229, 0.06);
+  --canvas-vignette: rgba(58, 96, 229, 0.12);
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--ink-bg);
+  color: var(--ink-text);
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  transition:
+    background-color 240ms ease,
+    color 240ms ease;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::selection {
+  background: rgba(124, 156, 255, 0.35);
+}
+
+button {
+  font-family: inherit;
+}
+
+input,
+select,
+textarea {
+  font-family: inherit;
+  color: inherit;
+}
+
+/* Subtle scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(124, 156, 255, 0.18);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(124, 156, 255, 0.35);
+}
+
+/* Toggle switch animations */
+.mode-toggle {
+  transition:
+    background 200ms ease,
+    box-shadow 200ms ease;
+}
+.mode-toggle .thumb {
+  transition:
+    transform 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    background 200ms ease;
+}
+
+/* Stage glow for analysis animation */
+@keyframes pulse-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(124, 156, 255, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 24px 4px rgba(124, 156, 255, 0.45);
+  }
+}
+.stage-active {
+  animation: pulse-glow 1.6s ease-in-out infinite;
+}
+
+.diagram-canvas {
+  touch-action: none;
+  cursor: grab;
+  background:
+    radial-gradient(circle at 50% 8%, var(--canvas-vignette), transparent 32rem),
+    linear-gradient(var(--canvas-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--canvas-grid) 1px, transparent 1px),
+    rgb(var(--ink-950));
+  background-size:
+    auto,
+    32px 32px,
+    32px 32px,
+    auto;
+}
+.diagram-canvas.dragging {
+  cursor: grabbing;
+}
+
+.glass-panel {
+  background: linear-gradient(180deg, rgb(var(--ink-900) / 0.86), rgb(var(--ink-850) / 0.78));
+  box-shadow:
+    0 1px 0 rgb(255 255 255 / 0.05) inset,
+    0 18px 50px rgb(0 0 0 / 0.18);
+  backdrop-filter: blur(16px);
+}
+
+.surface-transition {
+  transition:
+    background-color 220ms ease,
+    border-color 220ms ease,
+    color 220ms ease,
+    box-shadow 220ms ease,
+    transform 180ms ease;
+}

@@ -1,0 +1,17 @@
+// Tiny UML-style class diagram (rendered as flow with class-shaped nodes).
+
+Entities [color: indigo, icon: book-open] {
+  User [icon: list, color: indigo, shape: class]
+  Account [icon: tableau, color: indigo, shape: class]
+  Session [icon: clock, color: indigo, shape: class]
+}
+
+Services [color: coral, icon: cpu] {
+  AuthService [icon: shield, color: coral]
+  UserService [icon: cpu, color: coral]
+}
+
+AuthService > Session
+UserService > User
+User <> Account
+Session > User

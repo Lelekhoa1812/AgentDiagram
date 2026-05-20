@@ -1,0 +1,2604 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="4204" height="3337"
+     viewBox="-8 -8 4204 3337">
+  <defs>
+  <marker id="agentdiagram-arrow-fwd" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 Z" fill="rgba(180, 188, 204, 0.85)"/>
+  </marker>
+  <marker id="agentdiagram-arrow-bwd" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M10,0 L0,5 L10,10 Z" fill="rgba(180, 188, 204, 0.85)"/>
+  </marker>
+  <marker id="agentdiagram-arrow-thick" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 Z" fill="rgba(220, 226, 240, 0.95)"/>
+  </marker>
+</defs>
+  <rect x="-8" y="-8" width="4204" height="3337" fill="#07090c" />
+  <g>
+    <g data-id="clients" data-kind="group">
+      <rect x="24" y="24" width="627" height="110"
+            rx="14" ry="14"
+            fill="rgba(120, 196, 240, 0.05)" stroke="rgba(120, 196, 240, 0.45)" stroke-width="1"
+            style="filter: drop-shadow(0 0 12px rgba(120, 196, 240, 0.18))" />
+      <g transform="translate(34, 32)">
+        <rect x="0" y="0" width="73" height="22"
+              rx="11" ry="11"
+              fill="rgba(120, 196, 240, 0.18)" stroke="rgba(120, 196, 240, 0.45)" stroke-width="0.5" />
+        <g transform="translate(6, 4)">
+          <svg width="14" height="14" viewBox="0 0 24 24"
+               fill="none" stroke="rgba(120, 196, 240, 1)" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        </g>
+        <text x="26" y="11"
+              dominant-baseline="middle" fill="rgba(120, 196, 240, 1)"
+              font-size="10" font-family="Inter, sans-serif"
+              font-weight="600" letter-spacing="0.5">CLIENTS</text>
+      </g>
+    </g>
+
+    <g data-id="edge" data-kind="group">
+      <rect x="335" y="208" width="176.33333333333334" height="434"
+            rx="14" ry="14"
+            fill="rgba(120, 196, 240, 0.05)" stroke="rgba(120, 196, 240, 0.45)" stroke-width="1"
+            style="filter: drop-shadow(0 0 12px rgba(120, 196, 240, 0.18))" />
+      <g transform="translate(345, 216)">
+        <rect x="0" y="0" width="58" height="22"
+              rx="11" ry="11"
+              fill="rgba(120, 196, 240, 0.18)" stroke="rgba(120, 196, 240, 0.45)" stroke-width="0.5" />
+        <g transform="translate(6, 4)">
+          <svg width="14" height="14" viewBox="0 0 24 24"
+               fill="none" stroke="rgba(120, 196, 240, 1)" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="6" height="6"/><rect x="15" y="15" width="6" height="6"/><path d="M9 6h6a3 3 0 0 1 3 3v6"/></svg>
+        </g>
+        <text x="26" y="11"
+              dominant-baseline="middle" fill="rgba(120, 196, 240, 1)"
+              font-size="10" font-family="Inter, sans-serif"
+              font-weight="600" letter-spacing="0.5">EDGE</text>
+      </g>
+    </g>
+
+    <g data-id="gateway" data-kind="group">
+      <rect x="2578" y="856.6666666666666" width="473" height="218"
+            rx="14" ry="14"
+            fill="rgba(129, 140, 248, 0.05)" stroke="rgba(129, 140, 248, 0.45)" stroke-width="1"
+            style="filter: drop-shadow(0 0 12px rgba(129, 140, 248, 0.18))" />
+      <g transform="translate(2588, 864.6666666666666)">
+        <rect x="0" y="0" width="78" height="22"
+              rx="11" ry="11"
+              fill="rgba(129, 140, 248, 0.18)" stroke="rgba(129, 140, 248, 0.45)" stroke-width="0.5" />
+        <g transform="translate(6, 4)">
+          <svg width="14" height="14" viewBox="0 0 24 24"
+               fill="none" stroke="rgba(129, 140, 248, 1)" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6" y2="7"/><line x1="6" y1="17" x2="6" y2="17"/></svg>
+        </g>
+        <text x="26" y="11"
+              dominant-baseline="middle" fill="rgba(129, 140, 248, 1)"
+              font-size="10" font-family="Inter, sans-serif"
+              font-weight="600" letter-spacing="0.5">GATEWAY</text>
+      </g>
+    </g>
+
+    <g data-id="identity" data-kind="group">
+      <rect x="3568" y="2841" width="596" height="218"
+            rx="14" ry="14"
+            fill="rgba(129, 140, 248, 0.05)" stroke="rgba(129, 140, 248, 0.45)" stroke-width="1"
+            style="filter: drop-shadow(0 0 12px rgba(129, 140, 248, 0.18))" />
+      <g transform="translate(3578, 2849)">
+        <rect x="0" y="0" width="76" height="22"
+              rx="11" ry="11"
+              fill="rgba(129, 140, 248, 0.18)" stroke="rgba(129, 140, 248, 0.45)" stroke-width="0.5" />
+        <g transform="translate(6, 4)">
+          <svg width="14" height="14" viewBox="0 0 24 24"
+               fill="none" stroke="rgba(129, 140, 248, 1)" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </g>
+        <text x="26" y="11"
+              dominant-baseline="middle" fill="rgba(129, 140, 248, 1)"
+              font-size="10" font-family="Inter, sans-serif"
+              font-weight="600" letter-spacing="0.5">IDENTITY</text>
+      </g>
+    </g>
+
+    <g data-id="services" data-kind="group">
+      <rect x="1425" y="1255" width="2042" height="218"
+            rx="14" ry="14"
+            fill="rgba(180, 120, 240, 0.05)" stroke="rgba(180, 120, 240, 0.45)" stroke-width="1"
+            style="filter: drop-shadow(0 0 12px rgba(180, 120, 240, 0.18))" />
+      <g transform="translate(1435, 1263)">
+        <rect x="0" y="0" width="78" height="22"
+              rx="11" ry="11"
+              fill="rgba(180, 120, 240, 0.18)" stroke="rgba(180, 120, 240, 0.45)" stroke-width="0.5" />
+        <g transform="translate(6, 4)">
+          <svg width="14" height="14" viewBox="0 0 24 24"
+               fill="none" stroke="rgba(180, 120, 240, 1)" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="2" x2="9" y2="4"/><line x1="15" y1="2" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="22"/><line x1="15" y1="20" x2="15" y2="22"/><line x1="20" y1="9" x2="22" y2="9"/><line x1="20" y1="15" x2="22" y2="15"/><line x1="2" y1="9" x2="4" y2="9"/><line x1="2" y1="15" x2="4" y2="15"/></svg>
+        </g>
+        <text x="26" y="11"
+              dominant-baseline="middle" fill="rgba(180, 120, 240, 1)"
+              font-size="10" font-family="Inter, sans-serif"
+              font-weight="600" letter-spacing="0.5">SERVICES</text>
+      </g>
+    </g>
+
+    <g data-id="billing" data-kind="group">
+      <rect x="2960" y="1716.75" width="309.3333333333333" height="326"
+            rx="14" ry="14"
+            fill="rgba(144, 220, 96, 0.05)" stroke="rgba(144, 220, 96, 0.45)" stroke-width="1"
+            style="filter: drop-shadow(0 0 12px rgba(144, 220, 96, 0.18))" />
+      <g transform="translate(2970, 1724.75)">
+        <rect x="0" y="0" width="70" height="22"
+              rx="11" ry="11"
+              fill="rgba(144, 220, 96, 0.18)" stroke="rgba(144, 220, 96, 0.45)" stroke-width="0.5" />
+        <g transform="translate(6, 4)">
+          <svg width="14" height="14" viewBox="0 0 24 24"
+               fill="none" stroke="rgba(144, 220, 96, 1)" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        </g>
+        <text x="26" y="11"
+              dominant-baseline="middle" fill="rgba(144, 220, 96, 1)"
+              font-size="10" font-family="Inter, sans-serif"
+              font-weight="600" letter-spacing="0.5">BILLING</text>
+      </g>
+    </g>
+
+    <g data-id="ai-plane" data-kind="group">
+      <rect x="1623" y="2251" width="596" height="326"
+            rx="14" ry="14"
+            fill="rgba(240, 90, 90, 0.05)" stroke="rgba(240, 90, 90, 0.45)" stroke-width="1"
+            style="filter: drop-shadow(0 0 12px rgba(240, 90, 90, 0.18))" />
+      <g transform="translate(1633, 2259)">
+        <rect x="0" y="0" width="76" height="22"
+              rx="11" ry="11"
+              fill="rgba(240, 90, 90, 0.18)" stroke="rgba(240, 90, 90, 0.45)" stroke-width="0.5" />
+        <g transform="translate(6, 4)">
+          <svg width="14" height="14" viewBox="0 0 24 24"
+               fill="none" stroke="rgba(240, 90, 90, 1)" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a5 5 0 0 0-5 5v0a3 3 0 0 0-3 3v3a3 3 0 0 0 3 3v0a5 5 0 0 0 5 5 5 5 0 0 0 5-5v0a3 3 0 0 0 3-3v-3a3 3 0 0 0-3-3v0a5 5 0 0 0-5-5z"/></svg>
+        </g>
+        <text x="26" y="11"
+              dominant-baseline="middle" fill="rgba(240, 90, 90, 1)"
+              font-size="10" font-family="Inter, sans-serif"
+              font-weight="600" letter-spacing="0.5">AI PLANE</text>
+      </g>
+    </g>
+
+    <g data-id="async" data-kind="group">
+      <rect x="1031" y="1653" width="1156.6666666666665" height="428"
+            rx="14" ry="14"
+            fill="rgba(240, 116, 96, 0.05)" stroke="rgba(240, 116, 96, 0.45)" stroke-width="1"
+            style="filter: drop-shadow(0 0 12px rgba(240, 116, 96, 0.18))" />
+      <g transform="translate(1041, 1661)">
+        <rect x="0" y="0" width="64" height="22"
+              rx="11" ry="11"
+              fill="rgba(240, 116, 96, 0.18)" stroke="rgba(240, 116, 96, 0.45)" stroke-width="0.5" />
+        <g transform="translate(6, 4)">
+          <svg width="14" height="14" viewBox="0 0 24 24"
+               fill="none" stroke="rgba(240, 116, 96, 1)" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        </g>
+        <text x="26" y="11"
+              dominant-baseline="middle" fill="rgba(240, 116, 96, 1)"
+              font-size="10" font-family="Inter, sans-serif"
+              font-weight="600" letter-spacing="0.5">ASYNC</text>
+      </g>
+    </g>
+
+    <g data-id="data" data-kind="group">
+      <rect x="2262" y="2257.64" width="910" height="160"
+            rx="14" ry="14"
+            fill="rgba(80, 200, 192, 0.05)" stroke="rgba(80, 200, 192, 0.45)" stroke-width="1"
+            style="filter: drop-shadow(0 0 12px rgba(80, 200, 192, 0.18))" />
+      <g transform="translate(2272, 2265.64)">
+        <rect x="0" y="0" width="58" height="22"
+              rx="11" ry="11"
+              fill="rgba(80, 200, 192, 0.18)" stroke="rgba(80, 200, 192, 0.45)" stroke-width="0.5" />
+        <g transform="translate(6, 4)">
+          <svg width="14" height="14" viewBox="0 0 24 24"
+               fill="none" stroke="rgba(80, 200, 192, 1)" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="12" x2="2" y2="12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" y1="16" x2="6.01" y2="16"/></svg>
+        </g>
+        <text x="26" y="11"
+              dominant-baseline="middle" fill="rgba(80, 200, 192, 1)"
+              font-size="10" font-family="Inter, sans-serif"
+              font-weight="600" letter-spacing="0.5">DATA</text>
+      </g>
+    </g>
+
+    <g data-id="analytics" data-kind="group">
+      <rect x="1809" y="2787" width="587" height="326"
+            rx="14" ry="14"
+            fill="rgba(240, 180, 60, 0.05)" stroke="rgba(240, 180, 60, 0.45)" stroke-width="1"
+            style="filter: drop-shadow(0 0 12px rgba(240, 180, 60, 0.18))" />
+      <g transform="translate(1819, 2795)">
+        <rect x="0" y="0" width="84" height="22"
+              rx="11" ry="11"
+              fill="rgba(240, 180, 60, 0.18)" stroke="rgba(240, 180, 60, 0.45)" stroke-width="0.5" />
+        <g transform="translate(6, 4)">
+          <svg width="14" height="14" viewBox="0 0 24 24"
+               fill="none" stroke="rgba(240, 180, 60, 1)" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+        </g>
+        <text x="26" y="11"
+              dominant-baseline="middle" fill="rgba(240, 180, 60, 1)"
+              font-size="10" font-family="Inter, sans-serif"
+              font-weight="600" letter-spacing="0.5">ANALYTICS</text>
+      </g>
+    </g>
+
+    <g data-id="storage" data-kind="group">
+      <rect x="166" y="2787" width="750" height="110"
+            rx="14" ry="14"
+            fill="rgba(86, 196, 132, 0.05)" stroke="rgba(86, 196, 132, 0.45)" stroke-width="1"
+            style="filter: drop-shadow(0 0 12px rgba(86, 196, 132, 0.18))" />
+      <g transform="translate(176, 2795)">
+        <rect x="0" y="0" width="75" height="22"
+              rx="11" ry="11"
+              fill="rgba(86, 196, 132, 0.18)" stroke="rgba(86, 196, 132, 0.45)" stroke-width="0.5" />
+        <g transform="translate(6, 4)">
+          <svg width="14" height="14" viewBox="0 0 24 24"
+               fill="none" stroke="rgba(86, 196, 132, 1)" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="5"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+        </g>
+        <text x="26" y="11"
+              dominant-baseline="middle" fill="rgba(86, 196, 132, 1)"
+              font-size="10" font-family="Inter, sans-serif"
+              font-weight="600" letter-spacing="0.5">STORAGE</text>
+      </g>
+    </g>
+
+    <g data-id="observability" data-kind="group">
+      <rect x="2790" y="2802.4285714285716" width="742" height="218"
+            rx="14" ry="14"
+            fill="rgba(148, 163, 184, 0.05)" stroke="rgba(148, 163, 184, 0.45)" stroke-width="1"
+            style="filter: drop-shadow(0 0 12px rgba(148, 163, 184, 0.18))" />
+      <g transform="translate(2800, 2810.4285714285716)">
+        <rect x="0" y="0" width="103" height="22"
+              rx="11" ry="11"
+              fill="rgba(148, 163, 184, 0.18)" stroke="rgba(148, 163, 184, 0.45)" stroke-width="0.5" />
+        <g transform="translate(6, 4)">
+          <svg width="14" height="14" viewBox="0 0 24 24"
+               fill="none" stroke="rgba(148, 163, 184, 1)" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        </g>
+        <text x="26" y="11"
+              dominant-baseline="middle" fill="rgba(148, 163, 184, 1)"
+              font-size="10" font-family="Inter, sans-serif"
+              font-weight="600" letter-spacing="0.5">OBSERVABILITY</text>
+      </g>
+    </g>
+
+    <g data-id="platform" data-kind="group">
+      <rect x="937" y="2787" width="477.83333333333337" height="326"
+            rx="14" ry="14"
+            fill="rgba(96, 165, 250, 0.05)" stroke="rgba(96, 165, 250, 0.45)" stroke-width="1"
+            style="filter: drop-shadow(0 0 12px rgba(96, 165, 250, 0.18))" />
+      <g transform="translate(947, 2795)">
+        <rect x="0" y="0" width="83" height="22"
+              rx="11" ry="11"
+              fill="rgba(96, 165, 250, 0.18)" stroke="rgba(96, 165, 250, 0.45)" stroke-width="0.5" />
+        <g transform="translate(6, 4)">
+          <svg width="14" height="14" viewBox="0 0 24 24"
+               fill="none" stroke="rgba(96, 165, 250, 1)" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6" y2="7"/><line x1="6" y1="17" x2="6" y2="17"/></svg>
+        </g>
+        <text x="26" y="11"
+              dominant-baseline="middle" fill="rgba(96, 165, 250, 1)"
+              font-size="10" font-family="Inter, sans-serif"
+              font-weight="600" letter-spacing="0.5">PLATFORM</text>
+      </g>
+    </g>
+
+    <g data-id="devx" data-kind="group">
+      <rect x="1200" y="711" width="334.8333333333333" height="434"
+            rx="14" ry="14"
+            fill="rgba(232, 209, 80, 0.05)" stroke="rgba(232, 209, 80, 0.45)" stroke-width="1"
+            style="filter: drop-shadow(0 0 12px rgba(232, 209, 80, 0.18))" />
+      <g transform="translate(1210, 719)">
+        <rect x="0" y="0" width="58" height="22"
+              rx="11" ry="11"
+              fill="rgba(232, 209, 80, 0.18)" stroke="rgba(232, 209, 80, 0.45)" stroke-width="0.5" />
+        <g transform="translate(6, 4)">
+          <svg width="14" height="14" viewBox="0 0 24 24"
+               fill="none" stroke="rgba(232, 209, 80, 1)" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+        </g>
+        <text x="26" y="11"
+              dominant-baseline="middle" fill="rgba(232, 209, 80, 1)"
+              font-size="10" font-family="Inter, sans-serif"
+              font-weight="600" letter-spacing="0.5">DEVX</text>
+      </g>
+    </g>
+
+    <g data-id="third-party" data-kind="group">
+      <rect x="2777" y="3187" width="1193" height="110"
+            rx="14" ry="14"
+            fill="rgba(255, 154, 60, 0.05)" stroke="rgba(255, 154, 60, 0.45)" stroke-width="1"
+            style="filter: drop-shadow(0 0 12px rgba(255, 154, 60, 0.18))" />
+      <g transform="translate(2787, 3195)">
+        <rect x="0" y="0" width="92" height="22"
+              rx="11" ry="11"
+              fill="rgba(255, 154, 60, 0.18)" stroke="rgba(255, 154, 60, 0.45)" stroke-width="0.5" />
+        <g transform="translate(6, 4)">
+          <svg width="14" height="14" viewBox="0 0 24 24"
+               fill="none" stroke="rgba(255, 154, 60, 1)" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v6"/><path d="M15 2v6"/><path d="M5 8h14v3a5 5 0 0 1-5 5h-4a5 5 0 0 1-5-5z"/><path d="M12 16v6"/></svg>
+        </g>
+        <text x="26" y="11"
+              dominant-baseline="middle" fill="rgba(255, 154, 60, 1)"
+              font-size="10" font-family="Inter, sans-serif"
+              font-weight="600" letter-spacing="0.5">THIRD PARTY</text>
+      </g>
+    </g>
+
+    <g data-id="workers" data-kind="group">
+      <rect x="1066" y="1942" width="1051" height="110"
+            rx="14" ry="14"
+            fill="rgba(240, 116, 96, 0.05)" stroke="rgba(240, 116, 96, 0.45)" stroke-width="1"
+            style="filter: drop-shadow(0 0 12px rgba(240, 116, 96, 0.18))" />
+      <g transform="translate(1076, 1950)">
+        <rect x="0" y="0" width="78" height="22"
+              rx="11" ry="11"
+              fill="rgba(240, 116, 96, 0.18)" stroke="rgba(240, 116, 96, 0.45)" stroke-width="0.5" />
+        <g transform="translate(6, 4)">
+          <svg width="14" height="14" viewBox="0 0 24 24"
+               fill="none" stroke="rgba(240, 116, 96, 1)" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="2" x2="9" y2="4"/><line x1="15" y1="2" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="22"/><line x1="15" y1="20" x2="15" y2="22"/><line x1="20" y1="9" x2="22" y2="9"/><line x1="20" y1="15" x2="22" y2="15"/><line x1="2" y1="9" x2="4" y2="9"/><line x1="2" y1="15" x2="4" y2="15"/></svg>
+        </g>
+        <text x="26" y="11"
+              dominant-baseline="middle" fill="rgba(240, 116, 96, 1)"
+              font-size="10" font-family="Inter, sans-serif"
+              font-weight="600" letter-spacing="0.5">WORKERS</text>
+      </g>
+    </g></g>
+  <g>
+    <g data-id="web-app" data-kind="node">
+      <rect x="224" y="66" width="110" height="44"
+            rx="8" ry="8" fill="rgba(120, 196, 240, 0.12)" stroke="rgba(120, 196, 240, 0.7)" stroke-width="1" />
+      <g transform="translate(232, 81)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(120, 196, 240, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+      </g>
+      <text x="252" y="88"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Web App</text>
+    </g>
+
+    <g data-id="mobile-app" data-kind="node">
+      <rect x="370" y="66" width="110" height="44"
+            rx="8" ry="8" fill="rgba(120, 196, 240, 0.12)" stroke="rgba(120, 196, 240, 0.7)" stroke-width="1" />
+      <g transform="translate(378, 81)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(120, 196, 240, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      </g>
+      <text x="398" y="88"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Mobile App</text>
+    </g>
+
+    <g data-id="public-api-consumers" data-kind="node">
+      <rect x="48" y="66" width="140" height="44"
+            rx="8" ry="8" fill="rgba(120, 196, 240, 0.12)" stroke="rgba(120, 196, 240, 0.7)" stroke-width="1" />
+      <g transform="translate(56, 81)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(120, 196, 240, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v6"/><path d="M15 2v6"/><path d="M5 8h14v3a5 5 0 0 1-5 5h-4a5 5 0 0 1-5-5z"/><path d="M12 16v6"/></svg>
+      </g>
+      <text x="76" y="88"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Public API Consumers</text>
+    </g>
+
+    <g data-id="partner-embeds" data-kind="node">
+      <rect x="516" y="66" width="111" height="44"
+            rx="8" ry="8" fill="rgba(120, 196, 240, 0.12)" stroke="rgba(120, 196, 240, 0.7)" stroke-width="1" />
+      <g transform="translate(524, 81)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(120, 196, 240, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+      </g>
+      <text x="544" y="88"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Partner Embeds</text>
+    </g>
+
+    <g data-id="cdn" data-kind="node">
+      <rect x="359" y="250" width="110" height="44"
+            rx="8" ry="8" fill="rgba(120, 196, 240, 0.12)" stroke="rgba(120, 196, 240, 0.7)" stroke-width="1" />
+      <g transform="translate(367, 265)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(120, 196, 240, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="6" height="6"/><rect x="15" y="15" width="6" height="6"/><path d="M9 6h6a3 3 0 0 1 3 3v6"/></svg>
+      </g>
+      <text x="387" y="272"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">CDN</text>
+    </g>
+
+    <g data-id="waf" data-kind="node">
+      <rect x="377.33333333333337" y="358" width="110" height="44"
+            rx="8" ry="8" fill="rgba(120, 196, 240, 0.12)" stroke="rgba(120, 196, 240, 0.7)" stroke-width="1" />
+      <g transform="translate(385.33333333333337, 373)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(120, 196, 240, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      </g>
+      <text x="405.33333333333337" y="380"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">WAF</text>
+    </g>
+
+    <g data-id="edge-cache" data-kind="node">
+      <rect x="377.33333333333337" y="574" width="110" height="44"
+            rx="8" ry="8" fill="rgba(120, 196, 240, 0.12)" stroke="rgba(120, 196, 240, 0.7)" stroke-width="1" />
+      <g transform="translate(385.33333333333337, 589)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(120, 196, 240, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="5"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+      </g>
+      <text x="405.33333333333337" y="596"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Edge Cache</text>
+    </g>
+
+    <g data-id="bot-defense" data-kind="node">
+      <rect x="377.33333333333337" y="466" width="110" height="44"
+            rx="8" ry="8" fill="rgba(120, 196, 240, 0.12)" stroke="rgba(120, 196, 240, 0.7)" stroke-width="1" />
+      <g transform="translate(385.33333333333337, 481)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(120, 196, 240, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      </g>
+      <text x="405.33333333333337" y="488"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Bot Defense</text>
+    </g>
+
+    <g data-id="api-gateway" data-kind="node">
+      <rect x="2629.5" y="898.6666666666666" width="110" height="44"
+            rx="8" ry="8" fill="rgba(129, 140, 248, 0.12)" stroke="rgba(129, 140, 248, 0.7)" stroke-width="1" />
+      <g transform="translate(2637.5, 913.6666666666666)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(129, 140, 248, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6" y2="7"/><line x1="6" y1="17" x2="6" y2="17"/></svg>
+      </g>
+      <text x="2657.5" y="920.6666666666666"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">API Gateway</text>
+    </g>
+
+    <g data-id="graphql-federation" data-kind="node">
+      <rect x="2894" y="1006.6666666666666" width="133" height="44"
+            rx="8" ry="8" fill="rgba(129, 140, 248, 0.12)" stroke="rgba(129, 140, 248, 0.7)" stroke-width="1" />
+      <g transform="translate(2902, 1021.6666666666666)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(129, 140, 248, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+      </g>
+      <text x="2922" y="1028.6666666666665"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">GraphQL Federation</text>
+    </g>
+
+    <g data-id="rate-limiter" data-kind="node">
+      <rect x="2602" y="1006.6666666666666" width="110" height="44"
+            rx="8" ry="8" fill="rgba(129, 140, 248, 0.12)" stroke="rgba(129, 140, 248, 0.7)" stroke-width="1" />
+      <g transform="translate(2610, 1021.6666666666666)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(129, 140, 248, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+      </g>
+      <text x="2630" y="1028.6666666666665"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Rate Limiter</text>
+    </g>
+
+    <g data-id="request-router" data-kind="node">
+      <rect x="2748" y="1006.6666666666666" width="110" height="44"
+            rx="8" ry="8" fill="rgba(129, 140, 248, 0.12)" stroke="rgba(129, 140, 248, 0.7)" stroke-width="1" />
+      <g transform="translate(2756, 1021.6666666666666)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(129, 140, 248, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="6" height="6"/><rect x="15" y="15" width="6" height="6"/><path d="M9 6h6a3 3 0 0 1 3 3v6"/></svg>
+      </g>
+      <text x="2776" y="1028.6666666666665"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Request Router</text>
+    </g>
+
+    <g data-id="auth-service" data-kind="node">
+      <rect x="3625" y="2883" width="110" height="44"
+            rx="8" ry="8" fill="rgba(129, 140, 248, 0.12)" stroke="rgba(129, 140, 248, 0.7)" stroke-width="1" />
+      <g transform="translate(3633, 2898)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(129, 140, 248, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      </g>
+      <text x="3653" y="2905"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Auth Service</text>
+    </g>
+
+    <g data-id="sessions" data-kind="node">
+      <rect x="3738" y="2991" width="110" height="44"
+            rx="8" ry="8" fill="rgba(129, 140, 248, 0.12)" stroke="rgba(129, 140, 248, 0.7)" stroke-width="1" />
+      <g transform="translate(3746, 3006)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(129, 140, 248, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      </g>
+      <text x="3766" y="3013"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Sessions</text>
+    </g>
+
+    <g data-id="oauth-bridge" data-kind="node">
+      <rect x="4030" y="2991" width="110" height="44"
+            rx="8" ry="8" fill="rgba(129, 140, 248, 0.12)" stroke="rgba(129, 140, 248, 0.7)" stroke-width="1" />
+      <g transform="translate(4038, 3006)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(129, 140, 248, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v6"/><path d="M15 2v6"/><path d="M5 8h14v3a5 5 0 0 1-5 5h-4a5 5 0 0 1-5-5z"/><path d="M12 16v6"/></svg>
+      </g>
+      <text x="4058" y="3013"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">OAuth Bridge</text>
+    </g>
+
+    <g data-id="rbac-policy" data-kind="node">
+      <rect x="3592" y="2991" width="110" height="44"
+            rx="8" ry="8" fill="rgba(129, 140, 248, 0.12)" stroke="rgba(129, 140, 248, 0.7)" stroke-width="1" />
+      <g transform="translate(3600, 3006)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(129, 140, 248, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+      </g>
+      <text x="3620" y="3013"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">RBAC Policy</text>
+    </g>
+
+    <g data-id="mfa" data-kind="node">
+      <rect x="3884" y="2991" width="110" height="44"
+            rx="8" ry="8" fill="rgba(129, 140, 248, 0.12)" stroke="rgba(129, 140, 248, 0.7)" stroke-width="1" />
+      <g transform="translate(3892, 3006)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(129, 140, 248, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+      </g>
+      <text x="3912" y="3013"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">MFA</text>
+    </g>
+
+    <g data-id="users" data-kind="node">
+      <rect x="2602" y="1297" width="110" height="44"
+            rx="8" ry="8" fill="rgba(180, 120, 240, 0.12)" stroke="rgba(180, 120, 240, 0.7)" stroke-width="1" />
+      <g transform="translate(2610, 1312)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(180, 120, 240, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+      </g>
+      <text x="2630" y="1319"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Users</text>
+    </g>
+
+    <g data-id="tenants" data-kind="node">
+      <rect x="2018" y="1297" width="110" height="44"
+            rx="8" ry="8" fill="rgba(180, 120, 240, 0.12)" stroke="rgba(180, 120, 240, 0.7)" stroke-width="1" />
+      <g transform="translate(2026, 1312)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(180, 120, 240, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+      </g>
+      <text x="2046" y="1319"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Tenants</text>
+    </g>
+
+    <g data-id="org-and-roles" data-kind="node">
+      <rect x="2164" y="1297" width="110" height="44"
+            rx="8" ry="8" fill="rgba(180, 120, 240, 0.12)" stroke="rgba(180, 120, 240, 0.7)" stroke-width="1" />
+      <g transform="translate(2172, 1312)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(180, 120, 240, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+      </g>
+      <text x="2192" y="1319"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Org &amp; Roles</text>
+    </g>
+
+    <g data-id="catalog" data-kind="node">
+      <rect x="2310" y="1297" width="110" height="44"
+            rx="8" ry="8" fill="rgba(180, 120, 240, 0.12)" stroke="rgba(180, 120, 240, 0.7)" stroke-width="1" />
+      <g transform="translate(2318, 1312)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(180, 120, 240, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+      </g>
+      <text x="2338" y="1319"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Catalog</text>
+    </g>
+
+    <g data-id="cart" data-kind="node">
+      <rect x="3040" y="1297" width="110" height="44"
+            rx="8" ry="8" fill="rgba(180, 120, 240, 0.12)" stroke="rgba(180, 120, 240, 0.7)" stroke-width="1" />
+      <g transform="translate(3048, 1312)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(180, 120, 240, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="5"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+      </g>
+      <text x="3068" y="1319"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Cart</text>
+    </g>
+
+    <g data-id="orders" data-kind="node">
+      <rect x="2894" y="1297" width="110" height="44"
+            rx="8" ry="8" fill="rgba(180, 120, 240, 0.12)" stroke="rgba(180, 120, 240, 0.7)" stroke-width="1" />
+      <g transform="translate(2902, 1312)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(180, 120, 240, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+      </g>
+      <text x="2922" y="1319"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Orders</text>
+    </g>
+
+    <g data-id="inventory" data-kind="node">
+      <rect x="1449" y="1297" width="110" height="44"
+            rx="8" ry="8" fill="rgba(180, 120, 240, 0.12)" stroke="rgba(180, 120, 240, 0.7)" stroke-width="1" />
+      <g transform="translate(1457, 1312)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(180, 120, 240, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+      </g>
+      <text x="1477" y="1319"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Inventory</text>
+    </g>
+
+    <g data-id="fulfillment" data-kind="node">
+      <rect x="1741" y="1297" width="110" height="44"
+            rx="8" ry="8" fill="rgba(180, 120, 240, 0.12)" stroke="rgba(180, 120, 240, 0.7)" stroke-width="1" />
+      <g transform="translate(1749, 1312)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(180, 120, 240, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="6" height="6"/><rect x="15" y="15" width="6" height="6"/><path d="M9 6h6a3 3 0 0 1 3 3v6"/></svg>
+      </g>
+      <text x="1769" y="1319"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Fulfillment</text>
+    </g>
+
+    <g data-id="reviews" data-kind="node">
+      <rect x="2748" y="1297" width="110" height="44"
+            rx="8" ry="8" fill="rgba(180, 120, 240, 0.12)" stroke="rgba(180, 120, 240, 0.7)" stroke-width="1" />
+      <g transform="translate(2756, 1312)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(180, 120, 240, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      </g>
+      <text x="2776" y="1319"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Reviews</text>
+    </g>
+
+    <g data-id="notifications" data-kind="node">
+      <rect x="1887" y="1297" width="110" height="44"
+            rx="8" ry="8" fill="rgba(180, 120, 240, 0.12)" stroke="rgba(180, 120, 240, 0.7)" stroke-width="1" />
+      <g transform="translate(1895, 1312)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(180, 120, 240, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+      </g>
+      <text x="1915" y="1319"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Notifications</text>
+    </g>
+
+    <g data-id="files" data-kind="node">
+      <rect x="1595" y="1297" width="110" height="44"
+            rx="8" ry="8" fill="rgba(180, 120, 240, 0.12)" stroke="rgba(180, 120, 240, 0.7)" stroke-width="1" />
+      <g transform="translate(1603, 1312)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(180, 120, 240, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      </g>
+      <text x="1623" y="1319"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Files</text>
+    </g>
+
+    <g data-id="audit-log" data-kind="node">
+      <rect x="1631.6666666666667" y="1405" width="110" height="44"
+            rx="8" ry="8" fill="rgba(180, 120, 240, 0.12)" stroke="rgba(180, 120, 240, 0.7)" stroke-width="1" />
+      <g transform="translate(1639.6666666666667, 1420)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(180, 120, 240, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><line x1="8" y1="9" x2="10" y2="9"/></svg>
+      </g>
+      <text x="1659.6666666666667" y="1427"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Audit Log</text>
+    </g>
+
+    <g data-id="reports-service" data-kind="node">
+      <rect x="3332" y="1297" width="111" height="44"
+            rx="8" ry="8" fill="rgba(180, 120, 240, 0.12)" stroke="rgba(180, 120, 240, 0.7)" stroke-width="1" />
+      <g transform="translate(3340, 1312)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(180, 120, 240, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><line x1="12" y1="11" x2="12" y2="19"/></svg>
+      </g>
+      <text x="3360" y="1319"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Reports Service</text>
+    </g>
+
+    <g data-id="feature-flags" data-kind="node">
+      <rect x="3186" y="1297" width="110" height="44"
+            rx="8" ry="8" fill="rgba(180, 120, 240, 0.12)" stroke="rgba(180, 120, 240, 0.7)" stroke-width="1" />
+      <g transform="translate(3194, 1312)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(180, 120, 240, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </g>
+      <text x="3214" y="1319"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Feature Flags</text>
+    </g>
+
+    <g data-id="webhooks" data-kind="node">
+      <rect x="2456" y="1297" width="110" height="44"
+            rx="8" ry="8" fill="rgba(180, 120, 240, 0.12)" stroke="rgba(180, 120, 240, 0.7)" stroke-width="1" />
+      <g transform="translate(2464, 1312)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(180, 120, 240, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="6" height="6"/><rect x="15" y="15" width="6" height="6"/><path d="M9 6h6a3 3 0 0 1 3 3v6"/></svg>
+      </g>
+      <text x="2484" y="1319"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Webhooks</text>
+    </g>
+
+    <g data-id="pricing-engine" data-kind="node">
+      <rect x="2984" y="1866.75" width="110" height="44"
+            rx="8" ry="8" fill="rgba(144, 220, 96, 0.12)" stroke="rgba(144, 220, 96, 0.7)" stroke-width="1" />
+      <g transform="translate(2992, 1881.75)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(144, 220, 96, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><path d="M6 12L3 21h6z"/><path d="M18 12l-3 9h6z"/><line x1="3" y1="3" x2="21" y2="3"/></svg>
+      </g>
+      <text x="3012" y="1888.75"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Pricing Engine</text>
+    </g>
+
+    <g data-id="subscriptions" data-kind="node">
+      <rect x="3049" y="1758.75" width="110" height="44"
+            rx="8" ry="8" fill="rgba(144, 220, 96, 0.12)" stroke="rgba(144, 220, 96, 0.7)" stroke-width="1" />
+      <g transform="translate(3057, 1773.75)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(144, 220, 96, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+      </g>
+      <text x="3077" y="1780.75"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Subscriptions</text>
+    </g>
+
+    <g data-id="invoicing" data-kind="node">
+      <rect x="3135.3333333333335" y="1866.75" width="110" height="44"
+            rx="8" ry="8" fill="rgba(144, 220, 96, 0.12)" stroke="rgba(144, 220, 96, 0.7)" stroke-width="1" />
+      <g transform="translate(3143.3333333333335, 1881.75)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(144, 220, 96, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><line x1="8" y1="9" x2="10" y2="9"/></svg>
+      </g>
+      <text x="3163.3333333333335" y="1888.75"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Invoicing</text>
+    </g>
+
+    <g data-id="tax-calculator" data-kind="node">
+      <rect x="2984" y="1974.75" width="110" height="44"
+            rx="8" ry="8" fill="rgba(144, 220, 96, 0.12)" stroke="rgba(144, 220, 96, 0.7)" stroke-width="1" />
+      <g transform="translate(2992, 1989.75)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(144, 220, 96, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M12 3h7a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-7M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h7M12 3v18"/></svg>
+      </g>
+      <text x="3012" y="1996.75"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Tax Calculator</text>
+    </g>
+
+    <g data-id="revenue-reports" data-kind="node">
+      <rect x="3115" y="1974.75" width="114" height="44"
+            rx="8" ry="8" fill="rgba(144, 220, 96, 0.12)" stroke="rgba(144, 220, 96, 0.7)" stroke-width="1" />
+      <g transform="translate(3123, 1989.75)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(144, 220, 96, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      </g>
+      <text x="3143" y="1996.75"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Revenue Reports</text>
+    </g>
+
+    <g data-id="llm-router" data-kind="node">
+      <rect x="1939" y="2401" width="110" height="44"
+            rx="8" ry="8" fill="rgba(240, 90, 90, 0.12)" stroke="rgba(240, 90, 90, 0.7)" stroke-width="1" />
+      <g transform="translate(1947, 2416)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(240, 90, 90, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+      </g>
+      <text x="1967" y="2423"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">LLM Router</text>
+    </g>
+
+    <g data-id="rag-service" data-kind="node">
+      <rect x="1793" y="2293" width="110" height="44"
+            rx="8" ry="8" fill="rgba(240, 90, 90, 0.12)" stroke="rgba(240, 90, 90, 0.7)" stroke-width="1" />
+      <g transform="translate(1801, 2308)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(240, 90, 90, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      </g>
+      <text x="1821" y="2315"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">RAG Service</text>
+    </g>
+
+    <g data-id="embedder" data-kind="node">
+      <rect x="1647" y="2293" width="110" height="44"
+            rx="8" ry="8" fill="rgba(240, 90, 90, 0.12)" stroke="rgba(240, 90, 90, 0.7)" stroke-width="1" />
+      <g transform="translate(1655, 2308)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(240, 90, 90, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="2" x2="9" y2="4"/><line x1="15" y1="2" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="22"/><line x1="15" y1="20" x2="15" y2="22"/><line x1="20" y1="9" x2="22" y2="9"/><line x1="20" y1="15" x2="22" y2="15"/><line x1="2" y1="9" x2="4" y2="9"/><line x1="2" y1="15" x2="4" y2="15"/></svg>
+      </g>
+      <text x="1675" y="2315"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Embedder</text>
+    </g>
+
+    <g data-id="summarizer" data-kind="node">
+      <rect x="2085" y="2293" width="110" height="44"
+            rx="8" ry="8" fill="rgba(240, 90, 90, 0.12)" stroke="rgba(240, 90, 90, 0.7)" stroke-width="1" />
+      <g transform="translate(2093, 2308)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(240, 90, 90, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5z"/><path d="M19 14l.8 2.4L22 17l-2.2.6L19 20l-.8-2.4L16 17l2.2-.6z"/><path d="M5 14l.8 2.4L8 17l-2.2.6L5 20l-.8-2.4L2 17l2.2-.6z"/></svg>
+      </g>
+      <text x="2113" y="2315"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Summarizer</text>
+    </g>
+
+    <g data-id="moderation" data-kind="node">
+      <rect x="1939" y="2293" width="110" height="44"
+            rx="8" ry="8" fill="rgba(240, 90, 90, 0.12)" stroke="rgba(240, 90, 90, 0.7)" stroke-width="1" />
+      <g transform="translate(1947, 2308)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(240, 90, 90, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      </g>
+      <text x="1967" y="2315"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Moderation</text>
+    </g>
+
+    <g data-id="prompt-store" data-kind="node">
+      <rect x="2085" y="2401" width="110" height="44"
+            rx="8" ry="8" fill="rgba(240, 90, 90, 0.12)" stroke="rgba(240, 90, 90, 0.7)" stroke-width="1" />
+      <g transform="translate(2093, 2416)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(240, 90, 90, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+      </g>
+      <text x="2113" y="2423"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Prompt Store</text>
+    </g>
+
+    <g data-id="eval-harness" data-kind="node">
+      <rect x="1939" y="2509" width="110" height="44"
+            rx="8" ry="8" fill="rgba(240, 90, 90, 0.12)" stroke="rgba(240, 90, 90, 0.7)" stroke-width="1" />
+      <g transform="translate(1947, 2524)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(240, 90, 90, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+      </g>
+      <text x="1967" y="2531"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Eval Harness</text>
+    </g>
+
+    <g data-id="event-bus" data-kind="node">
+      <rect x="1766.1666666666667" y="1803" width="110" height="44"
+            rx="8" ry="8" fill="rgba(240, 116, 96, 0.12)" stroke="rgba(240, 116, 96, 0.7)" stroke-width="1" />
+      <g transform="translate(1774.1666666666667, 1818)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(240, 116, 96, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="6" height="6"/><rect x="15" y="15" width="6" height="6"/><path d="M9 6h6a3 3 0 0 1 3 3v6"/></svg>
+      </g>
+      <text x="1794.1666666666667" y="1825"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Event Bus</text>
+    </g>
+
+    <g data-id="job-queue" data-kind="node">
+      <rect x="1482.1666666666667" y="1803" width="110" height="44"
+            rx="8" ry="8" fill="rgba(240, 116, 96, 0.12)" stroke="rgba(240, 116, 96, 0.7)" stroke-width="1" />
+      <g transform="translate(1490.1666666666667, 1818)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(240, 116, 96, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+      </g>
+      <text x="1510.1666666666667" y="1825"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Job Queue</text>
+    </g>
+
+    <g data-id="scheduler" data-kind="node">
+      <rect x="1482.1666666666667" y="1695" width="110" height="44"
+            rx="8" ry="8" fill="rgba(240, 116, 96, 0.12)" stroke="rgba(240, 116, 96, 0.7)" stroke-width="1" />
+      <g transform="translate(1490.1666666666667, 1710)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(240, 116, 96, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      </g>
+      <text x="1510.1666666666667" y="1717"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Scheduler</text>
+    </g>
+
+    <g data-id="outbox-relay" data-kind="node">
+      <rect x="2053.6666666666665" y="1695" width="110" height="44"
+            rx="8" ry="8" fill="rgba(240, 116, 96, 0.12)" stroke="rgba(240, 116, 96, 0.7)" stroke-width="1" />
+      <g transform="translate(2061.6666666666665, 1710)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(240, 116, 96, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+      </g>
+      <text x="2081.6666666666665" y="1717"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Outbox Relay</text>
+    </g>
+
+    <g data-id="saga-coordinator" data-kind="node">
+      <rect x="1628.1666666666667" y="1695" width="117" height="44"
+            rx="8" ry="8" fill="rgba(240, 116, 96, 0.12)" stroke="rgba(240, 116, 96, 0.7)" stroke-width="1" />
+      <g transform="translate(1636.1666666666667, 1710)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(240, 116, 96, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+      </g>
+      <text x="1656.1666666666667" y="1717"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Saga Coordinator</text>
+    </g>
+
+    <g data-id="order-worker" data-kind="node">
+      <rect x="1090" y="1984" width="110" height="44"
+            rx="8" ry="8" fill="rgba(240, 116, 96, 0.12)" stroke="rgba(240, 116, 96, 0.7)" stroke-width="1" />
+      <g transform="translate(1098, 1999)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(240, 116, 96, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+      </g>
+      <text x="1118" y="2006"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Order Worker</text>
+    </g>
+
+    <g data-id="email-worker" data-kind="node">
+      <rect x="1236" y="1984" width="110" height="44"
+            rx="8" ry="8" fill="rgba(240, 116, 96, 0.12)" stroke="rgba(240, 116, 96, 0.7)" stroke-width="1" />
+      <g transform="translate(1244, 1999)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(240, 116, 96, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      </g>
+      <text x="1264" y="2006"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Email Worker</text>
+    </g>
+
+    <g data-id="sms-worker" data-kind="node">
+      <rect x="1674" y="1984" width="110" height="44"
+            rx="8" ry="8" fill="rgba(240, 116, 96, 0.12)" stroke="rgba(240, 116, 96, 0.7)" stroke-width="1" />
+      <g transform="translate(1682, 1999)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(240, 116, 96, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+      </g>
+      <text x="1702" y="2006"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">SMS Worker</text>
+    </g>
+
+    <g data-id="index-worker" data-kind="node">
+      <rect x="1983" y="1984" width="110" height="44"
+            rx="8" ry="8" fill="rgba(240, 116, 96, 0.12)" stroke="rgba(240, 116, 96, 0.7)" stroke-width="1" />
+      <g transform="translate(1991, 1999)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(240, 116, 96, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      </g>
+      <text x="2011" y="2006"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Index Worker</text>
+    </g>
+
+    <g data-id="export-worker" data-kind="node">
+      <rect x="1528" y="1984" width="110" height="44"
+            rx="8" ry="8" fill="rgba(240, 116, 96, 0.12)" stroke="rgba(240, 116, 96, 0.7)" stroke-width="1" />
+      <g transform="translate(1536, 1999)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(240, 116, 96, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      </g>
+      <text x="1556" y="2006"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Export Worker</text>
+    </g>
+
+    <g data-id="image-worker" data-kind="node">
+      <rect x="1382" y="1984" width="110" height="44"
+            rx="8" ry="8" fill="rgba(240, 116, 96, 0.12)" stroke="rgba(240, 116, 96, 0.7)" stroke-width="1" />
+      <g transform="translate(1390, 1999)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(240, 116, 96, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>
+      </g>
+      <text x="1410" y="2006"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Image Worker</text>
+    </g>
+
+    <g data-id="embedding-worker" data-kind="node">
+      <rect x="1820" y="1984" width="127" height="44"
+            rx="8" ry="8" fill="rgba(240, 116, 96, 0.12)" stroke="rgba(240, 116, 96, 0.7)" stroke-width="1" />
+      <g transform="translate(1828, 1999)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(240, 116, 96, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="2" x2="9" y2="4"/><line x1="15" y1="2" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="22"/><line x1="15" y1="20" x2="15" y2="22"/><line x1="20" y1="9" x2="22" y2="9"/><line x1="20" y1="15" x2="22" y2="15"/><line x1="2" y1="9" x2="4" y2="9"/><line x1="2" y1="15" x2="4" y2="15"/></svg>
+      </g>
+      <text x="1848" y="2006"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Embedding Worker</text>
+    </g>
+
+    <g data-id="postgres-primary" data-kind="node">
+      <rect x="2286" y="2349.64" width="121" height="44"
+            rx="8" ry="8" fill="rgba(80, 200, 192, 0.12)" stroke="rgba(80, 200, 192, 0.7)" stroke-width="1" />
+      <g transform="translate(2294, 2364.64)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(80, 200, 192, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="12" y1="3" x2="12" y2="21"/></svg>
+      </g>
+      <text x="2314" y="2371.64"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Postgres Primary</text>
+    </g>
+
+    <g data-id="postgres-replicas" data-kind="node">
+      <rect x="2881" y="2349.64" width="121" height="44"
+            rx="8" ry="8" fill="rgba(80, 200, 192, 0.12)" stroke="rgba(80, 200, 192, 0.7)" stroke-width="1" />
+      <g transform="translate(2889, 2364.64)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(80, 200, 192, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="12" y1="3" x2="12" y2="21"/></svg>
+      </g>
+      <text x="2909" y="2371.64"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Postgres Replicas</text>
+    </g>
+
+    <g data-id="redis-cache" data-kind="node">
+      <rect x="2589" y="2349.64" width="110" height="44"
+            rx="8" ry="8" fill="rgba(80, 200, 192, 0.12)" stroke="rgba(80, 200, 192, 0.7)" stroke-width="1" />
+      <g transform="translate(2597, 2364.64)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(80, 200, 192, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="2" x2="9" y2="4"/><line x1="15" y1="2" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="22"/><line x1="15" y1="20" x2="15" y2="22"/><line x1="20" y1="9" x2="22" y2="9"/><line x1="20" y1="15" x2="22" y2="15"/><line x1="2" y1="9" x2="4" y2="9"/><line x1="2" y1="15" x2="4" y2="15"/></svg>
+      </g>
+      <text x="2617" y="2371.64"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Redis Cache</text>
+    </g>
+
+    <g data-id="feature-store" data-kind="node">
+      <rect x="2443" y="2349.64" width="110" height="44"
+            rx="8" ry="8" fill="rgba(80, 200, 192, 0.12)" stroke="rgba(80, 200, 192, 0.7)" stroke-width="1" />
+      <g transform="translate(2451, 2364.64)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(80, 200, 192, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+      </g>
+      <text x="2471" y="2371.64"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Feature Store</text>
+    </g>
+
+    <g data-id="outbox-table" data-kind="node">
+      <rect x="3038" y="2349.64" width="110" height="44"
+            rx="8" ry="8" fill="rgba(80, 200, 192, 0.12)" stroke="rgba(80, 200, 192, 0.7)" stroke-width="1" />
+      <g transform="translate(3046, 2364.64)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(80, 200, 192, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="5"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+      </g>
+      <text x="3066" y="2371.64"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Outbox Table</text>
+    </g>
+
+    <g data-id="tenant-shards" data-kind="node">
+      <rect x="2735" y="2349.64" width="110" height="44"
+            rx="8" ry="8" fill="rgba(80, 200, 192, 0.12)" stroke="rgba(80, 200, 192, 0.7)" stroke-width="1" />
+      <g transform="translate(2743, 2364.64)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(80, 200, 192, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M12 3h7a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-7M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h7M12 3v18"/></svg>
+      </g>
+      <text x="2763" y="2371.64"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Tenant Shards</text>
+    </g>
+
+    <g data-id="clickhouse" data-kind="node">
+      <rect x="2262" y="2937" width="110" height="44"
+            rx="8" ry="8" fill="rgba(240, 180, 60, 0.12)" stroke="rgba(240, 180, 60, 0.7)" stroke-width="1" />
+      <g transform="translate(2270, 2952)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(240, 180, 60, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="12" y1="3" x2="12" y2="21"/></svg>
+      </g>
+      <text x="2290" y="2959"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">ClickHouse</text>
+    </g>
+
+    <g data-id="warehouse-mirror" data-kind="node">
+      <rect x="2208.6666666666665" y="3045" width="127" height="44"
+            rx="8" ry="8" fill="rgba(240, 180, 60, 0.12)" stroke="rgba(240, 180, 60, 0.7)" stroke-width="1" />
+      <g transform="translate(2216.6666666666665, 3060)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(240, 180, 60, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+      </g>
+      <text x="2236.6666666666665" y="3067"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Warehouse Mirror</text>
+    </g>
+
+    <g data-id="streaming-ingest" data-kind="node">
+      <rect x="2125" y="2829" width="116" height="44"
+            rx="8" ry="8" fill="rgba(240, 180, 60, 0.12)" stroke="rgba(240, 180, 60, 0.7)" stroke-width="1" />
+      <g transform="translate(2133, 2844)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(240, 180, 60, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="6" height="6"/><rect x="15" y="15" width="6" height="6"/><path d="M9 6h6a3 3 0 0 1 3 3v6"/></svg>
+      </g>
+      <text x="2153" y="2851"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Streaming Ingest</text>
+    </g>
+
+    <g data-id="opensearch" data-kind="node">
+      <rect x="1833" y="2829" width="110" height="44"
+            rx="8" ry="8" fill="rgba(240, 180, 60, 0.12)" stroke="rgba(240, 180, 60, 0.7)" stroke-width="1" />
+      <g transform="translate(1841, 2844)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(240, 180, 60, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      </g>
+      <text x="1861" y="2851"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">OpenSearch</text>
+    </g>
+
+    <g data-id="vector-db" data-kind="node">
+      <rect x="1979" y="2829" width="110" height="44"
+            rx="8" ry="8" fill="rgba(240, 180, 60, 0.12)" stroke="rgba(240, 180, 60, 0.7)" stroke-width="1" />
+      <g transform="translate(1987, 2844)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(240, 180, 60, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="2" x2="9" y2="4"/><line x1="15" y1="2" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="22"/><line x1="15" y1="20" x2="15" y2="22"/><line x1="20" y1="9" x2="22" y2="9"/><line x1="20" y1="15" x2="22" y2="15"/><line x1="2" y1="9" x2="4" y2="9"/><line x1="2" y1="15" x2="4" y2="15"/></svg>
+      </g>
+      <text x="2007" y="2851"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Vector DB</text>
+    </g>
+
+    <g data-id="s3-uploads" data-kind="node">
+      <rect x="782" y="2829" width="110" height="44"
+            rx="8" ry="8" fill="rgba(86, 196, 132, 0.12)" stroke="rgba(86, 196, 132, 0.7)" stroke-width="1" />
+      <g transform="translate(790, 2844)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(86, 196, 132, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="5"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+      </g>
+      <text x="810" y="2851"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">S3 Uploads</text>
+    </g>
+
+    <g data-id="s3-exports" data-kind="node">
+      <rect x="636" y="2829" width="110" height="44"
+            rx="8" ry="8" fill="rgba(86, 196, 132, 0.12)" stroke="rgba(86, 196, 132, 0.7)" stroke-width="1" />
+      <g transform="translate(644, 2844)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(86, 196, 132, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      </g>
+      <text x="664" y="2851"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">S3 Exports</text>
+    </g>
+
+    <g data-id="image-cdn-bucket" data-kind="node">
+      <rect x="336" y="2829" width="118" height="44"
+            rx="8" ry="8" fill="rgba(86, 196, 132, 0.12)" stroke="rgba(86, 196, 132, 0.7)" stroke-width="1" />
+      <g transform="translate(344, 2844)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(86, 196, 132, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>
+      </g>
+      <text x="364" y="2851"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Image CDN Bucket</text>
+    </g>
+
+    <g data-id="document-store" data-kind="node">
+      <rect x="490" y="2829" width="110" height="44"
+            rx="8" ry="8" fill="rgba(86, 196, 132, 0.12)" stroke="rgba(86, 196, 132, 0.7)" stroke-width="1" />
+      <g transform="translate(498, 2844)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(86, 196, 132, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><line x1="8" y1="9" x2="10" y2="9"/></svg>
+      </g>
+      <text x="518" y="2851"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Document Store</text>
+    </g>
+
+    <g data-id="backups" data-kind="node">
+      <rect x="190" y="2829" width="110" height="44"
+            rx="8" ry="8" fill="rgba(86, 196, 132, 0.12)" stroke="rgba(86, 196, 132, 0.7)" stroke-width="1" />
+      <g transform="translate(198, 2844)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(86, 196, 132, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="12" x2="2" y2="12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" y1="16" x2="6.01" y2="16"/></svg>
+      </g>
+      <text x="218" y="2851"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Backups</text>
+    </g>
+
+    <g data-id="log-aggregator" data-kind="node">
+      <rect x="3106" y="2844.4285714285716" width="110" height="44"
+            rx="8" ry="8" fill="rgba(148, 163, 184, 0.12)" stroke="rgba(148, 163, 184, 0.7)" stroke-width="1" />
+      <g transform="translate(3114, 2859.4285714285716)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(148, 163, 184, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><line x1="8" y1="9" x2="10" y2="9"/></svg>
+      </g>
+      <text x="3134" y="2866.4285714285716"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Log Aggregator</text>
+    </g>
+
+    <g data-id="metrics" data-kind="node">
+      <rect x="3252" y="2844.4285714285716" width="110" height="44"
+            rx="8" ry="8" fill="rgba(148, 163, 184, 0.12)" stroke="rgba(148, 163, 184, 0.7)" stroke-width="1" />
+      <g transform="translate(3260, 2859.4285714285716)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(148, 163, 184, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      </g>
+      <text x="3280" y="2866.4285714285716"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Metrics</text>
+    </g>
+
+    <g data-id="traces" data-kind="node">
+      <rect x="2960" y="2844.4285714285716" width="110" height="44"
+            rx="8" ry="8" fill="rgba(148, 163, 184, 0.12)" stroke="rgba(148, 163, 184, 0.7)" stroke-width="1" />
+      <g transform="translate(2968, 2859.4285714285716)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(148, 163, 184, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+      </g>
+      <text x="2988" y="2866.4285714285716"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Traces</text>
+    </g>
+
+    <g data-id="alerts" data-kind="node">
+      <rect x="3398" y="2952.4285714285716" width="110" height="44"
+            rx="8" ry="8" fill="rgba(148, 163, 184, 0.12)" stroke="rgba(148, 163, 184, 0.7)" stroke-width="1" />
+      <g transform="translate(3406, 2967.4285714285716)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(148, 163, 184, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      </g>
+      <text x="3426" y="2974.4285714285716"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Alerts</text>
+    </g>
+
+    <g data-id="dashboards" data-kind="node">
+      <rect x="3106" y="2952.4285714285716" width="110" height="44"
+            rx="8" ry="8" fill="rgba(148, 163, 184, 0.12)" stroke="rgba(148, 163, 184, 0.7)" stroke-width="1" />
+      <g transform="translate(3114, 2967.4285714285716)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(148, 163, 184, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+      </g>
+      <text x="3134" y="2974.4285714285716"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Dashboards</text>
+    </g>
+
+    <g data-id="slo-tracker" data-kind="node">
+      <rect x="3252" y="2952.4285714285716" width="110" height="44"
+            rx="8" ry="8" fill="rgba(148, 163, 184, 0.12)" stroke="rgba(148, 163, 184, 0.7)" stroke-width="1" />
+      <g transform="translate(3260, 2967.4285714285716)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(148, 163, 184, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><path d="M6 12L3 21h6z"/><path d="M18 12l-3 9h6z"/><line x1="3" y1="3" x2="21" y2="3"/></svg>
+      </g>
+      <text x="3280" y="2974.4285714285716"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">SLO Tracker</text>
+    </g>
+
+    <g data-id="incident-bridge" data-kind="node">
+      <rect x="2814" y="2844.4285714285716" width="110" height="44"
+            rx="8" ry="8" fill="rgba(148, 163, 184, 0.12)" stroke="rgba(148, 163, 184, 0.7)" stroke-width="1" />
+      <g transform="translate(2822, 2859.4285714285716)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(148, 163, 184, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      </g>
+      <text x="2842" y="2866.4285714285716"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Incident Bridge</text>
+    </g>
+
+    <g data-id="kubernetes" data-kind="node">
+      <rect x="1260" y="2829" width="110" height="44"
+            rx="8" ry="8" fill="rgba(96, 165, 250, 0.12)" stroke="rgba(96, 165, 250, 0.7)" stroke-width="1" />
+      <g transform="translate(1268, 2844)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(96, 165, 250, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6" y2="7"/><line x1="6" y1="17" x2="6" y2="17"/></svg>
+      </g>
+      <text x="1288" y="2851"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Kubernetes</text>
+    </g>
+
+    <g data-id="service-mesh" data-kind="node">
+      <rect x="1278.3333333333335" y="2937" width="110" height="44"
+            rx="8" ry="8" fill="rgba(96, 165, 250, 0.12)" stroke="rgba(96, 165, 250, 0.7)" stroke-width="1" />
+      <g transform="translate(1286.3333333333335, 2952)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(96, 165, 250, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+      </g>
+      <text x="1306.3333333333335" y="2959"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Service Mesh</text>
+    </g>
+
+    <g data-id="secrets-manager" data-kind="node">
+      <rect x="1107" y="2829" width="117" height="44"
+            rx="8" ry="8" fill="rgba(96, 165, 250, 0.12)" stroke="rgba(96, 165, 250, 0.7)" stroke-width="1" />
+      <g transform="translate(1115, 2844)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(96, 165, 250, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      </g>
+      <text x="1135" y="2851"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Secrets Manager</text>
+    </g>
+
+    <g data-id="config-service" data-kind="node">
+      <rect x="961" y="2829" width="110" height="44"
+            rx="8" ry="8" fill="rgba(96, 165, 250, 0.12)" stroke="rgba(96, 165, 250, 0.7)" stroke-width="1" />
+      <g transform="translate(969, 2844)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(96, 165, 250, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </g>
+      <text x="989" y="2851"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Config Service</text>
+    </g>
+
+    <g data-id="service-registry" data-kind="node">
+      <rect x="1275.8333333333335" y="3045" width="115" height="44"
+            rx="8" ry="8" fill="rgba(96, 165, 250, 0.12)" stroke="rgba(96, 165, 250, 0.7)" stroke-width="1" />
+      <g transform="translate(1283.8333333333335, 3060)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(96, 165, 250, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+      </g>
+      <text x="1303.8333333333335" y="3067"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Service Registry</text>
+    </g>
+
+    <g data-id="load-balancer" data-kind="node">
+      <rect x="1132.3333333333333" y="2937" width="110" height="44"
+            rx="8" ry="8" fill="rgba(96, 165, 250, 0.12)" stroke="rgba(96, 165, 250, 0.7)" stroke-width="1" />
+      <g transform="translate(1140.3333333333333, 2952)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(96, 165, 250, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="6" height="6"/><rect x="15" y="15" width="6" height="6"/><path d="M9 6h6a3 3 0 0 1 3 3v6"/></svg>
+      </g>
+      <text x="1160.3333333333333" y="2959"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Load Balancer</text>
+    </g>
+
+    <g data-id="ci-pipeline" data-kind="node">
+      <rect x="1269.8333333333333" y="753" width="110" height="44"
+            rx="8" ry="8" fill="rgba(232, 209, 80, 0.12)" stroke="rgba(232, 209, 80, 0.7)" stroke-width="1" />
+      <g transform="translate(1277.8333333333333, 768)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(232, 209, 80, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="6" height="6"/><rect x="15" y="15" width="6" height="6"/><path d="M9 6h6a3 3 0 0 1 3 3v6"/></svg>
+      </g>
+      <text x="1297.8333333333333" y="775"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">CI Pipeline</text>
+    </g>
+
+    <g data-id="cd-deployer" data-kind="node">
+      <rect x="1242.3333333333333" y="969" width="110" height="44"
+            rx="8" ry="8" fill="rgba(232, 209, 80, 0.12)" stroke="rgba(232, 209, 80, 0.7)" stroke-width="1" />
+      <g transform="translate(1250.3333333333333, 984)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(232, 209, 80, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+      </g>
+      <text x="1270.3333333333333" y="991"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">CD Deployer</text>
+    </g>
+
+    <g data-id="preview-envs" data-kind="node">
+      <rect x="1224" y="1077" width="110" height="44"
+            rx="8" ry="8" fill="rgba(232, 209, 80, 0.12)" stroke="rgba(232, 209, 80, 0.7)" stroke-width="1" />
+      <g transform="translate(1232, 1092)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(232, 209, 80, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      </g>
+      <text x="1252" y="1099"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Preview Envs</text>
+    </g>
+
+    <g data-id="test-harness" data-kind="node">
+      <rect x="1389.8333333333333" y="861" width="110" height="44"
+            rx="8" ry="8" fill="rgba(232, 209, 80, 0.12)" stroke="rgba(232, 209, 80, 0.7)" stroke-width="1" />
+      <g transform="translate(1397.8333333333333, 876)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(232, 209, 80, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+      </g>
+      <text x="1417.8333333333333" y="883"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Test Harness</text>
+    </g>
+
+    <g data-id="artifact-registry" data-kind="node">
+      <rect x="1240.8333333333333" y="861" width="113" height="44"
+            rx="8" ry="8" fill="rgba(232, 209, 80, 0.12)" stroke="rgba(232, 209, 80, 0.7)" stroke-width="1" />
+      <g transform="translate(1248.8333333333333, 876)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(232, 209, 80, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+      </g>
+      <text x="1268.8333333333333" y="883"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Artifact Registry</text>
+    </g>
+
+    <g data-id="migration-runner" data-kind="node">
+      <rect x="1355" y="1077" width="118" height="44"
+            rx="8" ry="8" fill="rgba(232, 209, 80, 0.12)" stroke="rgba(232, 209, 80, 0.7)" stroke-width="1" />
+      <g transform="translate(1363, 1092)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(232, 209, 80, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><polygon points="18.5 2.5 22 6 12 16 8 16 8 12 18.5 2.5"/></svg>
+      </g>
+      <text x="1383" y="1099"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Migration Runner</text>
+    </g>
+
+    <g data-id="stripe" data-kind="node">
+      <rect x="3836" y="3229" width="110" height="44"
+            rx="8" ry="8" fill="rgba(255, 154, 60, 0.12)" stroke="rgba(255, 154, 60, 0.7)" stroke-width="1" />
+      <g transform="translate(3844, 3244)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(255, 154, 60, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+      </g>
+      <text x="3864" y="3251"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Stripe</text>
+    </g>
+
+    <g data-id="ses-email" data-kind="node">
+      <rect x="2801" y="3229" width="110" height="44"
+            rx="8" ry="8" fill="rgba(255, 154, 60, 0.12)" stroke="rgba(255, 154, 60, 0.7)" stroke-width="1" />
+      <g transform="translate(2809, 3244)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(255, 154, 60, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      </g>
+      <text x="2829" y="3251"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">SES Email</text>
+    </g>
+
+    <g data-id="twilio-sms" data-kind="node">
+      <rect x="2947" y="3229" width="110" height="44"
+            rx="8" ry="8" fill="rgba(255, 154, 60, 0.12)" stroke="rgba(255, 154, 60, 0.7)" stroke-width="1" />
+      <g transform="translate(2955, 3244)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(255, 154, 60, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+      </g>
+      <text x="2975" y="3251"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Twilio SMS</text>
+    </g>
+
+    <g data-id="google-oauth" data-kind="node">
+      <rect x="3544" y="3229" width="110" height="44"
+            rx="8" ry="8" fill="rgba(255, 154, 60, 0.12)" stroke="rgba(255, 154, 60, 0.7)" stroke-width="1" />
+      <g transform="translate(3552, 3244)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(255, 154, 60, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      </g>
+      <text x="3572" y="3251"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Google OAuth</text>
+    </g>
+
+    <g data-id="github-oauth" data-kind="node">
+      <rect x="3690" y="3229" width="110" height="44"
+            rx="8" ry="8" fill="rgba(255, 154, 60, 0.12)" stroke="rgba(255, 154, 60, 0.7)" stroke-width="1" />
+      <g transform="translate(3698, 3244)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(255, 154, 60, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      </g>
+      <text x="3718" y="3251"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">GitHub OAuth</text>
+    </g>
+
+    <g data-id="segment-analytics" data-kind="node">
+      <rect x="3093" y="3229" width="122" height="44"
+            rx="8" ry="8" fill="rgba(255, 154, 60, 0.12)" stroke="rgba(255, 154, 60, 0.7)" stroke-width="1" />
+      <g transform="translate(3101, 3244)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(255, 154, 60, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      </g>
+      <text x="3121" y="3251"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Segment Analytics</text>
+    </g>
+
+    <g data-id="pagerduty" data-kind="node">
+      <rect x="3398" y="3229" width="110" height="44"
+            rx="8" ry="8" fill="rgba(255, 154, 60, 0.12)" stroke="rgba(255, 154, 60, 0.7)" stroke-width="1" />
+      <g transform="translate(3406, 3244)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(255, 154, 60, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      </g>
+      <text x="3426" y="3251"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">PagerDuty</text>
+    </g>
+
+    <g data-id="slack-webhooks" data-kind="node">
+      <rect x="3251" y="3229" width="111" height="44"
+            rx="8" ry="8" fill="rgba(255, 154, 60, 0.12)" stroke="rgba(255, 154, 60, 0.7)" stroke-width="1" />
+      <g transform="translate(3259, 3244)">
+        <svg width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="rgba(255, 154, 60, 0.95)" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      </g>
+      <text x="3279" y="3251"
+            dominant-baseline="middle" fill="#dde2ee" font-size="11"
+            font-family="Inter, sans-serif" font-weight="500">Slack Webhooks</text>
+    </g></g>
+  <g>
+    <g data-id="e1" data-kind="edge">
+      <path d="M 279 110 L 279 143 Q 279 149 285 149 L 397 149 Q 403 149 403 155 L 403 250" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="2"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-thick)" />
+      
+    </g>
+
+    <g data-id="e2" data-kind="edge">
+      <path d="M 425 110 L 425 250" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="2"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-thick)" />
+      
+    </g>
+
+    <g data-id="e3" data-kind="edge">
+      <path d="M 118 110 L 118 153 Q 118 159 124 159 L 375 159 Q 381 159 381 165 L 381 250" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="2"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-thick)" />
+      
+    </g>
+
+    <g data-id="e4" data-kind="edge">
+      <path d="M 571.5 110 L 566 133 Q 572 139 572 145 L 572 143 Q 572 149 566 149 L 453 149 Q 447 149 447 155 L 447 250" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="2"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-thick)" />
+      
+    </g>
+
+    <g data-id="e5" data-kind="edge">
+      <path d="M 97.33333333333334 86 L 97.33333333333334 150" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="2"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-thick)" />
+      
+    </g>
+
+    <g data-id="e6" data-kind="edge">
+      <path d="M 97.33333333333334 194 L 97.33333333333334 258" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="2"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-thick)" />
+      
+    </g>
+
+    <g data-id="e7" data-kind="edge">
+      <path d="M 97.33333333333334 302 L 97.33333333333334 366" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="2"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-thick)" />
+      
+    </g>
+
+    <g data-id="e8" data-kind="edge">
+      <path d="M 432.33333333333337 618 L 438 641 Q 432 647 432 653 L 432 651 Q 432 657 438 657 L 2679 657 Q 2685 657 2679 663 L 2690.5 845.6666666666666 Q 2684.5 851.6666666666666 2684.5 857.6666666666666 L 2684.5 898.6666666666666" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="2"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-thick)" />
+      
+    </g>
+
+    <g data-id="e9" data-kind="edge">
+      <path d="M 395.6666666666667 294 L 395.6666666666667 298 Q 395.6666666666667 304 389.6666666666667 304 L 372.33333333333337 304 Q 366.33333333333337 304 360.33333333333337 310 L 372 641 Q 366 647 360 653 L 371.5 2776 Q 365.5 2782 365.5 2788 L 365.5 2829" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 4" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e10" data-kind="edge">
+      <path d="M 79 86 L 79 150" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e11" data-kind="edge">
+      <path d="M 134 86 L 134 90 Q 134 96 140 96 L 376.5 96 Q 382.5 96 382.5 102 L 382.5 150" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e12" data-kind="edge">
+      <path d="M 106.5 86 L 106.5 100 Q 106.5 106 112.5 106 L 219 106 Q 225 106 225 112 L 225 150" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e13" data-kind="edge">
+      <path d="M 2803 1050.6666666666665 L 2803 1234 Q 2803 1240 2809 1240 L 3493 1240 Q 3499 1240 3499 1246 L 3499 2586 Q 3499 2592 3505 2592 L 3674 2592 Q 3680 2592 3680 2598 L 3680 2883" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="2"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-thick)" />
+      
+    </g>
+
+    <g data-id="e14" data-kind="edge">
+      <path d="M 101 86 L 101 110 Q 101 116 107 116 L 219 116 Q 225 116 225 122 L 225 150" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e15" data-kind="edge">
+      <path d="M 79 86 L 79 150" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e16" data-kind="edge">
+      <path d="M 123 86 L 123 100 Q 123 106 129 106 L 365 106 Q 371 106 371 112 L 371 150" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e17" data-kind="edge">
+      <path d="M 145 86 L 145 90 Q 145 96 151 96 L 511 96 Q 517 96 517 102 L 517 150" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" marker-start="url(#agentdiagram-arrow-bwd)" />
+      
+    </g>
+
+    <g data-id="e18" data-kind="edge">
+      <path d="M 4085 3035 L 4085 3122 Q 4085 3128 4079 3128 L 3605 3128 Q 3599 3128 3599 3134 L 3599 3229" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" marker-start="url(#agentdiagram-arrow-bwd)" />
+      
+    </g>
+
+    <g data-id="e19" data-kind="edge">
+      <path d="M 4085 3035 L 4085 3122 Q 4085 3128 4079 3128 L 3751 3128 Q 3745 3128 3745 3134 L 3745 3229" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" marker-start="url(#agentdiagram-arrow-bwd)" />
+      
+    </g>
+
+    <g data-id="e20" data-kind="edge">
+      <path d="M 2803 1050.6666666666665 L 2803 1234 Q 2803 1240 2797 1240 L 2663 1240 Q 2657 1240 2657 1246 L 2657 1297" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e21" data-kind="edge">
+      <path d="M 2803 1050.6666666666665 L 2803 1234 Q 2803 1240 2797 1240 L 2079 1240 Q 2073 1240 2073 1246 L 2073 1297" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e22" data-kind="edge">
+      <path d="M 2803 1050.6666666666665 L 2803 1234 Q 2803 1240 2797 1240 L 2225 1240 Q 2219 1240 2219 1246 L 2219 1297" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e23" data-kind="edge">
+      <path d="M 2803 1050.6666666666665 L 2803 1234 Q 2803 1240 2797 1240 L 2371 1240 Q 2365 1240 2365 1246 L 2365 1297" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e24" data-kind="edge">
+      <path d="M 2803 1050.6666666666665 L 2803 1234 Q 2803 1240 2809 1240 L 3089 1240 Q 3095 1240 3095 1246 L 3095 1297" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e25" data-kind="edge">
+      <path d="M 2803 1050.6666666666665 L 2803 1234 Q 2803 1240 2809 1240 L 2925 1240 Q 2931 1240 2925 1246 L 2936.666666666667 1244 Q 2930.666666666667 1250 2930.666666666667 1256 L 2930.666666666667 1297" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e26" data-kind="edge">
+      <path d="M 2803 1050.6666666666665 L 2803 1234 Q 2803 1240 2797 1240 L 1538 1240 Q 1532 1240 1526 1246 L 1537.5 1244 Q 1531.5 1250 1531.5 1256 L 1531.5 1297" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e27" data-kind="edge">
+      <path d="M 2803 1050.6666666666665 L 2803 1234 Q 2803 1240 2797 1240 L 1830 1240 Q 1824 1240 1818 1246 L 1829.5 1244 Q 1823.5 1250 1823.5 1256 L 1823.5 1297" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e28" data-kind="edge">
+      <path d="M 2803 1050.6666666666665 L 2803 1297" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e29" data-kind="edge">
+      <path d="M 2803 1050.6666666666665 L 2803 1234 Q 2803 1240 2797 1240 L 1966 1240 Q 1960 1240 1966 1246 L 1954.3333333333335 1244 Q 1960.3333333333335 1250 1960.3333333333335 1256 L 1960.3333333333335 1297" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e30" data-kind="edge">
+      <path d="M 2803 1050.6666666666665 L 2803 1234 Q 2803 1240 2797 1240 L 1656 1240 Q 1650 1240 1650 1246 L 1650 1297" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e31" data-kind="edge">
+      <path d="M 2803 1050.6666666666665 L 2803 1234 Q 2803 1240 2797 1240 L 2013 1240 Q 2007 1240 2007 1246 L 2007 1375 Q 2007 1381 2001 1381 L 1711 1381 Q 1705 1381 1705 1387 L 1705 1405" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e32" data-kind="edge">
+      <path d="M 2803 1050.6666666666665 L 2803 1234 Q 2803 1240 2809 1240 L 3382 1240 Q 3388 1240 3382 1246 L 3393.5 1244 Q 3387.5 1250 3387.5 1256 L 3387.5 1297" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e33" data-kind="edge">
+      <path d="M 2803 1050.6666666666665 L 2803 1234 Q 2803 1240 2809 1240 L 3253 1240 Q 3259 1240 3265 1246 L 3253.333333333333 1244 Q 3259.333333333333 1250 3259.333333333333 1256 L 3259.333333333333 1297" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e34" data-kind="edge">
+      <path d="M 2803 1050.6666666666665 L 2803 1234 Q 2803 1240 2797 1240 L 2517 1240 Q 2511 1240 2511 1246 L 2511 1297" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e35" data-kind="edge">
+      <path d="M 2803 1050.6666666666665 L 2803 1234 Q 2803 1240 2809 1240 L 3471 1240 Q 3477 1240 3477 1246 L 3477 1572 Q 3477 1578 3471 1578 L 3027 1578 Q 3021 1578 3015 1584 L 3026.6666666666665 1705.75 Q 3020.6666666666665 1711.75 3020.6666666666665 1717.75 L 3020.6666666666665 1866.75" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e36" data-kind="edge">
+      <path d="M 2803 1050.6666666666665 L 2803 1234 Q 2803 1240 2809 1240 L 3471 1240 Q 3477 1240 3477 1246 L 3477 1572 Q 3477 1578 3471 1578 L 3092 1578 Q 3086 1578 3080 1584 L 3091.6666666666665 1705.75 Q 3085.6666666666665 1711.75 3085.6666666666665 1717.75 L 3085.6666666666665 1758.75" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e37" data-kind="edge">
+      <path d="M 2803 1050.6666666666665 L 2803 1234 Q 2803 1240 2809 1240 L 3471 1240 Q 3477 1240 3477 1246 L 3477 1572 Q 3477 1578 3471 1578 L 3215 1578 Q 3209 1578 3203 1584 L 3214.666666666667 1705.75 Q 3208.666666666667 1711.75 3202.666666666667 1717.75 L 3208.6666666666665 1866.75" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e38" data-kind="edge">
+      <path d="M 2803 1050.6666666666665 L 2803 1234 Q 2803 1240 2797 1240 L 1409 1240 Q 1403 1240 1403 1246 L 1403 1592 Q 1403 1598 1409 1598 L 2212 1598 Q 2218 1598 2218 1604 L 2218 2230 Q 2218 2236 2212 2236 L 1854 2236 Q 1848 2236 1848 2242 L 1848 2293" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e39" data-kind="edge">
+      <path d="M 2803 1050.6666666666665 L 2803 1234 Q 2803 1240 2797 1240 L 1409 1240 Q 1403 1240 1403 1246 L 1403 1592 Q 1403 1598 1409 1598 L 2212 1598 Q 2218 1598 2218 1604 L 2218 2230 Q 2218 2236 2212 2236 L 2146 2236 Q 2140 2236 2140 2242 L 2140 2293" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e40" data-kind="edge">
+      <path d="M 2657 1341 L 2657 1532 Q 2657 1538 2651 1538 L 2362 1538 Q 2356 1538 2362 1544 L 2350.5 2246.64 Q 2356.5 2252.64 2356.5 2258.64 L 2356.5 2303.64 Q 2356.5 2309.64 2350.5 2309.64 L 2361.142857142857 2309.64 Q 2355.142857142857 2309.64 2355.142857142857 2315.64 L 2355.142857142857 2349.64" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e41" data-kind="edge">
+      <path d="M 2073 1341 L 2073 1532 Q 2073 1538 2079 1538 L 2328 1538 Q 2334 1538 2334 1544 L 2334 2230 Q 2334 2236 2340 2236 L 2330 2236 Q 2336 2236 2342 2242 L 2330.5 2246.64 Q 2336.5 2252.64 2336.5 2258.64 L 2336.5 2303.64 Q 2336.5 2309.64 2342.5 2309.64 L 2331.857142857143 2309.64 Q 2337.857142857143 2309.64 2337.857142857143 2315.64 L 2337.857142857143 2349.64" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e42" data-kind="edge">
+      <path d="M 2219 1341 L 2219 1482 Q 2219 1488 2225 1488 L 2339 1488 Q 2345 1488 2345 1494 L 2345 2230 Q 2345 2236 2351 2236 L 2340 2236 Q 2346 2236 2352 2242 L 2340.5 2246.64 Q 2346.5 2252.64 2346.5 2258.64 L 2346.5 2349.64" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e43" data-kind="edge">
+      <path d="M 2365 1341 L 2365 1502 Q 2365 1508 2371 1508 L 2383 1508 Q 2389 1508 2389 1514 L 2389 2230 Q 2389 2236 2383 2236 L 2392 2236 Q 2386 2236 2392 2242 L 2380.5 2246.64 Q 2386.5 2252.64 2386.5 2258.64 L 2386.5 2313.64 Q 2386.5 2319.64 2380.5 2319.64 L 2387.0714285714284 2319.64 Q 2381.0714285714284 2319.64 2381.0714285714284 2325.64 L 2381.0714285714284 2349.64" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e44" data-kind="edge">
+      <path d="M 3095 1341 L 3095 1552 Q 3095 1558 3089 1558 L 2896 1558 Q 2890 1558 2890 1564 L 2890 2230 Q 2890 2236 2884 2236 L 2668 2236 Q 2662 2236 2668 2242 L 2656.3333333333335 2246.64 Q 2662.3333333333335 2252.64 2662.3333333333335 2258.64 L 2662.3333333333335 2349.64" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e45" data-kind="edge">
+      <path d="M 3095 1341 L 3095 1552 Q 3095 1558 3089 1558 L 2863 1558 Q 2857 1558 2857 1564 L 2857 2090 Q 2857 2096 2851 2096 L 2403 2096 Q 2397 2096 2391 2102 L 2402.5 2246.64 Q 2396.5 2252.64 2396.5 2258.64 L 2396.5 2323.64 Q 2396.5 2329.64 2390.5 2329.64 L 2395.714285714286 2329.64 Q 2389.714285714286 2329.64 2389.714285714286 2335.64 L 2389.714285714286 2349.64" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e46" data-kind="edge">
+      <path d="M 2949 1341 L 2949 1512 Q 2949 1518 2943 1518 L 2874 1518 Q 2868 1518 2868 1524 L 2868 2200 Q 2868 2206 2862 2206 L 2413 2206 Q 2407 2206 2401 2212 L 2412.5 2246.64 Q 2406.5 2252.64 2406.5 2258.64 L 2406.5 2333.64 Q 2406.5 2339.64 2400.5 2339.64 L 2404.357142857143 2339.64 Q 2398.357142857143 2339.64 2398.357142857143 2345.64 L 2398.357142857143 2349.64" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e47" data-kind="edge">
+      <path d="M 1504 1341 L 1504 1572 Q 1504 1578 1510 1578 L 2284 1578 Q 2290 1578 2290 1584 L 2290 2090 Q 2290 2096 2296 2096 L 2290 2096 Q 2296 2096 2302 2102 L 2290.5 2246.64 Q 2296.5 2252.64 2296.5 2258.64 L 2296.5 2323.64 Q 2296.5 2329.64 2302.5 2329.64 L 2297.285714285714 2329.64 Q 2303.285714285714 2329.64 2303.285714285714 2335.64 L 2303.285714285714 2349.64" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e48" data-kind="edge">
+      <path d="M 1796 1341 L 1796 1355 Q 1796 1361 1790 1361 L 1521 1361 Q 1515 1361 1515 1367 L 1515 1562 Q 1515 1568 1521 1568 L 2295 1568 Q 2301 1568 2301 1574 L 2301 2230 Q 2301 2236 2307 2236 L 2300 2236 Q 2306 2236 2312 2242 L 2300.5 2246.64 Q 2306.5 2252.64 2306.5 2258.64 L 2306.5 2313.64 Q 2306.5 2319.64 2312.5 2319.64 L 2305.9285714285716 2319.64 Q 2311.9285714285716 2319.64 2311.9285714285716 2325.64 L 2311.9285714285716 2349.64" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e49" data-kind="edge">
+      <path d="M 2803 1341 L 2803 1542 Q 2803 1548 2797 1548 L 2373 1548 Q 2367 1548 2367 1554 L 2367 2230 Q 2367 2236 2361 2236 L 2372 2236 Q 2366 2236 2372 2242 L 2360.5 2246.64 Q 2366.5 2252.64 2366.5 2258.64 L 2366.5 2303.64 Q 2366.5 2309.64 2360.5 2309.64 L 2369.785714285714 2309.64 Q 2363.785714285714 2309.64 2363.785714285714 2315.64 L 2363.785714285714 2349.64" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e50" data-kind="edge">
+      <path d="M 1631.6666666666667 1341 L 1631.6666666666667 1345 Q 1631.6666666666667 1351 1625.6666666666667 1351 L 1499 1351 Q 1493 1351 1493 1357 L 1493 1622 Q 1493 1628 1487 1628 L 871 1628 Q 865 1628 865 1634 L 865 2726 Q 865 2732 859 2732 L 843 2732 Q 837 2732 837 2738 L 837 2829" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e51" data-kind="edge">
+      <path d="M 1631.6666666666667 1341 L 1631.6666666666667 1345 Q 1631.6666666666667 1351 1625.6666666666667 1351 L 1499 1351 Q 1493 1351 1493 1357 L 1493 1622 Q 1493 1628 1487 1628 L 871 1628 Q 865 1628 865 1634 L 865 2160 Q 865 2166 859 2166 L 551 2166 Q 545 2166 545 2172 L 545 2829" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e52" data-kind="edge">
+      <path d="M 1942 1341 L 1942 1365 Q 1942 1371 1936 1371 L 1532 1371 Q 1526 1371 1526 1377 L 1526 1552 Q 1526 1558 1532 1558 L 2306 1558 Q 2312 1558 2312 1564 L 2312 2230 Q 2312 2236 2318 2236 L 2310 2236 Q 2316 2236 2322 2242 L 2310.5 2246.64 Q 2316.5 2252.64 2316.5 2258.64 L 2316.5 2303.64 Q 2316.5 2309.64 2322.5 2309.64 L 2314.5714285714284 2309.64 Q 2320.5714285714284 2309.64 2320.5714285714284 2315.64 L 2320.5714285714284 2349.64" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e53" data-kind="edge">
+      <path d="M 1686.6666666666667 1449 L 1681 1472 Q 1687 1478 1687 1484 L 1687 1542 Q 1687 1548 1693 1548 L 2317 1548 Q 2323 1548 2323 1554 L 2323 2230 Q 2323 2236 2329 2236 L 2320 2236 Q 2326 2236 2332 2242 L 2320.5 2246.64 Q 2326.5 2252.64 2326.5 2258.64 L 2326.5 2303.64 Q 2326.5 2309.64 2332.5 2309.64 L 2323.214285714286 2309.64 Q 2329.214285714286 2309.64 2329.214285714286 2315.64 L 2329.214285714286 2349.64" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e54" data-kind="edge">
+      <path d="M 3387.5 1341 L 3382 1472 Q 3388 1478 3388 1484 L 3388 1522 Q 3388 1528 3382 1528 L 2944 1528 Q 2938 1528 2938 1534 L 2938 2210 Q 2938 2216 2944 2216 L 2956 2216 Q 2962 2216 2956 2222 L 2967.6666666666665 2246.64 Q 2961.6666666666665 2252.64 2961.6666666666665 2258.64 L 2961.6666666666665 2349.64" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e55" data-kind="edge">
+      <path d="M 3387.5 1341 L 3382 1472 Q 3388 1478 3388 1484 L 3388 1522 Q 3388 1528 3382 1528 L 3286 1528 Q 3280 1528 3280 1534 L 3280 2100 Q 3280 2106 3274 2106 L 3188 2106 Q 3182 2106 3182 2112 L 3182 2586 Q 3182 2592 3176 2592 L 2323 2592 Q 2317 2592 2317 2598 L 2317 2937" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e56" data-kind="edge">
+      <path d="M 3241 1341 L 3241 1562 Q 3241 1568 3235 1568 L 2885 1568 Q 2879 1568 2879 1574 L 2879 2210 Q 2879 2216 2873 2216 L 2632 2216 Q 2626 2216 2620 2222 L 2631.666666666667 2246.64 Q 2625.666666666667 2252.64 2625.666666666667 2258.64 L 2625.666666666667 2349.64" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e57" data-kind="edge">
+      <path d="M 2511 1341 L 2511 1482 Q 2511 1488 2505 1488 L 2384 1488 Q 2378 1488 2378 1494 L 2378 2230 Q 2378 2236 2372 2236 L 2382 2236 Q 2376 2236 2382 2242 L 2370.5 2246.64 Q 2376.5 2252.64 2376.5 2258.64 L 2376.5 2303.64 Q 2376.5 2309.64 2370.5 2309.64 L 2378.4285714285716 2309.64 Q 2372.4285714285716 2309.64 2372.4285714285716 2315.64 L 2372.4285714285716 2349.64" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e58" data-kind="edge">
+      <path d="M 2657 1341 L 2657 1532 Q 2657 1538 2663 1538 L 2895 1538 Q 2901 1538 2907 1544 L 2895.1666666666665 2246.64 Q 2901.1666666666665 2252.64 2901.1666666666665 2258.64 L 2901.1666666666665 2349.64" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-start="url(#agentdiagram-arrow-bwd)" />
+      
+    </g>
+
+    <g data-id="e59" data-kind="edge">
+      <path d="M 2365 1341 L 2365 1502 Q 2365 1508 2371 1508 L 2921 1508 Q 2927 1508 2927 1514 L 2927 2230 Q 2927 2236 2933 2236 L 2936 2236 Q 2942 2236 2936 2242 L 2947.5 2246.64 Q 2941.5 2252.64 2941.5 2258.64 L 2941.5 2349.64" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-start="url(#agentdiagram-arrow-bwd)" />
+      
+    </g>
+
+    <g data-id="e60" data-kind="edge">
+      <path d="M 2949 1341 L 2949 2200 Q 2949 2206 2955 2206 L 2976 2206 Q 2982 2206 2976 2212 L 2987.833333333333 2246.64 Q 2981.833333333333 2252.64 2981.833333333333 2258.64 L 2981.833333333333 2349.64" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-start="url(#agentdiagram-arrow-bwd)" />
+      
+    </g>
+
+    <g data-id="e61" data-kind="edge">
+      <path d="M 2803 1341 L 2803 1542 Q 2803 1548 2809 1548 L 2910 1548 Q 2916 1548 2916 1554 L 2916 2230 Q 2916 2236 2922 2236 L 2915 2236 Q 2921 2236 2927 2242 L 2915.3333333333335 2246.64 Q 2921.3333333333335 2252.64 2921.3333333333335 2258.64 L 2921.3333333333335 2349.64" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-start="url(#agentdiagram-arrow-bwd)" />
+      
+    </g>
+
+    <g data-id="e62" data-kind="edge">
+      <path d="M 3387.5 1341 L 3382 1472 Q 3388 1478 3388 1484 L 3388 1522 Q 3388 1528 3382 1528 L 2257 1528 Q 2251 1528 2251 1534 L 2251 3045" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-start="url(#agentdiagram-arrow-bwd)" />
+      
+    </g>
+
+    <g data-id="e63" data-kind="edge">
+      <path d="M 2949 1341 L 2949 2200 Q 2949 2206 2955 2206 L 3076 2206 Q 3082 2206 3082 2212 L 3082 2349.64" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e64" data-kind="edge">
+      <path d="M 3104 1802.75 L 3104 2349.64" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e65" data-kind="edge">
+      <path d="M 3208.6666666666665 1910.75 L 3208.6666666666665 1914.75 Q 3208.6666666666665 1920.75 3214.6666666666665 1920.75 L 3233 1920.75 Q 3239 1920.75 3239 1926.75 L 3239 2090 Q 3239 2096 3233 2096 L 3132 2096 Q 3126 2096 3126 2102 L 3126 2349.64" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e66" data-kind="edge">
+      <path d="M 2127 1739 L 2127 2220 Q 2127 2226 2133 2226 L 3054 2226 Q 3060 2226 3060 2232 L 3060 2349.64" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-start="url(#agentdiagram-arrow-bwd)" />
+      
+    </g>
+
+    <g data-id="e67" data-kind="edge">
+      <path d="M 1059.3333333333333 86 L 1059.3333333333333 90 Q 1059.3333333333333 96 1053.3333333333333 96 L 829.1666666666667 96 Q 823.1666666666667 96 823.1666666666667 102 L 823.1666666666667 150" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e68" data-kind="edge">
+      <path d="M 675.1666666666667 86 L 675.1666666666667 90 Q 675.1666666666667 96 681.1666666666667 96 L 751.1666666666667 96 Q 757.1666666666667 96 757.1666666666667 102 L 757.1666666666667 150" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" marker-start="url(#agentdiagram-arrow-bwd)" />
+      
+    </g>
+
+    <g data-id="e69" data-kind="edge">
+      <path d="M 1667.1666666666667 1739 L 1667.1666666666667 1743 Q 1667.1666666666667 1749 1661.1666666666667 1749 L 1061 1749 Q 1055 1749 1055 1755 L 1055 2090 Q 1055 2096 1049 2096 L 1007 2096 Q 1001 2096 1001 2090 L 1001 1206 Q 1001 1200 1007 1200 L 2961 1200 Q 2967 1200 2973 1206 L 2961.333333333333 1244 Q 2967.333333333333 1250 2967.333333333333 1256 L 2967.333333333333 1297" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e70" data-kind="edge">
+      <path d="M 1667.1666666666667 1739 L 1667.1666666666667 1743 Q 1667.1666666666667 1749 1661.1666666666667 1749 L 1061 1749 Q 1055 1749 1055 1755 L 1055 2090 Q 1055 2096 1061 2096 L 2192 2096 Q 2198 2096 2198 2090 L 2198 1624 Q 2198 1618 2192 1618 L 1389 1618 Q 1383 1618 1383 1612 L 1383 1226 Q 1383 1220 1389 1220 L 1763 1220 Q 1769 1220 1763 1226 L 1774.5 1244 Q 1768.5 1250 1768.5 1256 L 1768.5 1297" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e71" data-kind="edge">
+      <path d="M 1667.1666666666667 1739 L 1667.1666666666667 1743 Q 1667.1666666666667 1749 1661.1666666666667 1749 L 1061 1749 Q 1055 1749 1055 1755 L 1055 2090 Q 1055 2096 1049 2096 L 1027 2096 Q 1021 2096 1021 2090 L 1021 1624 Q 1021 1618 1027 1618 L 1377 1618 Q 1383 1618 1383 1612 L 1383 1226 Q 1383 1220 1389 1220 L 1498 1220 Q 1504 1220 1504 1226 L 1504 1297" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e72" data-kind="edge">
+      <path d="M 747.3888888888889 194 L 747.3888888888889 208 Q 747.3888888888889 214 741.3888888888889 214 L 138.33333333333334 214 Q 132.33333333333334 214 132.33333333333334 220 L 132.33333333333334 331" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e73" data-kind="edge">
+      <path d="M 759.6111111111112 194 L 759.6111111111112 228 Q 759.6111111111112 234 753.6111111111112 234 L 284.33333333333337 234 Q 278.33333333333337 234 278.33333333333337 240 L 278.33333333333337 331" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e74" data-kind="edge">
+      <path d="M 796.2777777777778 194 L 796.2777777777778 268 Q 796.2777777777778 274 790.2777777777778 274 L 704 274 Q 698 274 698 280 L 698 331" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e75" data-kind="edge">
+      <path d="M 832.9444444444446 194 L 832.9444444444446 198 Q 832.9444444444446 204 838.9444444444446 204 L 1001 204 Q 1007 204 1007 210 L 1007 331" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e76" data-kind="edge">
+      <path d="M 784.0555555555557 194 L 784.0555555555557 258 Q 784.0555555555557 264 778.0555555555557 264 L 576.3333333333334 264 Q 570.3333333333334 264 570.3333333333334 270 L 570.3333333333334 331" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e77" data-kind="edge">
+      <path d="M 771.8333333333334 194 L 771.8333333333334 238 Q 771.8333333333334 244 765.8333333333334 244 L 393.6666666666667 244 Q 387.6666666666667 244 387.6666666666667 250 L 387.6666666666667 331" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e78" data-kind="edge">
+      <path d="M 820.7222222222223 194 L 820.7222222222223 208 Q 820.7222222222223 214 826.7222222222223 214 L 867.6666666666666 214 Q 873.6666666666666 214 873.6666666666666 220 L 873.6666666666666 331" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e79" data-kind="edge">
+      <path d="M 1145 2028 L 1145 2100 Q 1145 2106 1151 2106 L 2202 2106 Q 2208 2106 2208 2100 L 2208 1614 Q 2208 1608 2202 1608 L 1399 1608 Q 1393 1608 1393 1602 L 1393 1236 Q 1393 1230 1399 1230 L 1471 1230 Q 1477 1230 1471 1236 L 1482.5 1244 Q 1476.5 1250 1476.5 1256 L 1476.5 1297" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e80" data-kind="edge">
+      <path d="M 1145 2028 L 1145 2100 Q 1145 2106 1139 2106 L 1017 2106 Q 1011 2106 1011 2100 L 1011 1216 Q 1011 1210 1017 1210 L 1790 1210 Q 1796 1210 1796 1216 L 1796 1297" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e81" data-kind="edge">
+      <path d="M 1145 2028 L 1145 2100 Q 1145 2106 1139 2106 L 997 2106 Q 991 2106 991 2100 L 991 1196 Q 991 1190 997 1190 L 1918 1190 Q 1924 1190 1918 1196 L 1929.6666666666667 1244 Q 1923.6666666666667 1250 1923.6666666666667 1256 L 1923.6666666666667 1297" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e82" data-kind="edge">
+      <path d="M 1291 2028 L 1291 2110 Q 1291 2116 1285 2116 L 161 2116 Q 155 2116 155 2122 L 155 3142 Q 155 3148 161 3148 L 2850 3148 Q 2856 3148 2856 3154 L 2856 3229" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e83" data-kind="edge">
+      <path d="M 1729 2028 L 1729 2140 Q 1729 2146 1723 2146 L 932 2146 Q 926 2146 926 2152 L 926 3132 Q 926 3138 932 3138 L 2996 3138 Q 3002 3138 3002 3144 L 3002 3229" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e84" data-kind="edge">
+      <path d="M 1437 2028 L 1437 2120 Q 1437 2126 1431 2126 L 860 2126 Q 854 2126 854 2132 L 854 2716 Q 854 2722 848 2722 L 816 2722 Q 810 2722 804 2728 L 815.5 2776 Q 809.5 2782 809.5 2788 L 809.5 2829" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e85" data-kind="edge">
+      <path d="M 1437 2028 L 1437 2120 Q 1437 2126 1431 2126 L 431 2126 Q 425 2126 425 2132 L 425 2706 Q 425 2712 419 2712 L 401 2712 Q 395 2712 395 2718 L 395 2829" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e86" data-kind="edge">
+      <path d="M 2038 2028 L 2038 2200 Q 2038 2206 2032 2206 L 1607 2206 Q 1601 2206 1601 2212 L 1601 2746 Q 1601 2752 1607 2752 L 1882 2752 Q 1888 2752 1888 2758 L 1888 2829" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e87" data-kind="edge">
+      <path d="M 1883.5 2028 L 1878 2080 Q 1884 2086 1884 2092 L 1884 2150 Q 1884 2156 1878 2156 L 1708 2156 Q 1702 2156 1702 2162 L 1702 2293" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e88" data-kind="edge">
+      <path d="M 1883.5 2028 L 1878 2080 Q 1884 2086 1884 2092 L 1884 2150 Q 1884 2156 1878 2156 L 1618 2156 Q 1612 2156 1612 2162 L 1612 2736 Q 1612 2742 1618 2742 L 2001 2742 Q 2007 2742 2001 2748 L 2012.5 2776 Q 2006.5 2782 2006.5 2788 L 2006.5 2829" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e89" data-kind="edge">
+      <path d="M 1583 2028 L 1583 2130 Q 1583 2136 1577 2136 L 849 2136 Q 843 2136 843 2142 L 843 2586 Q 843 2592 837 2592 L 697 2592 Q 691 2592 691 2598 L 691 2829" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e90" data-kind="edge">
+      <path d="M 506.1666666666667 86 L 506.1666666666667 150" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e91" data-kind="edge">
+      <path d="M 478.6666666666667 194 L 478.6666666666667 198 Q 478.6666666666667 204 472.6666666666667 204 L 101.66666666666667 204 Q 95.66666666666667 204 95.66666666666667 210 L 95.66666666666667 331" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e92" data-kind="edge">
+      <path d="M 533.6666666666667 194 L 533.6666666666667 331" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e93" data-kind="edge">
+      <path d="M 506.1666666666667 194 L 506.1666666666667 218 Q 506.1666666666667 224 500.1666666666667 224 L 247.66666666666669 224 Q 241.66666666666669 224 241.66666666666669 230 L 241.66666666666669 331" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e94" data-kind="edge">
+      <path d="M 116.5 86 L 116.5 90 Q 116.5 96 110.5 96 L 103.33333333333334 96 Q 97.33333333333334 96 97.33333333333334 102 L 97.33333333333334 150" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e95" data-kind="edge">
+      <path d="M 79 194 L 79 258" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e96" data-kind="edge">
+      <path d="M 171.5 86 L 171.5 90 Q 171.5 96 177.5 96 L 206 96 Q 212 96 212 102 L 212 150" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e97" data-kind="edge">
+      <path d="M 3208.6666666666665 1910.75 L 3208.6666666666665 1914.75 Q 3208.6666666666665 1920.75 3214.6666666666665 1920.75 L 3233 1920.75 Q 3239 1920.75 3239 1926.75 L 3239 2090 Q 3239 2096 3245 2096 L 4168 2096 Q 4174 2096 4174 2102 L 4174 3132 Q 4174 3138 4168 3138 L 3897 3138 Q 3891 3138 3891 3144 L 3891 3229" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e98" data-kind="edge">
+      <path d="M 212 194 L 212 258" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e99" data-kind="edge">
+      <path d="M 3891 3273 L 3891 3306 Q 3891 3312 3897 3312 L 4179 3312 Q 4185 3312 4185 3306 L 4185 1594 Q 4185 1588 4179 1588 L 3128 1588 Q 3122 1588 3128 1594 L 3116.3333333333335 1705.75 Q 3122.3333333333335 1711.75 3122.3333333333335 1717.75 L 3122.3333333333335 1758.75" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" marker-start="url(#agentdiagram-arrow-bwd)" />
+      <text x="3506.666666666667" y="2511.875"
+            fill="#c1c7d3" font-size="9.5" font-family="Inter, sans-serif"
+            text-anchor="middle">webhooks</text>
+    </g>
+
+    <g data-id="e100" data-kind="edge">
+      <path d="M 3172 2018.75 L 3172 2200 Q 3172 2206 3178 2206 L 3187 2206 Q 3193 2206 3193 2212 L 3193 2596 Q 3193 2602 3187 2602 L 2351 2602 Q 2345 2602 2339 2608 L 2350.5 2776 Q 2344.5 2782 2344.5 2788 L 2344.5 2937" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e101" data-kind="edge">
+      <path d="M 1820.5 2337 L 1815 2576 Q 1821 2582 1821 2588 L 1821 2706 Q 1821 2712 1827 2712 L 2056 2712 Q 2062 2712 2056 2718 L 2067.5 2776 Q 2061.5 2782 2061.5 2788 L 2061.5 2829" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e102" data-kind="edge">
+      <path d="M 225 86 L 225 110 Q 225 116 231 116 L 337.5 116 Q 343.5 116 343.5 122 L 343.5 150" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e103" data-kind="edge">
+      <path d="M 252.5 86 L 252.5 100 Q 252.5 106 258.5 106 L 492.6666666666667 106 Q 498.6666666666667 106 498.6666666666667 112 L 498.6666666666667 150" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e104" data-kind="edge">
+      <path d="M 1820.5 2337 L 1815 2576 Q 1821 2582 1821 2588 L 1821 2706 Q 1821 2712 1815 2712 L 579 2712 Q 573 2712 567 2718 L 578.5 2776 Q 572.5 2782 572.5 2788 L 572.5 2829" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-start="url(#agentdiagram-arrow-bwd)" />
+      
+    </g>
+
+    <g data-id="e105" data-kind="edge">
+      <path d="M 498.6666666666667 86 L 498.6666666666667 90 Q 498.6666666666667 96 492.6666666666667 96 L 404.5 96 Q 398.5 96 398.5 102 L 398.5 150" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e106" data-kind="edge">
+      <path d="M 535.3333333333334 86 L 535.3333333333334 150" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e107" data-kind="edge">
+      <path d="M 371 86 L 371 150" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e108" data-kind="edge">
+      <path d="M 371 194 L 371 258" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e109" data-kind="edge">
+      <path d="M 1702 2337 L 1702 2341 Q 1702 2347 1708 2347 L 1825.5 2347 Q 1831.5 2347 1837.5 2353 L 1826 2576 Q 1832 2582 1832 2588 L 1832 2726 Q 1832 2732 1838 2732 L 2028 2732 Q 2034 2732 2034 2738 L 2034 2829" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e110" data-kind="edge">
+      <path d="M 1994 2553 L 1994 2676 Q 1994 2682 2000 2682 L 3315 2682 Q 3321 2682 3315 2688 L 3326.75 2791.4285714285716 Q 3320.75 2797.4285714285716 3320.75 2803.4285714285716 L 3320.75 2844.4285714285716" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 4" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e111" data-kind="edge">
+      <path d="M 1631.6666666666667 1341 L 1631.6666666666667 1345 Q 1631.6666666666667 1351 1625.6666666666667 1351 L 1499 1351 Q 1493 1351 1493 1357 L 1493 1622 Q 1493 1628 1499 1628 L 1826 1628 Q 1832 1628 1838 1634 L 1826.1666666666667 1642 Q 1832.1666666666667 1648 1832.1666666666667 1654 L 1832.1666666666667 1803" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      <text x="1731.9166666666667" y="1568"
+            fill="#c1c7d3" font-size="9.5" font-family="Inter, sans-serif"
+            text-anchor="middle">file.uploaded</text>
+    </g>
+
+    <g data-id="e112" data-kind="edge">
+      <path d="M 808.5000000000001 194 L 808.5000000000001 218 Q 808.5000000000001 224 814.5000000000001 224 L 825.3333333333334 224 Q 831.3333333333334 224 831.3333333333334 230 L 831.3333333333334 331" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e113" data-kind="edge">
+      <path d="M 1883.5 2028 L 1878 2080 Q 1884 2086 1884 2092 L 1884 2150 Q 1884 2156 1878 2156 L 524 2156 Q 518 2156 512 2162 L 523.5 2776 Q 517.5 2782 517.5 2788 L 517.5 2829" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e114" data-kind="edge">
+      <path d="M 2163.6666666666665 2873 L 2158 3112 Q 2164 3118 2164 3124 L 2164 3122 Q 2164 3128 2158 3128 L 1431 3128 Q 1425 3128 1425 3122 L 1425 2172 Q 1425 2166 1419 2166 L 987 2166 Q 981 2166 981 2160 L 981 1644 Q 981 1638 987 1638 L 1804 1638 Q 1810 1638 1816 1644 L 1804.1666666666667 1642 Q 1810.1666666666667 1648 1810.1666666666667 1654 L 1810.1666666666667 1803" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-start="url(#agentdiagram-arrow-bwd)" />
+      
+    </g>
+
+    <g data-id="e115" data-kind="edge">
+      <path d="M 393.33333333333337 86 L 393.33333333333337 90 Q 393.33333333333337 96 399.33333333333337 96 L 474.5 96 Q 480.5 96 480.5 102 L 480.5 150" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e116" data-kind="edge">
+      <path d="M 508 194 L 508 198 Q 508 204 502 204 L 490.33333333333337 204 Q 484.33333333333337 204 484.33333333333337 210 L 484.33333333333337 258" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e117" data-kind="edge">
+      <path d="M 2272.1666666666665 3089 L 2278 3112 Q 2272 3118 2272 3124 L 2272 3122 Q 2272 3128 2278 3128 L 3148 3128 Q 3154 3128 3154 3134 L 3154 3229" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e118" data-kind="edge">
+      <path d="M 2365 1341 L 2365 1502 Q 2365 1508 2359 1508 L 2235 1508 Q 2229 1508 2229 1514 L 2229 2586 Q 2229 2592 2223 2592 L 2170 2592 Q 2164 2592 2158 2598 L 2169.666666666667 2776 Q 2163.666666666667 2782 2163.666666666667 2788 L 2163.666666666667 2829" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e119" data-kind="edge">
+      <path d="M 2949 1341 L 2949 1512 Q 2949 1518 2943 1518 L 2246 1518 Q 2240 1518 2240 1524 L 2240 2726 Q 2240 2732 2234 2732 L 2208 2732 Q 2202 2732 2208 2738 L 2196.3333333333335 2776 Q 2202.3333333333335 2782 2202.3333333333335 2788 L 2202.3333333333335 2829" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e120" data-kind="edge">
+      <path d="M 1536 1473 L 1536 1492 Q 1536 1498 1542 1498 L 3318 1498 Q 3324 1498 3324 1504 L 3324 2666 Q 3324 2672 3318 2672 L 3286 2672 Q 3280 2672 3274 2678 L 3285.5 2791.4285714285716 Q 3279.5 2797.4285714285716 3279.5 2803.4285714285716 L 3279.5 2844.4285714285716" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 4" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e121" data-kind="edge">
+      <path d="M 1536 1473 L 1536 1492 Q 1536 1498 1542 1498 L 3285 1498 Q 3291 1498 3291 1504 L 3291 2636 Q 3291 2642 3285 2642 L 3167 2642 Q 3161 2642 3161 2648 L 3161 2844.4285714285716" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 4" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e122" data-kind="edge">
+      <path d="M 1536 1473 L 1536 1492 Q 1536 1498 1542 1498 L 3285 1498 Q 3291 1498 3291 1504 L 3291 2200 Q 3291 2206 3285 2206 L 3275 2206 Q 3269 2206 3269 2212 L 3269 2616 Q 3269 2622 3263 2622 L 3039 2622 Q 3033 2622 3039 2628 L 3027.3333333333335 2791.4285714285716 Q 3033.3333333333335 2797.4285714285716 3033.3333333333335 2803.4285714285716 L 3033.3333333333335 2844.4285714285716" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 4" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e123" data-kind="edge">
+      <path d="M 2048 2081 L 2048 2190 Q 2048 2196 2054 2196 L 3307 2196 Q 3313 2196 3313 2202 L 3313 2656 Q 3313 2662 3307 2662 L 3272 2662 Q 3266 2662 3260 2668 L 3271.75 2791.4285714285716 Q 3265.75 2797.4285714285716 3265.75 2803.4285714285716 L 3265.75 2844.4285714285716" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 4" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e124" data-kind="edge">
+      <path d="M 2048 2081 L 2048 2190 Q 2048 2196 2054 2196 L 3274 2196 Q 3280 2196 3280 2202 L 3280 2626 Q 3280 2632 3274 2632 L 3140 2632 Q 3134 2632 3128 2638 L 3139.5 2791.4285714285716 Q 3133.5 2797.4285714285716 3133.5 2803.4285714285716 L 3133.5 2844.4285714285716" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 4" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e125" data-kind="edge">
+      <path d="M 2048 2081 L 2048 2190 Q 2048 2196 2054 2196 L 3198 2196 Q 3204 2196 3204 2202 L 3204 2606 Q 3204 2612 3198 2612 L 3003 2612 Q 2997 2612 2991 2618 L 3002.6666666666665 2791.4285714285716 Q 2996.6666666666665 2797.4285714285716 2996.6666666666665 2803.4285714285716 L 2996.6666666666665 2844.4285714285716" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 4" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e126" data-kind="edge">
+      <path d="M 2286 2417.64 L 2286 2716 Q 2286 2722 2292 2722 L 3287 2722 Q 3293 2722 3299 2728 L 3287.25 2791.4285714285716 Q 3293.25 2797.4285714285716 3293.25 2803.4285714285716 L 3293.25 2844.4285714285716" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 4" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e127" data-kind="edge">
+      <path d="M 1842 2577 L 1842 2686 Q 1842 2692 1848 2692 L 3301 2692 Q 3307 2692 3307 2698 L 3307 2844.4285714285716" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 4" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e128" data-kind="edge">
+      <path d="M 2813 1074.6666666666665 L 2813 1164 Q 2813 1170 2819 1170 L 3482 1170 Q 3488 1170 3488 1176 L 3488 2100 Q 3488 2106 3482 2106 L 3354 2106 Q 3348 2106 3354 2112 L 3342.25 2791.4285714285716 Q 3348.25 2797.4285714285716 3348.25 2803.4285714285716 L 3348.25 2844.4285714285716" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 4" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e129" data-kind="edge">
+      <path d="M 2813 1074.6666666666665 L 2813 1164 Q 2813 1170 2819 1170 L 3482 1170 Q 3488 1170 3488 1176 L 3488 1592 Q 3488 1598 3482 1598 L 3319 1598 Q 3313 1598 3313 1604 L 3313 2100 Q 3313 2106 3307 2106 L 3308 2106 Q 3302 2106 3302 2112 L 3302 2646 Q 3302 2652 3296 2652 L 3195 2652 Q 3189 2652 3183 2658 L 3194.5 2791.4285714285716 Q 3188.5 2797.4285714285716 3188.5 2803.4285714285716 L 3188.5 2844.4285714285716" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 4" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e130" data-kind="edge">
+      <path d="M 3068 2042.75 L 3068 2180 Q 3068 2186 3074 2186 L 3329 2186 Q 3335 2186 3329 2192 L 3340.5 2791.4285714285716 Q 3334.5 2797.4285714285716 3334.5 2803.4285714285716 L 3334.5 2844.4285714285716" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 4" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e131" data-kind="edge">
+      <path d="M 544.5 86 L 544.5 90 Q 544.5 96 550.5 96 L 657 96 Q 663 96 663 102 L 663 150" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e132" data-kind="edge">
+      <path d="M 225 86 L 225 90 Q 225 96 231 96 L 337.5 96 Q 343.5 96 343.5 102 L 343.5 150" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e133" data-kind="edge">
+      <path d="M 371 86 L 371 150" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e134" data-kind="edge">
+      <path d="M 489.5 86 L 489.5 90 Q 489.5 96 483.5 96 L 404.5 96 Q 398.5 96 398.5 102 L 398.5 150" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e135" data-kind="edge">
+      <path d="M 517 86 L 517 150" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e136" data-kind="edge">
+      <path d="M 3453 2996.4285714285716 L 3453 3229" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e137" data-kind="edge">
+      <path d="M 3453 2996.4285714285716 L 3453 3122 Q 3453 3128 3447 3128 L 3313 3128 Q 3307 3128 3301 3134 L 3312.5 3176 Q 3306.5 3182 3306.5 3188 L 3306.5 3229" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e138" data-kind="edge">
+      <path d="M 3453 3273 L 3453 3306 Q 3453 3312 3447 3312 L 151 3312 Q 145 3312 145 3306 L 145 2708 Q 145 2702 151 2702 L 2863 2702 Q 2869 2702 2869 2708 L 2869 2844.4285714285716" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" marker-start="url(#agentdiagram-arrow-bwd)" />
+      
+    </g>
+
+    <g data-id="e139" data-kind="edge">
+      <path d="M 1536 1473 L 1536 1492 Q 1536 1498 1530 1498 L 965 1498 Q 959 1498 959 1504 L 959 2180 Q 959 2186 965 2186 L 964 2186 Q 970 2186 970 2192 L 970 2736 Q 970 2742 976 2742 L 1295 2742 Q 1301 2742 1307 2748 L 1295.25 2776 Q 1301.25 2782 1301.25 2788 L 1301.25 2829" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 4" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e140" data-kind="edge">
+      <path d="M 2048 2081 L 2048 2190 Q 2048 2196 2042 2196 L 965 2196 Q 959 2196 959 2202 L 959 2746 Q 959 2752 965 2752 L 1282 2752 Q 1288 2752 1282 2758 L 1293.5 2776 Q 1287.5 2782 1287.5 2788 L 1287.5 2829" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 4" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e141" data-kind="edge">
+      <path d="M 2286 2417.64 L 2286 2716 Q 2286 2722 2280 2722 L 1321 2722 Q 1315 2722 1315 2728 L 1315 2829" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 4" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e142" data-kind="edge">
+      <path d="M 1842 2577 L 1842 2686 Q 1842 2692 1836 2692 L 1335 2692 Q 1329 2692 1323 2698 L 1334.75 2776 Q 1328.75 2782 1328.75 2788 L 1328.75 2829" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 4" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e143" data-kind="edge">
+      <path d="M 3068 2042.75 L 3068 2180 Q 3068 2186 3062 2186 L 987 2186 Q 981 2186 981 2192 L 981 2726 Q 981 2732 987 2732 L 1337 2732 Q 1343 2732 1337 2738 L 1348.5 2776 Q 1342.5 2782 1342.5 2788 L 1342.5 2829" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 4" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e144" data-kind="edge">
+      <path d="M 2813 1074.6666666666665 L 2813 1164 Q 2813 1170 2807 1170 L 976 1170 Q 970 1170 970 1176 L 970 2170 Q 970 2176 976 2176 L 986 2176 Q 992 2176 992 2182 L 992 2586 Q 992 2592 998 2592 L 1350 2592 Q 1356 2592 1362 2598 L 1350.25 2776 Q 1356.25 2782 1356.25 2788 L 1356.25 2829" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 4" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e145" data-kind="edge">
+      <path d="M 396.33333333333337 86 L 396.33333333333337 150" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e146" data-kind="edge">
+      <path d="M 396.33333333333337 194 L 396.33333333333337 258" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e147" data-kind="edge">
+      <path d="M 359.6666666666667 86 L 359.6666666666667 90 Q 359.6666666666667 96 353.6666666666667 96 L 256.33333333333337 96 Q 250.33333333333334 96 250.33333333333334 102 L 250.33333333333334 150" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e148" data-kind="edge">
+      <path d="M 1536 1473 L 1536 1492 Q 1536 1498 1530 1498 L 943 1498 Q 937 1498 937 1504 L 937 2766 Q 937 2772 943 2772 L 1160 2772 Q 1166 2772 1160 2778 L 1171.5 2776 Q 1165.5 2782 1165.5 2788 L 1165.5 2829" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 4" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e149" data-kind="edge">
+      <path d="M 1536 1473 L 1536 1492 Q 1536 1498 1530 1498 L 943 1498 Q 937 1498 937 1504 L 937 2766 Q 937 2772 943 2772 L 1010 2772 Q 1016 2772 1016 2778 L 1016 2829" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 4" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e150" data-kind="edge">
+      <path d="M 124.83333333333333 86 L 124.83333333333333 100 Q 124.83333333333333 106 130.83333333333331 106 L 238.83333333333331 106 Q 244.83333333333331 106 244.83333333333331 112 L 244.83333333333331 150" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e151" data-kind="edge">
+      <path d="M 97.33333333333333 86 L 97.33333333333333 150" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e152" data-kind="edge">
+      <path d="M 97.33333333333333 194 L 97.33333333333333 258" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e153" data-kind="edge">
+      <path d="M 1315.6666666666667 1013 L 1315.6666666666667 1017 Q 1315.6666666666667 1023 1321.6666666666667 1023 L 1338 1023 Q 1344 1023 1344 1029 L 1344 1154 Q 1344 1160 1338 1160 L 954 1160 Q 948 1160 948 1166 L 948 2756 Q 948 2762 954 2762 L 1268 2762 Q 1274 2762 1268 2768 L 1279.75 2776 Q 1273.75 2782 1273.75 2788 L 1273.75 2829" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e154" data-kind="edge">
+      <path d="M 79 302 L 79 366" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e155" data-kind="edge">
+      <path d="M 1414 1121 L 1414 1582 Q 1414 1588 1420 1588 L 2256 1588 Q 2262 1588 2262 1594 L 2262 2230 Q 2262 2236 2268 2236 L 2280 2236 Q 2286 2236 2292 2242 L 2280.5 2246.64 Q 2286.5 2252.64 2286.5 2258.64 L 2286.5 2333.64 Q 2286.5 2339.64 2292.5 2339.64 L 2288.642857142857 2339.64 Q 2294.642857142857 2339.64 2294.642857142857 2345.64 L 2294.642857142857 2349.64" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e156" data-kind="edge">
+      <path d="M 1352.3333333333333 797 L 1352.3333333333333 801 Q 1352.3333333333333 807 1358.3333333333333 807 L 1503.8333333333333 807 Q 1509.8333333333333 807 1515.8333333333333 813 L 1504 1144 Q 1510 1150 1510 1156 L 1510 1174 Q 1510 1180 1516 1180 L 3217 1180 Q 3223 1180 3217 1186 L 3228.666666666667 1244 Q 3222.666666666667 1250 3222.666666666667 1256 L 3222.666666666667 1297" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 4" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e157" data-kind="edge">
+      <path d="M 1631.6666666666667 1341 L 1631.6666666666667 1345 Q 1631.6666666666667 1351 1625.6666666666667 1351 L 1499 1351 Q 1493 1351 1493 1357 L 1493 1622 Q 1493 1628 1487 1628 L 871 1628 Q 865 1628 859 1634 L 870.5 2776 Q 864.5 2782 864.5 2788 L 864.5 2829" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e158" data-kind="edge">
+      <path d="M 1631.6666666666667 1341 L 1631.6666666666667 1345 Q 1631.6666666666667 1351 1625.6666666666667 1351 L 1499 1351 Q 1493 1351 1493 1357 L 1493 1622 Q 1493 1628 1499 1628 L 1749 1628 Q 1755 1628 1761 1634 L 1749.1666666666667 1642 Q 1755.1666666666667 1648 1755.1666666666667 1654 L 1755.1666666666667 1901 Q 1755.1666666666667 1907 1749.1666666666667 1907 L 1461.3333333333335 1907 Q 1455.3333333333335 1907 1455.3333333333335 1913 L 1455.3333333333335 1984" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e159" data-kind="edge">
+      <path d="M 1437 2028 L 1437 2120 Q 1437 2126 1431 2126 L 431 2126 Q 425 2126 419 2132 L 430.5 2776 Q 424.5 2782 424.5 2788 L 424.5 2829" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g>
+
+    <g data-id="e160" data-kind="edge">
+      <path d="M 243.33333333333334 86 L 243.33333333333337 150" fill="none" stroke="rgba(180, 188, 204, 0.45)" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" marker-end="url(#agentdiagram-arrow-fwd)" />
+      
+    </g></g>
+</svg>

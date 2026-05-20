@@ -1,0 +1,26 @@
+// Tiny example to showcase the DSL.
+
+Frontend [color: sky, icon: monitor] {
+  UI [icon: layout, color: sky]
+  Router [icon: git-branch, color: sky]
+}
+
+API [color: indigo, icon: server] {
+  Auth [icon: shield, color: indigo]
+  Users [icon: list, color: indigo]
+  Files [icon: archive, color: indigo]
+}
+
+Database [color: green, icon: hard-drive] {
+  Postgres [icon: table, color: green]
+  Redis [icon: cpu, color: green]
+}
+
+UI > Router
+Router > Auth
+Router > Users
+Router > Files
+Auth > Postgres
+Users > Postgres
+Files > Redis
+Files > Postgres

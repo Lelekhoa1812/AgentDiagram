@@ -1,0 +1,74 @@
+# Local setup
+
+AgentDiagram is designed to live **inside the repo you want to analyze**.
+
+```
+your-project/
+├── src/
+├── package.json
+└── AgentDiagram/        ← clone this repo here
+    ├── app/
+    ├── lib/
+    └── ...
+```
+
+When you launch the agentic explorer, the default repo path is `..`
+(the parent of `AgentDiagram/`), i.e. your project.
+
+## Install
+
+```bash
+git clone <repo-url> path/to/your-project/AgentDiagram
+cd path/to/your-project/AgentDiagram
+cp .env.local.example .env.local
+# fill in keys for whichever providers you intend to use
+npm install
+npm run dev
+```
+
+The dev server runs on http://localhost:3000.
+
+## .env.local
+
+| Variable                          | Purpose                                |
+|-----------------------------------|----------------------------------------|
+| `OPENAI_API_KEY`                  | OpenAI provider key                    |
+| `OPENAI_MODEL`                    | Default OpenAI model                   |
+| `CLAUDE_API_KEY`                  | Anthropic provider key                 |
+| `CLAUDE_MODEL`                    | Default Anthropic model                |
+| `GEMINI_API_KEY`                  | Google Gemini provider key             |
+| `GEMINI_MODEL`                    | Default Gemini model                   |
+| `FOUNDRY_API_KEY`                 | Azure AI Foundry provider key          |
+| `FOUNDRY_ENDPOINT`                | Azure AI Foundry endpoint URL          |
+| `FOUNDRY_MODEL`                   | Azure deployment name                  |
+| `AGENTDIAGRAM_DEFAULT_PROVIDER`   | `openai` / `anthropic` / `gemini` / `foundry` |
+| `AGENTDIAGRAM_DEFAULT_REPO_PATH`  | Override the parent-directory default  |
+
+Any single provider key is sufficient — switch between them in the UI.
+
+## Scripts
+
+| Script                  | Purpose                                  |
+|-------------------------|------------------------------------------|
+| `npm run dev`           | Local dev server with hot reload         |
+| `npm run build`         | Production build                         |
+| `npm run start`         | Run the production build                 |
+| `npm run lint`          | ESLint                                   |
+| `npm run typecheck`     | TypeScript without emit                  |
+| `npm test`              | Vitest unit tests                        |
+| `npm run test:e2e`      | Playwright end-to-end tests              |
+| `npm run test:visual`   | Visual regression snapshots              |
+| `npm run format`        | Prettier                                 |
+
+## Security notes
+
+- API keys entered in the UI live **only in server-process memory** for the
+  current analysis. They are never written to disk and never echoed back to
+  the browser.
+- The repo scanner refuses obviously sensitive paths (`/etc`, `/var`,
+  `~/.ssh`, etc.) and honors `.gitignore`.
+- The scanner also explicitly excludes `.env*`, `*.pem`, `*.key`, `*.crt`,
+  and binaries.
+- AI calls send only **selected file chunks** plus per-file summaries, not
+  your entire repo. Per-file summaries are cached locally under
+  `.agentdiagram-cache/` (added to `.gitignore`).

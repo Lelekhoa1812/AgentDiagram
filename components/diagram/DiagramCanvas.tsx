@@ -1,0 +1,346 @@
+'use client';
+
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { useDiagramStore } from '@/lib/state/store';
+import { compile } from '@/lib/dsl/compiler';
+import { runLayout } from '@/lib/layout/strategies';
+import { buildScene, type SceneResult } from '@/lib/render/svgScene';
+import type { LayoutResult } from '@/lib/layout/elk';
+import type { Point } from '@/lib/ir/types';
+import { edgeLaneOffsets, routeEdgePath } from '@/lib/render/edgePath';
+
+export interface DiagramCanvasHandle {
+  getSvg: () => SVGSVGElement | null;
+  fitView: () => void;
+}
+
+interface DragState {
+  kind: 'pan' | 'node' | 'group' | 'edge-segment';
+  id?: string;
+  start: { x: number; y: number };
+  origin: { x: number; y: number; scale: number };
+  startRect?: { x: number; y: number; width: number; height: number };
+  descendantStarts?: Record<string, { x: number; y: number }>;
+  edgeSegmentIndex?: number;
+  edgeSegmentAxis?: 'horizontal' | 'vertical';
+  edgeRouteStart?: Point[];
+}
+
+const PAD = 32;
+
+export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCanvas(_, ref) {
+  const dsl = useDiagramStore((s) => s.dslText);
+  const overrides = useDiagramStore((s) => s.overrides);
+  const setOverride = useDiagramStore((s) => s.setOverride);
+  const selection = useDiagramStore((s) => s.selection);
+  const setSelection = useDiagramStore((s) => s.setSelection);
+  const setDiagram = useDiagramStore((s) => s.setDiagram);
+  const setLayoutResult = useDiagramStore((s) => s.setLayoutResult);
+  const strategy = useDiagramStore((s) => s.layoutStrategy);
+  const theme = useDiagramStore((s) => s.theme);
+
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
+  const drag = useRef<DragState | null>(null);
+
+  const diagram = useMemo(() => compile(dsl, dsl), [dsl]);
+  useEffect(() => setDiagram(diagram), [diagram, setDiagram]);
+
+  const layoutRef = useRef<LayoutResult | null>(null);
+  const [scene, setScene] = useState<SceneResult | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await runLayout(diagram, strategy);
+        if (cancelled) return;
+        layoutRef.current = result;
+        setLayoutResult(result);
+        setScene(buildScene(diagram, result, { selectedId: selection.id, overrides, theme }));
+      } catch (err) {
+        if (!cancelled) {
+          setScene(null);
+          setLayoutResult(null);
+          // eslint-disable-next-line no-console
+          console.warn('Layout failed:', err);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [diagram, strategy, theme]);
+
+  useEffect(() => {
+    if (!layoutRef.current) return;
+    setScene(
+      buildScene(diagram, layoutRef.current, { selectedId: selection.id, overrides, theme }),
+    );
+  }, [overrides, selection, diagram, theme]);
+
+  const fitView = useCallback(() => {
+    if (!scene || !wrapperRef.current) return;
+    const w = wrapperRef.current.clientWidth;
+    const h = wrapperRef.current.clientHeight;
+    if (w === 0 || h === 0) return;
+    const bw = scene.bbox.width + PAD * 2;
+    const bh = scene.bbox.height + PAD * 2;
+    const scale = Math.max(0.08, Math.min(w / bw, h / bh) * 0.92);
+    const cx = scene.bbox.x + scene.bbox.width / 2;
+    const cy = scene.bbox.y + scene.bbox.height / 2;
+    setViewport({ x: w / 2 - cx * scale, y: h / 2 - cy * scale, scale });
+  }, [scene]);
+
+  useEffect(() => {
+    if (scene && wrapperRef.current) fitView();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scene?.bbox.width, scene?.bbox.height]);
+
+  useImperativeHandle(
+    ref,
+    (): DiagramCanvasHandle => ({
+      getSvg: () => svgRef.current,
+      fitView,
+    }),
+    [fitView],
+  );
+
+  const onWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    if (!wrapperRef.current) return;
+    const rect = wrapperRef.current.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const cy = e.clientY - rect.top;
+    const factor = e.deltaY < 0 ? 1.08 : 1 / 1.08;
+    setViewport((v) => {
+      const nextScale = Math.max(0.1, Math.min(5, v.scale * factor));
+      const k = nextScale / v.scale;
+      return { x: cx - (cx - v.x) * k, y: cy - (cy - v.y) * k, scale: nextScale };
+    });
+  };
+
+  function findRectFor(id: string, kind: 'node' | 'group') {
+    const result = layoutRef.current;
+    if (!result) return null;
+    const ov = kind === 'node' ? overrides.nodes[id] : overrides.groups[id];
+    const base = kind === 'node' ? result.nodes.get(id) : result.groups.get(id);
+    if (!base) return null;
+    return {
+      x: ov?.x ?? base.x,
+      y: ov?.y ?? base.y,
+      width: ov?.width ?? base.width,
+      height: ov?.height ?? base.height,
+    };
+  }
+
+  function descendants(groupId: string): { nodes: string[]; groups: string[] } {
+    const out = { nodes: [] as string[], groups: [] as string[] };
+    const g = diagram.groups.find((gg) => gg.id === groupId);
+    if (!g) return out;
+    for (const child of g.children) {
+      if (diagram.groups.some((gg) => gg.id === child)) {
+        out.groups.push(child);
+        const sub = descendants(child);
+        out.nodes.push(...sub.nodes);
+        out.groups.push(...sub.groups);
+      } else {
+        out.nodes.push(child);
+      }
+    }
+    return out;
+  }
+
+  function currentEdgeRoute(edgeId: string): Point[] | null {
+    const result = layoutRef.current;
+    if (!result) return null;
+    const edge = diagram.edges.find((candidate) => candidate.id === edgeId);
+    if (!edge) return null;
+    const edgeOffsets = edgeLaneOffsets(diagram.edges);
+    return routeEdgePath(edge, result, overrides, edgeOffsets.get(edge.id) ?? 0)?.points ?? null;
+  }
+
+  function compactManualBends(points: Point[]): Point[] {
+    const out: Point[] = [];
+    for (const point of points) {
+      const last = out[out.length - 1];
+      if (!last || Math.abs(last.x - point.x) > 0.001 || Math.abs(last.y - point.y) > 0.001) {
+        out.push(point);
+      }
+    }
+    if (out.length <= 2) return [];
+
+    const bends: Point[] = [];
+    for (let i = 1; i < out.length - 1; i++) {
+      const prev = bends[bends.length - 1] ?? out[i - 1]!;
+      const curr = out[i]!;
+      const next = out[i + 1]!;
+      const sameVertical = Math.abs(prev.x - curr.x) < 0.001 && Math.abs(curr.x - next.x) < 0.001;
+      const sameHorizontal = Math.abs(prev.y - curr.y) < 0.001 && Math.abs(curr.y - next.y) < 0.001;
+      if (!sameVertical && !sameHorizontal) bends.push(curr);
+    }
+    return bends;
+  }
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!wrapperRef.current) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const target = e.target as Element;
+    const edgeHandle = target.closest('[data-edge-segment]') as Element | null;
+    if (edgeHandle) {
+      const edgeId = edgeHandle.getAttribute('data-id');
+      const segmentIndex = Number(edgeHandle.getAttribute('data-edge-segment'));
+      const segmentAxis = edgeHandle.getAttribute('data-edge-axis') as
+        | 'horizontal'
+        | 'vertical'
+        | null;
+      const route = edgeId ? currentEdgeRoute(edgeId) : null;
+      if (edgeId && route && segmentAxis && Number.isFinite(segmentIndex)) {
+        setSelection({ id: edgeId, kind: 'edge' });
+        // Motivation vs Logic: selected edge handles drag the existing orthogonal segment rather than re-routing immediately, giving users precise control over the cut while the default renderer remains obstacle-avoiding.
+        drag.current = {
+          kind: 'edge-segment',
+          id: edgeId,
+          start: { x: e.clientX, y: e.clientY },
+          origin: viewport,
+          edgeSegmentIndex: segmentIndex,
+          edgeSegmentAxis: segmentAxis,
+          edgeRouteStart: route,
+        };
+        return;
+      }
+    }
+
+    const hit = target.closest('[data-id]') as Element | null;
+    const id = hit?.getAttribute('data-id') ?? null;
+    const kind = hit?.getAttribute('data-kind') as 'node' | 'group' | 'edge' | null;
+
+    if (id && kind) setSelection({ id, kind });
+    else setSelection({ id: null, kind: null });
+
+    if (id && (kind === 'node' || kind === 'group')) {
+      const rect = findRectFor(id, kind);
+      if (!rect) return;
+      const descendantStarts: Record<string, { x: number; y: number }> = {};
+      if (kind === 'group') {
+        const d = descendants(id);
+        for (const nid of d.nodes) {
+          const r = findRectFor(nid, 'node');
+          if (r) descendantStarts[`n:${nid}`] = { x: r.x, y: r.y };
+        }
+        for (const gid of d.groups) {
+          const r = findRectFor(gid, 'group');
+          if (r) descendantStarts[`g:${gid}`] = { x: r.x, y: r.y };
+        }
+      }
+      drag.current = {
+        kind,
+        id,
+        start: { x: e.clientX, y: e.clientY },
+        origin: viewport,
+        startRect: rect,
+        descendantStarts,
+      };
+    } else {
+      drag.current = { kind: 'pan', start: { x: e.clientX, y: e.clientY }, origin: viewport };
+    }
+  };
+
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    if (!d) return;
+    const dx = e.clientX - d.start.x;
+    const dy = e.clientY - d.start.y;
+    if (d.kind === 'pan') {
+      setViewport({ x: d.origin.x + dx, y: d.origin.y + dy, scale: d.origin.scale });
+      return;
+    }
+    const dxScene = dx / viewport.scale;
+    const dyScene = dy / viewport.scale;
+    if (d.kind === 'edge-segment') {
+      if (!d.id || !d.edgeRouteStart || d.edgeSegmentIndex === undefined || !d.edgeSegmentAxis)
+        return;
+      const next = d.edgeRouteStart.map((point) => ({ ...point }));
+      const index = d.edgeSegmentIndex;
+      const afterIndex = index + 1;
+      if (index <= 0 || afterIndex >= next.length - 1) return;
+      if (d.edgeSegmentAxis === 'vertical') {
+        next[index]!.x += dxScene;
+        next[afterIndex]!.x += dxScene;
+      } else {
+        next[index]!.y += dyScene;
+        next[afterIndex]!.y += dyScene;
+      }
+      setOverride('edges', d.id, { bends: compactManualBends(next) });
+      return;
+    }
+    if (!d.startRect || !d.id) return;
+    if (d.kind === 'node') {
+      setOverride('nodes', d.id, { x: d.startRect.x + dxScene, y: d.startRect.y + dyScene });
+    } else if (d.kind === 'group') {
+      setOverride('groups', d.id, { x: d.startRect.x + dxScene, y: d.startRect.y + dyScene });
+      if (d.descendantStarts) {
+        for (const [key, start] of Object.entries(d.descendantStarts)) {
+          const [scope, ...idParts] = key.split(':');
+          const idStr = idParts.join(':');
+          const move = { x: start.x + dxScene, y: start.y + dyScene };
+          if (scope === 'n') setOverride('nodes', idStr, move);
+          else setOverride('groups', idStr, move);
+        }
+      }
+    }
+  };
+
+  const onPointerUp = () => {
+    drag.current = null;
+  };
+
+  return (
+    <div
+      ref={wrapperRef}
+      className={`diagram-canvas relative h-full w-full overflow-hidden border-x border-ink-700/70 ${drag.current ? 'dragging' : ''}`}
+      onWheel={onWheel}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+    >
+      {scene ? (
+        /* Root Cause vs Logic: the SVG used to contribute its full intrinsic width to the CSS grid, so fitView centered against a thousands-pixel wrapper and pushed the diagram out of view. Keeping it absolutely positioned makes the viewport size authoritative while preserving the full viewBox for export. */
+        <svg
+          ref={svgRef}
+          xmlns="http://www.w3.org/2000/svg"
+          data-diagram-theme={theme}
+          className="absolute left-0 top-0 max-w-none overflow-visible"
+          width={scene.bbox.width + PAD * 2}
+          height={scene.bbox.height + PAD * 2}
+          viewBox={`${scene.bbox.x - PAD} ${scene.bbox.y - PAD} ${scene.bbox.width + PAD * 2} ${scene.bbox.height + PAD * 2}`}
+          style={{
+            transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`,
+            transformOrigin: '0 0',
+          }}
+        >
+          <defs dangerouslySetInnerHTML={{ __html: scene.defsHtml }} />
+          {scene.layers}
+        </svg>
+      ) : (
+        <div className="flex h-full w-full items-center justify-center text-sm text-ink-400">
+          No diagram
+        </div>
+      )}
+      <div className="pointer-events-none absolute bottom-3 left-3 rounded-md bg-ink-900/80 px-2 py-1 text-[10px] uppercase tracking-wider text-ink-400">
+        {Math.round(viewport.scale * 100)}%
+      </div>
+    </div>
+  );
+});

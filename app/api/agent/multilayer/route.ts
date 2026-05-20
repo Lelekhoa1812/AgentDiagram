@@ -1,0 +1,71 @@
+import { z } from 'zod';
+import { runMultiLayerPipeline } from '@/lib/agent/multilayer';
+import { makeSseStream } from '@/lib/util/stream';
+import { guardPath, defaultRepoPath } from '@/lib/security/pathGuard';
+import { PROVIDER_ENV } from '@/lib/agent/providers';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+const Body = z.object({
+  provider: z.enum(['openai', 'anthropic', 'gemini', 'foundry']),
+  model: z.string(),
+  apiKey: z.string().optional(),
+  endpoint: z.string().optional(),
+  rootPath: z.string().optional(),
+  focus: z.string().default(''),
+  topK: z.number().int().min(10).max(200).optional(),
+});
+
+export async function POST(req: Request) {
+  const json = await req.json().catch(() => ({}));
+  const parsed = Body.safeParse(json);
+  if (!parsed.success) {
+    return new Response(JSON.stringify({ error: parsed.error.message }), { status: 400 });
+  }
+  const cfg = parsed.data;
+  const apiKey = cfg.apiKey?.trim() || process.env[PROVIDER_ENV[cfg.provider]] || '';
+  if (!apiKey) {
+    return new Response(
+      JSON.stringify({
+        error: `No API key for ${cfg.provider}. Set ${PROVIDER_ENV[cfg.provider]} or enter one in the UI.`,
+      }),
+      { status: 400 },
+    );
+  }
+
+  const rootPath = cfg.rootPath || defaultRepoPath();
+  const guard = guardPath(rootPath);
+  if (!guard.ok) {
+    return new Response(JSON.stringify({ error: guard.reason }), { status: 400 });
+  }
+  const endpoint = cfg.endpoint?.trim() || process.env.FOUNDRY_ENDPOINT;
+
+  const { stream, send, close } = makeSseStream();
+  const ac = new AbortController();
+  req.signal.addEventListener('abort', () => ac.abort());
+
+  runMultiLayerPipeline(
+    {
+      rootPath: guard.resolved,
+      session: { id: cfg.provider, model: cfg.model, apiKey, endpoint },
+      focus: cfg.focus,
+      topK: cfg.topK,
+      signal: ac.signal,
+    },
+    send,
+  )
+    .catch((err) => {
+      send({ type: 'error', stage: 'pipeline', message: err instanceof Error ? err.message : String(err) });
+      send({ type: 'done' });
+    })
+    .finally(() => close());
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+    },
+  });
+}
