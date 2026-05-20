@@ -4,9 +4,9 @@
     {
       "name": "diagram-dev",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--", "-p", "4000"],
-      "port": 4000,
-      "autoPort": false
+      "runtimeArgs": ["run", "dev"],
+      "port": 3000,
+      "autoPort": true
     }
   ]
 }
