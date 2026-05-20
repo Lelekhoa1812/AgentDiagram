@@ -213,8 +213,17 @@ export function normalizeIgnoredFolders(folders: readonly string[] = []): string
   return [...normalized].sort((a, b) => a.localeCompare(b));
 }
 
+// Motivation vs Logic: users can now ignore individual files in addition to folders, but the
+// store still keeps a flat string[] for backwards compatibility. We emit both a literal pattern
+// (matches a single file or the folder name itself) and a `/**` pattern (matches folder contents)
+// so fast-glob filters both cases without us tracking whether the entry was a file or directory.
 function ignoredFolderPatterns(folders: readonly string[]): string[] {
-  return normalizeIgnoredFolders(folders).map((folder) => `${folder}/**`);
+  const patterns: string[] = [];
+  for (const folder of normalizeIgnoredFolders(folders)) {
+    patterns.push(folder);
+    patterns.push(`${folder}/**`);
+  }
+  return patterns;
 }
 
 function isAllowedByAllowlist(rel: string, allowlist: RepoScanAllowlist): boolean {

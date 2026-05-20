@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { readUiPreference, writeUiPreference } from '@/lib/state/uiPreferences';
 
 interface ScanResult {
@@ -20,9 +20,10 @@ interface ScanResult {
   likelyStack: string[];
 }
 
-interface DirectoryEntry {
+interface BrowseEntry {
   name: string;
   path: string;
+  type: 'dir' | 'file';
 }
 
 interface RepoInputProps {
@@ -30,34 +31,40 @@ interface RepoInputProps {
   onConfigChange?: (path: string, ignoredFolders: string[]) => void;
 }
 
+// Motivation vs Logic: the browser is the user's main lever to keep noisy folders/files out of
+// the agent's view, so we surface it inline (always visible) rather than hiding it behind a "..."
+// modal. Each row exposes a kebab menu with Cancel/Ignore so the action is explicit and
+// reversible — clicking Ignore appends to the existing `ignoredFolders` list which the analyze
+// API already plumbs straight into the scanner.
 export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
   const [path, setPath] = useState('');
   const [ignoredFolders, setIgnoredFolders] = useState<string[]>([]);
-  const [browserOpen, setBrowserOpen] = useState(false);
   const [browserParent, setBrowserParent] = useState('');
-  const [directories, setDirectories] = useState<DirectoryEntry[]>([]);
-  const [loadingDirectories, setLoadingDirectories] = useState(false);
+  const [entries, setEntries] = useState<BrowseEntry[]>([]);
+  const [loadingEntries, setLoadingEntries] = useState(false);
+  const [browseError, setBrowseError] = useState<string | null>(null);
+  const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ScanResult | null>(null);
 
+  const browserRef = useRef<HTMLDivElement | null>(null);
+
   useEffect(() => {
     const savedPath = readUiPreference('repoPath');
-    if (savedPath) {
-      setPath(savedPath);
-      onConfigChange?.(savedPath, readUiPreference('repoIgnoredFolders') ?? []);
-    }
-
     const savedIgnored = readUiPreference('repoIgnoredFolders') ?? [];
     if (savedIgnored.length) {
       setIgnoredFolders(savedIgnored);
     }
 
-    if (!savedPath) {
+    if (savedPath) {
+      setPath(savedPath);
+      onConfigChange?.(savedPath, savedIgnored);
+    } else {
       fetch('/api/repo/scan')
         .then((r) => r.json())
         .then((d: { defaultPath?: string }) => {
-          if (d.defaultPath && !path) {
+          if (d.defaultPath) {
             setPath(d.defaultPath);
             onConfigChange?.(d.defaultPath, savedIgnored);
           }
@@ -67,6 +74,63 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const loadEntries = useCallback(
+    async (parent = '') => {
+      if (!path) return;
+      setLoadingEntries(true);
+      setBrowseError(null);
+      try {
+        const res = await fetch('/api/repo/directories', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rootPath: path, parent }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setBrowseError(data.error ?? 'Could not list folder');
+          setEntries([]);
+          return;
+        }
+        setBrowserParent(data.parent ?? '');
+        const next: BrowseEntry[] = Array.isArray(data.entries)
+          ? data.entries
+          : Array.isArray(data.directories)
+            ? data.directories.map((d: { name: string; path: string }) => ({ ...d, type: 'dir' as const }))
+            : [];
+        setEntries(next);
+      } catch (err) {
+        setBrowseError(err instanceof Error ? err.message : String(err));
+        setEntries([]);
+      } finally {
+        setLoadingEntries(false);
+      }
+    },
+    [path],
+  );
+
+  // Auto-load the root listing whenever the path changes so the picker is never empty.
+  useEffect(() => {
+    if (!path) {
+      setEntries([]);
+      setBrowserParent('');
+      return;
+    }
+    void loadEntries('');
+  }, [path, loadEntries]);
+
+  // Close the kebab menu on outside click.
+  useEffect(() => {
+    if (!activeMenu) return;
+    const onClick = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (target && browserRef.current && !browserRef.current.contains(target)) {
+        setActiveMenu(null);
+      }
+    };
+    window.addEventListener('mousedown', onClick);
+    return () => window.removeEventListener('mousedown', onClick);
+  }, [activeMenu]);
+
   const onPathChange = (value: string) => {
     writeUiPreference('repoPath', value);
     setPath(value);
@@ -75,45 +139,35 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
   };
 
   const updateIgnoredFolders = (next: string[]) => {
-    const cleaned = [...new Set(next.map((item) => item.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')).filter(Boolean))].sort(
-      (a, b) => a.localeCompare(b),
-    );
+    const cleaned = [
+      ...new Set(next.map((item) => item.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')).filter(Boolean)),
+    ].sort((a, b) => a.localeCompare(b));
     setIgnoredFolders(cleaned);
     writeUiPreference('repoIgnoredFolders', cleaned);
     setResult(null);
     onConfigChange?.(path, cleaned);
   };
 
-  const loadDirectories = async (parent = '') => {
-    if (!path) return;
-    setLoadingDirectories(true);
-    setError(null);
-    try {
-      const res = await fetch('/api/repo/directories', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rootPath: path, parent }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error ?? 'Could not list folders');
-        return;
-      }
-      setBrowserParent(data.parent ?? '');
-      setDirectories(Array.isArray(data.directories) ? data.directories : []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoadingDirectories(false);
-    }
+  const parentFolder = browserParent ? browserParent.split('/').slice(0, -1).join('/') : '';
+
+  const ignoredSet = useMemo(() => new Set(ignoredFolders), [ignoredFolders]);
+
+  const onIgnoreEntry = (entry: BrowseEntry) => {
+    setActiveMenu(null);
+    if (ignoredSet.has(entry.path)) return;
+    updateIgnoredFolders([...ignoredFolders, entry.path]);
   };
 
-  const openBrowser = () => {
-    setBrowserOpen(true);
-    void loadDirectories('');
+  const onUnignoreEntry = (entry: BrowseEntry) => {
+    setActiveMenu(null);
+    updateIgnoredFolders(ignoredFolders.filter((item) => item !== entry.path));
   };
 
-  const parentFolder = browserParent.split('/').slice(0, -1).join('/');
+  const onOpenEntry = (entry: BrowseEntry) => {
+    if (entry.type !== 'dir') return;
+    setActiveMenu(null);
+    void loadEntries(entry.path);
+  };
 
   const onPreview = async () => {
     setScanning(true);
@@ -154,12 +208,12 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
           />
           <button
             type="button"
-            onClick={openBrowser}
-            disabled={!path}
-            title="Browse folders to ignore"
+            onClick={() => void loadEntries('')}
+            disabled={!path || loadingEntries}
+            title="Refresh folder listing"
             className="rounded-md border border-ink-700 bg-ink-800 px-3 py-1.5 font-semibold hover:bg-ink-700 disabled:opacity-50"
           >
-            ...
+            ↻
           </button>
         </div>
         <div className="mt-1 text-[10px] text-ink-400">
@@ -169,9 +223,13 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
 
       <div className="space-y-2 rounded-md border border-ink-800 bg-ink-950/70 p-2">
         <div className="flex items-center justify-between gap-2">
-          <div className="text-[10px] uppercase tracking-widest text-ink-400">Ignored folders</div>
+          <div className="text-[10px] uppercase tracking-widest text-ink-400">Ignored paths</div>
           {ignoredFolders.length > 0 && (
-            <button type="button" onClick={() => updateIgnoredFolders([])} className="text-[10px] text-ink-400 hover:text-ink-100">
+            <button
+              type="button"
+              onClick={() => updateIgnoredFolders([])}
+              className="text-[10px] text-ink-400 hover:text-ink-100"
+            >
               Clear
             </button>
           )}
@@ -184,9 +242,9 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
                 type="button"
                 onClick={() => updateIgnoredFolders(ignoredFolders.filter((item) => item !== folder))}
                 className="rounded-full border border-ink-700 bg-ink-800 px-2 py-0.5 font-mono text-[10px] text-ink-200 hover:border-coral/60"
-                title="Remove ignored folder"
+                title="Remove from ignore list"
               >
-                {folder} x
+                {folder} ×
               </button>
             ))}
           </div>
@@ -195,61 +253,143 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
         )}
       </div>
 
-      {browserOpen && (
-        <div className="space-y-2 rounded-md border border-ink-700 bg-ink-950 p-3">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <div className="text-[10px] uppercase tracking-widest text-ink-400">Folder browser</div>
-              <div className="mt-0.5 font-mono text-[10px] text-ink-500">{browserParent || '.'}</div>
+      <div ref={browserRef} className="space-y-2 rounded-md border border-ink-700 bg-ink-950 p-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-[10px] uppercase tracking-widest text-ink-400">Folder browser</div>
+            <div className="mt-0.5 truncate font-mono text-[10px] text-ink-500" title={browserParent || '.'}>
+              {browserParent || '.'}
             </div>
-            <button type="button" onClick={() => setBrowserOpen(false)} className="text-[11px] text-ink-400 hover:text-ink-100">
-              Close
-            </button>
           </div>
-          <div className="flex gap-2">
+          <div className="flex shrink-0 gap-2">
             <button
               type="button"
-              onClick={() => void loadDirectories(parentFolder)}
-              disabled={!browserParent || loadingDirectories}
+              onClick={() => void loadEntries(parentFolder)}
+              disabled={!browserParent || loadingEntries}
               className="rounded border border-ink-700 bg-ink-800 px-2 py-1 text-[11px] hover:bg-ink-700 disabled:opacity-50"
             >
               Up
             </button>
             <button
               type="button"
-              onClick={() => updateIgnoredFolders([...ignoredFolders, browserParent])}
-              disabled={!browserParent || ignoredFolders.includes(browserParent)}
-              className="rounded border border-accent/40 bg-accent/10 px-2 py-1 text-[11px] text-accent hover:bg-accent/20 disabled:opacity-50"
+              onClick={() => void loadEntries('')}
+              disabled={!path || loadingEntries}
+              className="rounded border border-ink-700 bg-ink-800 px-2 py-1 text-[11px] hover:bg-ink-700 disabled:opacity-50"
             >
-              Ignore current
+              Root
             </button>
           </div>
-          <div className="max-h-48 space-y-1 overflow-y-auto rounded border border-ink-800 bg-ink-900/70 p-1">
-            {loadingDirectories ? (
-              <div className="p-2 text-ink-400">Loading folders...</div>
-            ) : directories.length ? (
-              directories.map((dir) => (
-                <div key={dir.path} className="flex items-center justify-between gap-2 rounded px-2 py-1 hover:bg-ink-800">
+        </div>
+
+        {browseError && (
+          <div className="rounded border border-red-500/50 bg-red-500/10 p-2 text-red-200">{browseError}</div>
+        )}
+
+        <div className="max-h-72 space-y-0.5 overflow-y-auto rounded border border-ink-800 bg-ink-900/70 p-1">
+          {loadingEntries ? (
+            <div className="p-2 text-ink-400">Loading…</div>
+          ) : entries.length ? (
+            entries.map((entry) => {
+              const isIgnored = ignoredSet.has(entry.path);
+              const menuOpen = activeMenu === entry.path;
+              const isDir = entry.type === 'dir';
+              return (
+                <div
+                  key={entry.path}
+                  className={`group relative flex items-center gap-2 rounded px-2 py-1 ${
+                    isIgnored ? 'opacity-50' : 'hover:bg-ink-800'
+                  }`}
+                >
+                  <span className="w-4 shrink-0 text-center text-[11px] text-ink-500">
+                    {isDir ? '📁' : '📄'}
+                  </span>
+                  {isDir ? (
+                    <button
+                      type="button"
+                      onClick={() => onOpenEntry(entry)}
+                      className="min-w-0 flex-1 truncate text-left font-mono text-[11px] text-ink-200 hover:text-accent"
+                      title={`Open ${entry.path}`}
+                    >
+                      {entry.name}
+                    </button>
+                  ) : (
+                    <span
+                      className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink-300"
+                      title={entry.path}
+                    >
+                      {entry.name}
+                    </span>
+                  )}
+                  {isIgnored && (
+                    <span className="shrink-0 rounded-full border border-coral/40 bg-coral/10 px-1.5 py-0.5 text-[9px] uppercase tracking-widest text-coral">
+                      ignored
+                    </span>
+                  )}
                   <button
                     type="button"
-                    onClick={() => updateIgnoredFolders([...ignoredFolders, dir.path])}
-                    disabled={ignoredFolders.includes(dir.path)}
-                    className="min-w-0 truncate font-mono text-[11px] text-ink-200 disabled:text-ink-500"
-                    title={ignoredFolders.includes(dir.path) ? 'Already ignored' : 'Click to ignore this folder'}
+                    onClick={() => setActiveMenu((current) => (current === entry.path ? null : entry.path))}
+                    className="shrink-0 rounded px-2 py-0.5 text-[12px] text-ink-400 hover:bg-ink-700 hover:text-ink-100"
+                    title="Actions"
+                    aria-haspopup="menu"
+                    aria-expanded={menuOpen}
                   >
-                    {dir.name}
+                    …
                   </button>
-                  <button type="button" onClick={() => void loadDirectories(dir.path)} className="text-[10px] text-ink-400 hover:text-ink-100">
-                    Open
-                  </button>
+                  {menuOpen && (
+                    <div
+                      role="menu"
+                      className="absolute right-2 top-full z-10 mt-1 flex w-44 flex-col gap-1 rounded-md border border-ink-700 bg-ink-900 p-1 shadow-xl"
+                    >
+                      {isDir && (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => onOpenEntry(entry)}
+                          className="rounded px-2 py-1 text-left text-[11px] text-ink-200 hover:bg-ink-800"
+                        >
+                          Open folder
+                        </button>
+                      )}
+                      {isIgnored ? (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => onUnignoreEntry(entry)}
+                          className="rounded border border-accent/40 bg-accent/10 px-2 py-1 text-left text-[11px] text-accent hover:bg-accent/20"
+                        >
+                          Unignore
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => onIgnoreEntry(entry)}
+                          className="rounded border border-coral/40 bg-coral/10 px-2 py-1 text-left text-[11px] text-coral hover:bg-coral/20"
+                        >
+                          Ignore
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => setActiveMenu(null)}
+                        className="rounded px-2 py-1 text-left text-[11px] text-ink-400 hover:bg-ink-800"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )}
                 </div>
-              ))
-            ) : (
-              <div className="p-2 text-ink-500">No child folders.</div>
-            )}
-          </div>
+              );
+            })
+          ) : (
+            <div className="p-2 text-ink-500">Empty folder.</div>
+          )}
         </div>
-      )}
+        <div className="text-[10px] text-ink-500">
+          AgentDiagram’s own folder and common build/cache directories are hidden automatically.
+        </div>
+      </div>
 
       <button
         type="button"

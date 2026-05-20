@@ -12,18 +12,37 @@ const Body = z.object({
   parent: z.string().optional(),
 });
 
-const HIDDEN_BY_DEFAULT = new Set([
+// Motivation vs Logic: every browse response should mirror the agent's own ignore conventions so users never see and try to ignore folders we already silently skip (caches, VCS metadata, build outputs). Centralising the list here also keeps the picker visually quiet on cluttered monorepos.
+const HIDDEN_DIRS = new Set([
   '.agentdiagram-cache',
   '.cache',
   '.git',
+  '.hg',
+  '.idea',
   '.next',
   '.parcel-cache',
+  '.svn',
   '.turbo',
   '.vercel',
+  '.vscode',
   'coverage',
+  'dist',
+  'build',
   'node_modules',
   'playwright-report',
+  'vendor',
 ]);
+
+const HIDDEN_FILES = new Set([
+  '.DS_Store',
+  'Thumbs.db',
+  'package-lock.json',
+  'pnpm-lock.yaml',
+  'yarn.lock',
+  'tsconfig.tsbuildinfo',
+]);
+
+const SELF_ROOT = path.resolve(process.cwd());
 
 function childPath(root: string, rel: string): string | null {
   const [normalized] = normalizeIgnoredFolders([rel]);
@@ -52,19 +71,43 @@ export async function POST(req: Request) {
   }
 
   try {
-    const entries = await fs.readdir(absParent, { withFileTypes: true });
-    const directories = entries
-      .filter((entry) => entry.isDirectory() && !HIDDEN_BY_DEFAULT.has(entry.name))
-      .map((entry) => {
-        const rel = path.relative(guard.resolved, path.join(absParent, entry.name)).replace(/\\/g, '/');
-        return { name: entry.name, path: rel };
+    const dirents = await fs.readdir(absParent, { withFileTypes: true });
+
+    const entries = dirents
+      .filter((dirent) => {
+        if (dirent.isDirectory()) {
+          if (HIDDEN_DIRS.has(dirent.name)) return false;
+        } else if (dirent.isFile()) {
+          if (HIDDEN_FILES.has(dirent.name)) return false;
+        } else {
+          return false;
+        }
+        // Skip the AgentDiagram app folder itself so users never accidentally
+        // pipe our own source back into the agent when scanning a parent dir.
+        const abs = path.resolve(absParent, dirent.name);
+        if (abs === SELF_ROOT) return false;
+        return true;
       })
-      .sort((a, b) => a.path.localeCompare(b.path));
+      .map((dirent) => {
+        const abs = path.resolve(absParent, dirent.name);
+        const rel = path.relative(guard.resolved, abs).replace(/\\/g, '/');
+        return {
+          name: dirent.name,
+          path: rel,
+          type: dirent.isDirectory() ? ('dir' as const) : ('file' as const),
+        };
+      })
+      .sort((a, b) => {
+        if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
 
     return NextResponse.json({
       root: guard.resolved,
       parent: normalizeIgnoredFolders([relParent])[0] ?? '',
-      directories,
+      entries,
+      // Kept for older clients that still read `directories`; new UI uses `entries`.
+      directories: entries.filter((entry) => entry.type === 'dir').map(({ name, path: p }) => ({ name, path: p })),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

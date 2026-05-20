@@ -67,4 +67,23 @@ describe('repoScanner', () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it('also honors individual file entries in the ignore list', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentdiagram-scan-ignore-file-'));
+    try {
+      await write(root, 'src/keep.ts', 'export const keep = true;\n');
+      await write(root, 'src/skip.ts', 'export const skip = true;\n');
+      await write(root, 'top-level.ts', 'export const top = true;\n');
+
+      const repo = await scanRepo(root, {
+        allowlist: AGENT_FILE_ALLOWLIST,
+        ignoredFolders: ['src/skip.ts', 'top-level.ts'],
+      });
+      const paths = repo.files.map((file) => file.path).sort();
+
+      expect(paths).toEqual(['src/keep.ts']);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
