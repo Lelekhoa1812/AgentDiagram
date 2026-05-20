@@ -6,6 +6,7 @@ import { ProviderConfig } from '@/components/agent/ProviderConfig';
 import { RepoInput } from '@/components/agent/RepoInput';
 import { FocusPromptBox } from '@/components/agent/FocusPromptBox';
 import { AnalysisAnimation } from '@/components/agent/AnalysisAnimation';
+import { readAgentStream, readErrorMessage, type AgentStreamEvent } from '@/components/agent/streamEvents';
 
 export function MultiLayerPanel() {
   const provider = useDiagramStore((s) => s.provider);
@@ -25,6 +26,7 @@ export function MultiLayerPanel() {
   const [scanInfo, setScanInfo] = useState<{ resolved: string; fileCount: number } | null>(null);
   const [retryNotice, setRetryNotice] = useState<{ stage: string; attempt: number; delayMs: number; reason: string } | null>(null);
   const [counters, setCounters] = useState<Record<string, number>>({});
+  const [terminalState, setTerminalState] = useState<{ status: 'failed' | 'cancelled'; message: string } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const onStart = async () => {
@@ -36,7 +38,10 @@ export function MultiLayerPanel() {
     startAgent(sessionId);
     setCounters({});
     setRetryNotice(null);
+    setTerminalState(null);
     setMultiLayer(null);
+    let sawResult = false;
+    let sawFailure = false;
 
     const ac = new AbortController();
     abortRef.current = ac;
@@ -56,42 +61,33 @@ export function MultiLayerPanel() {
         signal: ac.signal,
       });
       if (!res.ok || !res.body) {
-        const txt = await res.text();
-        pushLog({ stage: 'init', level: 'error', message: txt || `HTTP ${res.status}` });
-        stopAgent();
+        const message = await readErrorMessage(res);
+        sawFailure = true;
+        setTerminalState({ status: 'failed', message });
+        pushLog({ stage: 'init', level: 'error', message });
         return;
       }
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n\n');
-        buffer = lines.pop() ?? '';
-        for (const block of lines) {
-          if (!block.startsWith('data: ')) continue;
-          try {
-            handleEvent(JSON.parse(block.slice(6)));
-          } catch {
-            /* ignore */
-          }
-        }
-      }
+      await readAgentStream(res.body, handleEvent);
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {
+        sawFailure = true;
+        setTerminalState({ status: 'cancelled', message: 'Cancelled' });
         pushLog({ stage: 'init', level: 'info', message: 'Cancelled' });
       } else {
-        pushLog({ stage: 'init', level: 'error', message: err instanceof Error ? err.message : String(err) });
+        const message = err instanceof Error ? err.message : String(err);
+        sawFailure = true;
+        setTerminalState({ status: 'failed', message });
+        pushLog({ stage: 'init', level: 'error', message });
       }
     } finally {
+      if (!sawResult && !sawFailure && !ac.signal.aborted) {
+        setTerminalState({ status: 'failed', message: 'Analysis ended before layered diagrams were produced.' });
+      }
       stopAgent();
       abortRef.current = null;
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    function handleEvent(ev: any) {
+    function handleEvent(ev: AgentStreamEvent) {
       if (ev.type === 'stage') {
         setAgentStage(ev.stage);
         if (ev.counters) setCounters((c) => ({ ...c, ...ev.counters }));
@@ -106,8 +102,11 @@ export function MultiLayerPanel() {
       } else if (ev.type === 'log') {
         pushLog({ stage: ev.stage, level: ev.level, message: ev.message });
       } else if (ev.type === 'error') {
+        sawFailure = true;
+        setTerminalState({ status: 'failed', message: ev.message });
         pushLog({ stage: ev.stage, level: 'error', message: ev.message });
       } else if (ev.type === 'result-multilayer') {
+        sawResult = true;
         const out = ev.output as MultiLayerOutput;
         setMultiLayer(out);
         clearOverrides();
@@ -169,11 +168,13 @@ export function MultiLayerPanel() {
         </div>
       </div>
 
-      {agentRunning && (
+      {(agentRunning || terminalState) && (
         <AnalysisAnimation
           retryNotice={retryNotice}
           counters={counters}
           onCancel={onCancel}
+          onDismiss={() => setTerminalState(null)}
+          terminalState={terminalState}
           stages={[
             { id: 'validate', label: 'Validating credentials' },
             { id: 'scan', label: 'Scanning repository' },

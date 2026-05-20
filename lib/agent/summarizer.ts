@@ -43,7 +43,7 @@ export const FileSummarySchema = z.object({
   surface: z.array(z.string()).max(25).describe('Public surface: function / class / route / table names'),
   external_deps: z.array(z.string()).max(20).describe('External packages / services used (e.g. stripe, redis, openai)'),
   side_effects: z.array(z.string()).max(15).describe('Notable side effects (db writes, HTTP calls, queue publishes, env reads)'),
-  notes: z.string().describe('Short notes on subsystem position / quirks').optional(),
+  notes: z.string().nullable().describe('Short notes on subsystem position / quirks').optional(),
 });
 export type FileSummary = z.infer<typeof FileSummarySchema>;
 
@@ -67,9 +67,10 @@ const SCHEMA = {
     surface: { type: 'array', items: { type: 'string' } },
     external_deps: { type: 'array', items: { type: 'string' } },
     side_effects: { type: 'array', items: { type: 'string' } },
-    notes: { type: 'string' },
+    notes: { type: ['string', 'null'] },
   },
-  required: ['role', 'category', 'layer', 'exports', 'imports', 'surface', 'external_deps', 'side_effects'],
+  // Root Cause vs Logic: OpenAI strict JSON schema rejects optional object properties unless every property is listed as required, so nullable fields carry "not supplied" intent without breaking structured output validation.
+  required: ['role', 'category', 'layer', 'exports', 'imports', 'surface', 'external_deps', 'side_effects', 'notes'],
   additionalProperties: false,
 };
 

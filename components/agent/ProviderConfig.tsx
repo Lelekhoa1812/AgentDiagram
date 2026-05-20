@@ -7,8 +7,8 @@ import {
   ANTHROPIC_MODELS,
   GEMINI_MODELS,
   GROK_MODELS,
-  PROVIDER_DEFAULTS,
-} from '@/lib/agent/providers';
+  getProviderDefaultModel,
+} from '@/lib/agent/provider-models';
 import type { ProviderId } from '@/lib/agent/providers/types';
 
 const PROVIDERS: Array<{ id: ProviderId; label: string; envVar: string; note: string }> = [
@@ -34,7 +34,7 @@ export function ProviderConfig() {
   const [validation, setValidation] = useState<{ ok: boolean; error?: string } | null>(null);
 
   const onProviderChange = (id: typeof provider.provider) => {
-    setProvider({ provider: id, model: PROVIDER_DEFAULTS[id] });
+    setProvider({ provider: id, model: getProviderDefaultModel(id) });
     setValidation(null);
   };
 

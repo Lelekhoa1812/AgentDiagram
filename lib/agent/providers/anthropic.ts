@@ -13,6 +13,7 @@ export class AnthropicProvider implements Provider {
     try {
       await this.client.messages.create({
         model,
+        max_tokens: 8,
         messages: [{ role: 'user', content: 'ping' }],
       });
       return { ok: true };
@@ -29,8 +30,9 @@ export class AnthropicProvider implements Provider {
       .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const body: any = {
-      // Root Cause vs Logic: Remove sampling overrides so provider requests stay compatible across models.
+      // Root Cause vs Logic: Anthropic requires max_tokens even for JSON/tool calls, while sampling overrides can still be model-specific. Keep the required output cap explicit and the rest minimal.
       model: params.model,
+      max_tokens: 4096,
       messages: others,
       ...(sys ? { system: sys } : {}),
     };

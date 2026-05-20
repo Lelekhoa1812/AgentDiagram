@@ -5,6 +5,7 @@ import { temporal } from 'zundo';
 import type { Diagram, Point } from '../ir/types';
 import type { LayoutResult, LayoutRect } from '../layout/elk';
 import type { LayoutStrategy } from '../layout/strategies';
+import { getProviderDefaultModel } from '@/lib/agent/provider-models';
 import type { ProviderId } from '../agent/providers/types';
 
 export type Mode = 'editor' | 'agent' | 'multi-layer';
@@ -53,7 +54,7 @@ export interface MultiLayerOutput {
 
 const DEFAULT_PROVIDER: ProviderConfig = {
   provider: 'openai',
-  model: 'gpt-5.5',
+  model: getProviderDefaultModel('openai'),
   apiKey: '',
 };
 

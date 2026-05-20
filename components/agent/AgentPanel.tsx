@@ -7,6 +7,7 @@ import { RepoInput } from './RepoInput';
 import { DiagramTypePicker } from './DiagramTypePicker';
 import { FocusPromptBox } from './FocusPromptBox';
 import { AnalysisAnimation } from './AnalysisAnimation';
+import { readAgentStream, readErrorMessage, type AgentStreamEvent } from './streamEvents';
 
 interface ScanResult {
   resolved: string;
@@ -29,6 +30,7 @@ export function AgentPanel() {
   const [scan, setScan] = useState<ScanResult | null>(null);
   const [retryNotice, setRetryNotice] = useState<{ stage: string; attempt: number; delayMs: number; reason: string } | null>(null);
   const [counters, setCounters] = useState<Record<string, number>>({});
+  const [terminalState, setTerminalState] = useState<{ status: 'failed' | 'cancelled'; message: string } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const onStart = async () => {
@@ -40,6 +42,9 @@ export function AgentPanel() {
     startAgent(sessionId);
     setCounters({});
     setRetryNotice(null);
+    setTerminalState(null);
+    let sawResult = false;
+    let sawFailure = false;
 
     const ac = new AbortController();
     abortRef.current = ac;
@@ -61,44 +66,34 @@ export function AgentPanel() {
       });
 
       if (!res.ok || !res.body) {
-        const txt = await res.text();
-        pushLog({ stage: 'init', level: 'error', message: txt || `HTTP ${res.status}` });
-        stopAgent();
+        const message = await readErrorMessage(res);
+        sawFailure = true;
+        setTerminalState({ status: 'failed', message });
+        pushLog({ stage: 'init', level: 'error', message });
         return;
       }
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n\n');
-        buffer = lines.pop() ?? '';
-        for (const block of lines) {
-          if (!block.startsWith('data: ')) continue;
-          try {
-            const ev = JSON.parse(block.slice(6));
-            handleEvent(ev);
-          } catch {
-            /* ignore */
-          }
-        }
-      }
+      await readAgentStream(res.body, handleEvent);
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {
+        sawFailure = true;
+        setTerminalState({ status: 'cancelled', message: 'Cancelled' });
         pushLog({ stage: 'init', level: 'info', message: 'Cancelled' });
       } else {
-        pushLog({ stage: 'init', level: 'error', message: err instanceof Error ? err.message : String(err) });
+        const message = err instanceof Error ? err.message : String(err);
+        sawFailure = true;
+        setTerminalState({ status: 'failed', message });
+        pushLog({ stage: 'init', level: 'error', message });
       }
     } finally {
+      if (!sawResult && !sawFailure && !ac.signal.aborted) {
+        setTerminalState({ status: 'failed', message: 'Analysis ended before a diagram was produced.' });
+      }
       stopAgent();
       abortRef.current = null;
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    function handleEvent(ev: any) {
+    function handleEvent(ev: AgentStreamEvent) {
       if (ev.type === 'stage') {
         setAgentStage(ev.stage);
         if (ev.counters) setCounters((c) => ({ ...c, ...ev.counters }));
@@ -114,8 +109,11 @@ export function AgentPanel() {
       } else if (ev.type === 'log') {
         pushLog({ stage: ev.stage, level: ev.level, message: ev.message });
       } else if (ev.type === 'error') {
+        sawFailure = true;
+        setTerminalState({ status: 'failed', message: ev.message });
         pushLog({ stage: ev.stage, level: 'error', message: ev.message });
       } else if (ev.type === 'result') {
+        sawResult = true;
         setDsl(ev.dsl);
         setMode('editor');
       } else if (ev.type === 'done') {
@@ -162,8 +160,14 @@ export function AgentPanel() {
         </div>
       </div>
 
-      {agentRunning && (
-        <AnalysisAnimation retryNotice={retryNotice} counters={counters} onCancel={onCancel} />
+      {(agentRunning || terminalState) && (
+        <AnalysisAnimation
+          retryNotice={retryNotice}
+          counters={counters}
+          onCancel={onCancel}
+          onDismiss={() => setTerminalState(null)}
+          terminalState={terminalState}
+        />
       )}
     </>
   );

@@ -19,10 +19,12 @@ interface Props {
   retryNotice?: { stage: string; attempt: number; delayMs: number; reason: string } | null;
   counters?: Record<string, number>;
   onCancel?: () => void;
+  onDismiss?: () => void;
+  terminalState?: { status: 'failed' | 'cancelled'; message: string } | null;
   stages?: Array<{ id: string; label: string }>;
 }
 
-export function AnalysisAnimation({ retryNotice, counters, onCancel, stages = DEFAULT_STAGES }: Props) {
+export function AnalysisAnimation({ retryNotice, counters, onCancel, onDismiss, terminalState, stages = DEFAULT_STAGES }: Props) {
   const stage = useDiagramStore((s) => s.agentStage);
   const log = useDiagramStore((s) => s.agentLog);
   const [elapsed, setElapsed] = useState(0);
@@ -34,22 +36,37 @@ export function AnalysisAnimation({ retryNotice, counters, onCancel, stages = DE
   }, []);
 
   const activeIdx = stages.findIndex((s) => s.id === stage);
+  const isTerminal = terminalState !== null && terminalState !== undefined;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/85 backdrop-blur-sm">
       <div className="w-[700px] max-w-[92vw] rounded-2xl border border-ink-700 bg-ink-900 p-6 shadow-2xl">
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <div className="text-sm font-semibold text-ink-100">Analyzing repository</div>
-            <div className="text-[11px] text-ink-400">Streaming live progress · cancel any time</div>
+            <div className="text-sm font-semibold text-ink-100">
+              {terminalState?.status === 'failed'
+                ? 'Analysis failed'
+                : terminalState?.status === 'cancelled'
+                  ? 'Analysis cancelled'
+                  : 'Analyzing repository'}
+            </div>
+            <div className="text-[11px] text-ink-400">
+              {isTerminal ? 'Review the error and log before closing' : 'Streaming live progress · cancel any time'}
+            </div>
           </div>
           <button
-            onClick={onCancel}
+            onClick={isTerminal ? onDismiss : onCancel}
             className="rounded-md border border-ink-700 bg-ink-800 px-3 py-1.5 text-xs hover:bg-ink-700"
           >
-            Cancel
+            {isTerminal ? 'Close' : 'Cancel'}
           </button>
         </div>
+
+        {terminalState?.message && (
+          <div className="mb-4 rounded-lg border border-red-500/50 bg-red-500/10 p-3 text-xs text-red-200">
+            {terminalState.message}
+          </div>
+        )}
 
         <div className="space-y-2">
           {stages.map((s, i) => {
