@@ -86,7 +86,7 @@ npm run lint         # ESLint
 npm run typecheck    # TypeScript without emit
 npm test             # Vitest
 npm run test:e2e     # Playwright
-npm run test:visual  # visual regression vs examples/v2.1.0.png
+npm run test:visual  # visual regression vs examples/flow.png
 ```
 
 ## Privacy
