@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { runCustomPlan } from '@/lib/agent/customPipeline';
 import { makeSseStream } from '@/lib/util/stream';
+import { methodNotAllowedResponse } from '@/lib/util/http';
 import { PROVIDER_ENV } from '@/lib/agent/providers';
 
 export const runtime = 'nodejs';
@@ -25,6 +26,21 @@ const Body = z.object({
     .max(20)
     .default([]),
 });
+
+const customMethodNotAllowed = () =>
+  methodNotAllowedResponse(
+    'POST with provider, model, prompt, intent summary, and answers is required to run the custom pipeline.',
+    ['POST'],
+  );
+
+// Motivation vs Logic: browsers landing on this stream should see its POST-only contract instead of Next's default 404 page.
+export function GET() {
+  return customMethodNotAllowed();
+}
+
+export function HEAD() {
+  return customMethodNotAllowed();
+}
 
 export async function POST(req: Request) {
   const json = await req.json().catch(() => ({}));

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { runClarify } from '@/lib/agent/customPipeline';
 import { makeSseStream } from '@/lib/util/stream';
+import { methodNotAllowedResponse } from '@/lib/util/http';
 import { PROVIDER_ENV } from '@/lib/agent/providers';
 
 export const runtime = 'nodejs';
@@ -13,6 +14,21 @@ const Body = z.object({
   endpoint: z.string().optional(),
   prompt: z.string().min(4),
 });
+
+const clarifyMethodNotAllowed = () =>
+  methodNotAllowedResponse(
+    'POST with provider, model, and prompt is required to stream clarifying questions.',
+    ['POST'],
+  );
+
+// Motivation vs Logic: returning a deliberate 405 body keeps toolchains from landing on Next's 404 page when they inspect the endpoint in a browser.
+export function GET() {
+  return clarifyMethodNotAllowed();
+}
+
+export function HEAD() {
+  return clarifyMethodNotAllowed();
+}
 
 export async function POST(req: Request) {
   const json = await req.json().catch(() => ({}));

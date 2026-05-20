@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { makeProvider, PROVIDER_ENV } from '@/lib/agent/providers';
+import { methodNotAllowedResponse } from '@/lib/util/http';
 
 export const runtime = 'nodejs';
 
@@ -10,6 +11,18 @@ const Body = z.object({
   apiKey: z.string().optional(),
   endpoint: z.string().optional(),
 });
+
+const validateMethodNotAllowed = () =>
+  methodNotAllowedResponse('POST with provider, model, and creds is required for validation.', ['POST']);
+
+// Motivation vs Logic: keep the validation contract explicit so callers don't land on Next's default 404 page.
+export function GET() {
+  return validateMethodNotAllowed();
+}
+
+export function HEAD() {
+  return validateMethodNotAllowed();
+}
 
 export async function POST(req: Request) {
   const json = await req.json().catch(() => ({}));

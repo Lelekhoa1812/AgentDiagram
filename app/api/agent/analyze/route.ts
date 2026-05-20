@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { runPipeline } from '@/lib/agent/pipeline';
 import { makeSseStream } from '@/lib/util/stream';
+import { methodNotAllowedResponse } from '@/lib/util/http';
 import { guardPath, defaultRepoPath } from '@/lib/security/pathGuard';
 import { PROVIDER_ENV } from '@/lib/agent/providers';
 
@@ -19,6 +20,21 @@ const Body = z.object({
   ignoredFolders: z.array(z.string()).max(100).optional(),
   quickMode: z.boolean().optional().default(false),
 });
+
+const analyzeMethodNotAllowed = () =>
+  methodNotAllowedResponse(
+    'POST with repo info, provider creds, and analysis settings is required to run the pipeline.',
+    ['POST'],
+  );
+
+// Motivation vs Logic: this makes the agent analyzer explain its POST-only contract instead of showing the default 404.
+export function GET() {
+  return analyzeMethodNotAllowed();
+}
+
+export function HEAD() {
+  return analyzeMethodNotAllowed();
+}
 
 export async function POST(req: Request) {
   const json = await req.json().catch(() => ({}));

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { runMultiLayerPipeline } from '@/lib/agent/multilayer';
 import { makeSseStream } from '@/lib/util/stream';
+import { methodNotAllowedResponse } from '@/lib/util/http';
 import { guardPath, defaultRepoPath } from '@/lib/security/pathGuard';
 import { PROVIDER_ENV } from '@/lib/agent/providers';
 
@@ -18,6 +19,21 @@ const Body = z.object({
   ignoredFolders: z.array(z.string()).max(100).optional(),
   quickMode: z.boolean().optional().default(false),
 });
+
+const multilayerMethodNotAllowed = () =>
+  methodNotAllowedResponse(
+    'POST with provider creds, repo path, and pipeline knobs is required to generate a multilayer overview.',
+    ['POST'],
+  );
+
+// Motivation vs Logic: avoid the generic 404 page by clearly stating that this SSE endpoint is POST-only.
+export function GET() {
+  return multilayerMethodNotAllowed();
+}
+
+export function HEAD() {
+  return multilayerMethodNotAllowed();
+}
 
 export async function POST(req: Request) {
   const json = await req.json().catch(() => ({}));
