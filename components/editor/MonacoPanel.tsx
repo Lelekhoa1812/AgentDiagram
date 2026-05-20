@@ -5,6 +5,7 @@ import Editor, { type OnMount } from '@monaco-editor/react';
 import { useDiagramStore } from '@/lib/state/store';
 import { readUiPreference, writeUiPreference, type PersistedEditorTab } from '@/lib/state/uiPreferences';
 import { registerDslLanguage } from './dslLanguage';
+import { FixPanel } from './FixPanel';
 
 type Tab = PersistedEditorTab;
 
@@ -75,7 +76,7 @@ export function MonacoPanel() {
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center border-b border-ink-700 bg-ink-850 text-xs">
-        {(['dsl', 'ir', 'diagnostics'] as Tab[]).map((t) => (
+        {(['dsl', 'ir', 'diagnostics', 'fix'] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => selectTab(t)}
@@ -83,7 +84,7 @@ export function MonacoPanel() {
               tab === t ? 'border-b-2 border-accent text-ink-100' : 'text-ink-400 hover:text-ink-200'
             }`}
           >
-            {t === 'dsl' ? 'DSL' : t === 'ir' ? 'JSON IR' : 'Diagnostics'}
+            {t === 'dsl' ? 'DSL' : t === 'ir' ? 'JSON IR' : t === 'diagnostics' ? 'Diagnostics' : 'Fix'}
             {t === 'diagnostics' && diagnostics.length > 0 && (
               <span className="ml-1.5 rounded-full bg-coral/20 px-1.5 text-coral text-[10px]">{diagnostics.length}</span>
             )}
@@ -149,6 +150,9 @@ export function MonacoPanel() {
               </ul>
             )}
           </div>
+        )}
+        {tab === 'fix' && (
+          <FixPanel onFixApplied={() => selectTab('dsl')} />
         )}
       </div>
     </div>

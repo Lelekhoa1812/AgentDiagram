@@ -8,7 +8,7 @@ const UI_PREFERENCES_KEY = 'agentdiagram:ui-preferences:v1';
 export type PersistedMode = 'editor' | 'agent' | 'multi-layer' | 'custom-prompt';
 export type PersistedTheme = 'dark' | 'light';
 export type PersistedDiagramType = 'architecture' | 'sequence' | 'class' | 'data-flow' | 'deployment';
-export type PersistedEditorTab = 'dsl' | 'ir' | 'diagnostics';
+export type PersistedEditorTab = 'dsl' | 'ir' | 'diagnostics' | 'fix';
 
 export interface PersistedProviderConfig {
   provider?: ProviderId;
@@ -37,7 +37,7 @@ export interface UiPreferences {
 const MODES = new Set<PersistedMode>(['editor', 'agent', 'multi-layer', 'custom-prompt']);
 const THEMES = new Set<PersistedTheme>(['dark', 'light']);
 const DIAGRAM_TYPES = new Set<PersistedDiagramType>(['architecture', 'sequence', 'class', 'data-flow', 'deployment']);
-const EDITOR_TABS = new Set<PersistedEditorTab>(['dsl', 'ir', 'diagnostics']);
+const EDITOR_TABS = new Set<PersistedEditorTab>(['dsl', 'ir', 'diagnostics', 'fix']);
 const PROVIDERS = new Set<ProviderId>(['openai', 'anthropic', 'gemini', 'grok', 'foundry']);
 const LAYOUT_STRATEGIES = new Set<LayoutStrategy>(['auto', 'layered', 'force-lite', 'grid-cluster', 'manual']);
 
