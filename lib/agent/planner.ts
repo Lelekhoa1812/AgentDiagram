@@ -211,7 +211,7 @@ function compactRepoContext(ctx: RepoContextDigest | undefined): string {
 export async function generatePlan(
   session: ProviderSession,
   input: PlanInput,
-  opts: { signal?: AbortSignal; onRetry?: RetryListener; maxTokens?: number } = {},
+  opts: { signal?: AbortSignal; onRetry?: RetryListener } = {},
 ): Promise<DiagramPlan> {
   const userMsg = [
     `Diagram type: ${input.kind}`,
@@ -261,7 +261,6 @@ export async function generatePlan(
     signal: opts.signal,
     onRetry: opts.onRetry,
     jsonSchema: SCHEMA,
-    maxTokens: opts.maxTokens ?? 4000,
   });
   return DiagramPlanSchema.parse(JSON.parse(raw));
 }
@@ -376,7 +375,6 @@ export async function identifyLayers(
     signal: opts.signal,
     onRetry: opts.onRetry,
     jsonSchema: LAYER_CATALOG_SCHEMA,
-    maxTokens: 2500,
   });
   return LayerCatalogSchema.parse(JSON.parse(raw));
 }

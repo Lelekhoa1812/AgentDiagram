@@ -14,7 +14,6 @@ export class AnthropicProvider implements Provider {
       await this.client.messages.create({
         model,
         messages: [{ role: 'user', content: 'ping' }],
-        max_tokens: 1,
       });
       return { ok: true };
     } catch (err) {
@@ -30,10 +29,9 @@ export class AnthropicProvider implements Provider {
       .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const body: any = {
+      // Root Cause vs Logic: Remove sampling overrides so provider requests stay compatible across models.
       model: params.model,
       messages: others,
-      max_tokens: params.maxTokens ?? 2048,
-      temperature: params.temperature ?? 0.2,
       ...(sys ? { system: sys } : {}),
     };
     if (params.jsonSchema) {

@@ -284,7 +284,7 @@ export async function runMultiLayerPipeline(
                 focus: `Layer "${layer.name}" - ${layer.description}. Show internal structure plus one-hop boundary nodes (dashed). Boundary deps: ${layer.boundary_deps.join(', ') || 'none'}.`,
                 layerFocus: layer.name,
               },
-              { signal: input.signal, onRetry: onRetry('sub-plan'), maxTokens: 4200 },
+              { signal: input.signal, onRetry: onRetry('sub-plan') },
             );
             const dsl = await validateDsl(input.session, planToDsl(plan), send, 'sub-plans', onRetry, input.signal);
             send({

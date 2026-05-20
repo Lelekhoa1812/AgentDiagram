@@ -103,7 +103,6 @@ export async function summarizeFile(
     signal: opts.signal,
     onRetry: opts.onRetry,
     jsonSchema: SCHEMA,
-    maxTokens: 900,
   });
 
   const parsed = FileSummarySchema.parse(JSON.parse(raw));

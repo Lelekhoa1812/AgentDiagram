@@ -8,8 +8,6 @@ export interface ChatMessage {
 export interface ChatParams {
   messages: ChatMessage[];
   model: string;
-  maxTokens?: number;
-  temperature?: number;
   /** JSON schema for structured output. Provider adapts to its native equivalent. */
   jsonSchema?: Record<string, unknown>;
   signal?: AbortSignal;

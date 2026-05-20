@@ -23,20 +23,17 @@ export class GeminiProvider implements Provider {
   async chat(params: ChatParams): Promise<string> {
     const sys = params.messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n');
     const others = params.messages.filter((m) => m.role !== 'system');
+    // Root Cause vs Logic: Drop sampling knobs so newer models don't complain about unsupported fields.
+    const generationConfig: Record<string, unknown> = {};
+    if (params.jsonSchema) {
+      generationConfig.responseMimeType = 'application/json';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      generationConfig.responseSchema = params.jsonSchema as any;
+    }
     const model = this.client.getGenerativeModel({
       model: params.model,
       ...(sys ? { systemInstruction: sys } : {}),
-      generationConfig: {
-        temperature: params.temperature ?? 0.2,
-        maxOutputTokens: params.maxTokens ?? 2048,
-        ...(params.jsonSchema
-          ? {
-              responseMimeType: 'application/json',
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              responseSchema: params.jsonSchema as any,
-            }
-          : {}),
-      },
+      ...(Object.keys(generationConfig).length ? { generationConfig } : {}),
     });
     const history = others.slice(0, -1).map((m) => ({
       role: m.role === 'assistant' ? 'model' : 'user',

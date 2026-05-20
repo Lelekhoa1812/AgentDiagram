@@ -26,8 +26,6 @@ export async function tryRepair(
     current = await chatWithRetry(session, messages, {
       signal: opts.signal,
       onRetry: opts.onRetry,
-      maxTokens: 4000,
-      temperature: 0,
     });
     current = stripFences(current);
   }

@@ -65,19 +65,16 @@ export async function chatWithRetry(
     signal?: AbortSignal;
     onRetry?: RetryListener;
     jsonSchema?: Record<string, unknown>;
-    temperature?: number;
-    maxTokens?: number;
   } = {},
 ): Promise<string> {
   const provider = makeProvider(session.id, { apiKey: session.apiKey, endpoint: session.endpoint });
   return withRetry(
     () => {
+      // Motivation vs Logic: Keep payloads minimal so providers don't reject unsupported sampling overrides.
       const params: ChatParams = {
         model: session.model,
         messages,
         signal: opts.signal,
-        temperature: opts.temperature,
-        maxTokens: opts.maxTokens,
         jsonSchema: opts.jsonSchema,
       };
       return provider.chat(params);

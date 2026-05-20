@@ -14,7 +14,6 @@ export class OpenAIProvider implements Provider {
       await this.client.chat.completions.create({
         model,
         messages: [{ role: 'user', content: 'ping' }],
-        max_tokens: 1,
       });
       return { ok: true };
     } catch (err) {
@@ -27,10 +26,9 @@ export class OpenAIProvider implements Provider {
     const messages = params.messages.map((m) => ({ role: m.role, content: m.content }));
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const body: any = {
+      // Root Cause vs Logic: Sampling overrides can be rejected by modern models, so keep the payload minimal.
       model: params.model,
       messages,
-      temperature: params.temperature ?? 0.2,
-      max_tokens: params.maxTokens ?? 2048,
     };
     if (params.jsonSchema) {
       body.response_format = {

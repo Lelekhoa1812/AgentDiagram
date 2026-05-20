@@ -23,7 +23,6 @@ export class FoundryProvider implements Provider {
       await this.callChat({
         messages: [{ role: 'user', content: 'ping' }],
         model,
-        maxTokens: 1,
       });
       return { ok: true };
     } catch (err) {
@@ -41,9 +40,8 @@ export class FoundryProvider implements Provider {
     const url = `${this.endpoint}/openai/deployments/${encodeURIComponent(params.model)}/chat/completions?api-version=2024-08-01-preview`;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const body: any = {
+      // Root Cause vs Logic: Avoid unsupported sampling knobs so Foundry/OpenAI deployments accept the request.
       messages: params.messages,
-      max_tokens: params.maxTokens ?? 2048,
-      temperature: params.temperature ?? 0.2,
     };
     if (params.jsonSchema) {
       body.response_format = {
