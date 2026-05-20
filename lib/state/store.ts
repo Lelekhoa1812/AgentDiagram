@@ -8,6 +8,14 @@ import type { LayoutStrategy } from '../layout/strategies';
 import { getProviderDefaultModel } from '@/lib/agent/provider-models';
 import type { ProviderId } from '../agent/providers/types';
 import { readUiPreferences, writeUiPreference } from './uiPreferences';
+import {
+  type StoredProject,
+  addStoredProject,
+  readStoredProjects,
+  removeStoredProject,
+  readActiveProjectId,
+  writeActiveProjectId,
+} from './projectStorage';
 
 export type Mode = 'editor' | 'agent' | 'multi-layer' | 'custom-prompt';
 export type ThemeMode = 'dark' | 'light';
@@ -86,6 +94,10 @@ interface State {
   // Quick Mode: skip per-file LLM summarization in agent pipelines. Default off.
   quickMode: boolean;
 
+  // Project tabs — user-generated projects saved to localStorage
+  generatedProjects: StoredProject[];
+  activeProjectId: string | null;
+
   setMode: (mode: Mode) => void;
   setTheme: (theme: ThemeMode) => void;
   setDsl: (text: string) => void;
@@ -107,6 +119,9 @@ interface State {
   setMultiLayer: (output: MultiLayerOutput | null) => void;
   setActiveLayer: (name: string) => void;
   setQuickMode: (enabled: boolean) => void;
+  addGeneratedProject: (name: string, dsl: string) => void;
+  removeGeneratedProject: (id: string) => void;
+  setActiveProjectId: (id: string | null) => void;
 }
 
 export const useDiagramStore = create<State>()(
@@ -131,6 +146,8 @@ export const useDiagramStore = create<State>()(
       multiLayer: null,
       activeLayer: 'overview',
       quickMode: false,
+      generatedProjects: [],
+      activeProjectId: null,
       setMode: (mode) => {
         writeUiPreference('mode', mode);
         set({ mode });
@@ -180,8 +197,12 @@ export const useDiagramStore = create<State>()(
       },
       hydrateUiPreferences: () => {
         const preferences = readUiPreferences();
+        const generatedProjects = readStoredProjects();
+        const activeProjectId = readActiveProjectId();
         // Motivation vs Logic: UI choices should survive reloads, but credentials stay session-only so localStorage never contradicts the API key copy.
         set((state) => ({
+          generatedProjects,
+          activeProjectId,
           ...(preferences.mode ? { mode: preferences.mode } : {}),
           ...(preferences.theme ? { theme: preferences.theme } : {}),
           ...(preferences.layoutStrategy ? { layoutStrategy: preferences.layoutStrategy } : {}),
@@ -216,6 +237,27 @@ export const useDiagramStore = create<State>()(
       setQuickMode: (enabled) => {
         writeUiPreference('quickMode', enabled);
         set({ quickMode: enabled });
+      },
+      addGeneratedProject: (name, dsl) => {
+        const project = addStoredProject(name, dsl);
+        writeActiveProjectId(project.id);
+        set((state) => ({
+          generatedProjects: [...state.generatedProjects, project],
+          activeProjectId: project.id,
+        }));
+      },
+      removeGeneratedProject: (id) => {
+        removeStoredProject(id);
+        set((state) => {
+          const generatedProjects = state.generatedProjects.filter((p) => p.id !== id);
+          const activeProjectId = state.activeProjectId === id ? null : state.activeProjectId;
+          if (state.activeProjectId === id) writeActiveProjectId(null);
+          return { generatedProjects, activeProjectId };
+        });
+      },
+      setActiveProjectId: (id) => {
+        writeActiveProjectId(id);
+        set({ activeProjectId: id });
       },
     }),
     {

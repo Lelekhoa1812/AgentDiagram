@@ -1,0 +1,87 @@
+'use client';
+
+const PROJECTS_KEY = 'agentdiagram:projects:v1';
+const ACTIVE_PROJECT_ID_KEY = 'agentdiagram:active-project:v1';
+
+export interface StoredProject {
+  id: string;
+  name: string;
+  dsl: string;
+  createdAt: number;
+}
+
+function canUseLocalStorage(): boolean {
+  return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+}
+
+export function readStoredProjects(): StoredProject[] {
+  if (!canUseLocalStorage()) return [];
+  try {
+    const raw = window.localStorage.getItem(PROJECTS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (p): p is StoredProject =>
+        typeof p === 'object' &&
+        p !== null &&
+        typeof p.id === 'string' &&
+        typeof p.name === 'string' &&
+        typeof p.dsl === 'string' &&
+        typeof p.createdAt === 'number',
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function writeStoredProjects(projects: StoredProject[]): void {
+  if (!canUseLocalStorage()) return;
+  window.localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
+}
+
+export function addStoredProject(name: string, dsl: string): StoredProject {
+  const projects = readStoredProjects();
+
+  // Deduplicate: find existing names to derive a unique suffix
+  const existingNames = new Set(projects.map((p) => p.name));
+  let uniqueName = name;
+  let counter = 2;
+  while (existingNames.has(uniqueName)) {
+    uniqueName = `${name} ${counter}`;
+    counter++;
+  }
+
+  const project: StoredProject = {
+    id: `proj-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    name: uniqueName,
+    dsl,
+    createdAt: Date.now(),
+  };
+  writeStoredProjects([...projects, project]);
+  return project;
+}
+
+export function removeStoredProject(id: string): void {
+  const projects = readStoredProjects().filter((p) => p.id !== id);
+  writeStoredProjects(projects);
+}
+
+export function updateStoredProject(id: string, dsl: string): void {
+  const projects = readStoredProjects().map((p) => (p.id === id ? { ...p, dsl } : p));
+  writeStoredProjects(projects);
+}
+
+export function readActiveProjectId(): string | null {
+  if (!canUseLocalStorage()) return null;
+  return window.localStorage.getItem(ACTIVE_PROJECT_ID_KEY);
+}
+
+export function writeActiveProjectId(id: string | null): void {
+  if (!canUseLocalStorage()) return;
+  if (id === null) {
+    window.localStorage.removeItem(ACTIVE_PROJECT_ID_KEY);
+  } else {
+    window.localStorage.setItem(ACTIVE_PROJECT_ID_KEY, id);
+  }
+}

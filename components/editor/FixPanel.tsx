@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Wrench } from 'lucide-react';
 import { useDiagramStore } from '@/lib/state/store';
 import { ProviderConfig } from '../agent/ProviderConfig';
@@ -17,6 +17,39 @@ interface AnswerState {
 }
 
 const OTHER_TOKEN = '__other__';
+
+const FIX_PANEL_CACHE_KEY = 'agentdiagram:fix-panel:v1';
+
+interface PersistedFixState {
+  changeDescription: string;
+  step: 'prompt' | 'questions' | 'complete';
+  clarify: ClarifyStreamOutput | null;
+  answers: Record<string, { selected: string[]; custom: string }>;
+}
+
+function canUseLocalStorage(): boolean {
+  return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+}
+
+function saveFixState(state: PersistedFixState): void {
+  if (!canUseLocalStorage()) return;
+  try {
+    window.localStorage.setItem(FIX_PANEL_CACHE_KEY, JSON.stringify(state));
+  } catch {
+    // Ignore quota errors
+  }
+}
+
+function loadFixState(): PersistedFixState | null {
+  if (!canUseLocalStorage()) return null;
+  try {
+    const raw = window.localStorage.getItem(FIX_PANEL_CACHE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as PersistedFixState;
+  } catch {
+    return null;
+  }
+}
 
 interface Props {
   onFixApplied: () => void;
@@ -42,6 +75,40 @@ export function FixPanel({ onFixApplied }: Props) {
   const [phaseStages, setPhaseStages] = useState(FIX_APPLY_STAGES);
   const [showProviderConfig, setShowProviderConfig] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+
+  // Restore persisted state on mount
+  useEffect(() => {
+    const saved = loadFixState();
+    if (!saved) return;
+    if (saved.changeDescription) setChangeDescription(saved.changeDescription);
+    if (saved.step === 'questions' && saved.clarify) {
+      setClarify(saved.clarify);
+      const restored: Record<string, AnswerState> = {};
+      for (const [qid, ans] of Object.entries(saved.answers)) {
+        restored[qid] = { selected: new Set(ans.selected), custom: ans.custom };
+      }
+      setAnswers(restored);
+      setStep('questions');
+    } else if (saved.step === 'complete') {
+      setStep('complete');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist on every relevant state change
+  useEffect(() => {
+    if (step === 'generating') return;
+    const serializedAnswers: Record<string, { selected: string[]; custom: string }> = {};
+    for (const [qid, ans] of Object.entries(answers)) {
+      serializedAnswers[qid] = { selected: [...ans.selected], custom: ans.custom };
+    }
+    saveFixState({
+      changeDescription,
+      step,
+      clarify,
+      answers: serializedAnswers,
+    });
+  }, [changeDescription, step, clarify, answers]);
 
   const currentModel = provider.provider === 'foundry' ? (provider.customModel ?? '?') : provider.model;
 
@@ -268,8 +335,8 @@ export function FixPanel({ onFixApplied }: Props) {
   }, [clarify, answers]);
 
   return (
-    <>
-      <div className="h-full overflow-y-auto bg-ink-950 p-3 text-xs space-y-3">
+    <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+      <div className="flex-1 min-h-0 overflow-y-auto bg-ink-950 p-3 text-xs space-y-3">
 
         {/* Provider row */}
         <div>
@@ -475,6 +542,6 @@ export function FixPanel({ onFixApplied }: Props) {
           stages={phaseStages}
         />
       )}
-    </>
+    </div>
   );
 }

@@ -1,14 +1,27 @@
-// Login sequence diagram.
+// OAuth 2.0 authorization code flow with JWT access tokens.
 
 User [icon: monitor, color: sky]
-Web [icon: layout, color: indigo]
-API [icon: server, color: purple]
-DB [icon: table, color: green]
+Browser [icon: layout, color: indigo]
+AuthServer [icon: shield, color: purple]
+API [icon: server, color: coral]
+DB [icon: table, color: teal]
+Cache [icon: zap, color: amber]
 
-User > Web: clicks login
-Web > API: POST /login
-API > DB: select user by email
-API < DB: row
-API > API: verify password
-Web < API: 200 + session
-User < Web: redirect to dashboard
+User > Browser: click Sign In
+Browser > AuthServer: GET /oauth/authorize
+AuthServer > Browser: login form
+User > Browser: enter credentials
+Browser > AuthServer: POST /oauth/token
+AuthServer > DB: lookup user by email
+DB < AuthServer: user record + hashed password
+AuthServer > AuthServer: verify password + sign JWT
+Browser < AuthServer: access_token + refresh_token (httpOnly cookie)
+Browser > API: GET /me (Authorization: Bearer token)
+API > Cache: check token blacklist
+Cache < API: not blacklisted
+API > AuthServer: introspect token
+AuthServer < API: claims { sub, roles, exp }
+API > DB: SELECT profile WHERE id = sub
+DB < API: profile row
+Browser < API: 200 { name, email, avatar }
+User < Browser: dashboard rendered

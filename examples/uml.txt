@@ -1,17 +1,36 @@
-// Tiny UML-style class diagram (rendered as flow with class-shaped nodes).
+// E-commerce domain model — class diagram.
 
-Entities [color: indigo, icon: book-open] {
-  User [icon: list, color: indigo, shape: class]
-  Account [icon: tableau, color: indigo, shape: class]
-  Session [icon: clock, color: indigo, shape: class]
+Customer [color: sky, icon: users] {
+  Customer [icon: user, color: sky, shape: class]
+  Address [icon: map-pin, color: sky, shape: class]
+  Cart [icon: shopping-cart, color: sky, shape: class]
 }
 
-Services [color: coral, icon: cpu] {
-  AuthService [icon: shield, color: coral]
-  UserService [icon: cpu, color: coral]
+Catalog [color: indigo, icon: book-open] {
+  Product [icon: box, color: indigo, shape: class]
+  Category [icon: tag, color: indigo, shape: class]
+  Inventory [icon: layers, color: indigo, shape: class]
 }
 
-AuthService > Session
-UserService > User
-User <> Account
-Session > User
+Orders [color: coral, icon: clipboard] {
+  Order [icon: list, color: coral, shape: class]
+  OrderItem [icon: hash, color: coral, shape: class]
+  Payment [icon: credit-card, color: coral, shape: class]
+}
+
+Fulfillment [color: teal, icon: truck] {
+  Shipment [icon: package, color: teal, shape: class]
+  Tracking [icon: map-pin, color: teal, shape: class]
+}
+
+Customer <> Cart
+Customer > Address
+Cart > Order
+Order > OrderItem
+Order > Address
+Order > Payment
+OrderItem > Product
+Product > Category
+Product > Inventory
+Payment > Shipment
+Shipment > Tracking

@@ -22,9 +22,11 @@ interface Props {
   onDismiss?: () => void;
   terminalState?: { status: 'failed' | 'cancelled'; message: string } | null;
   stages?: Array<{ id: string; label: string }>;
+  /** Override the running title shown while the pipeline is active */
+  title?: string;
 }
 
-export function AnalysisAnimation({ retryNotice, counters, onCancel, onDismiss, terminalState, stages = DEFAULT_STAGES }: Props) {
+export function AnalysisAnimation({ retryNotice, counters, onCancel, onDismiss, terminalState, stages = DEFAULT_STAGES, title = 'Analyzing repository' }: Props) {
   const stage = useDiagramStore((s) => s.agentStage);
   const log = useDiagramStore((s) => s.agentLog);
   const [elapsed, setElapsed] = useState(0);
@@ -48,7 +50,7 @@ export function AnalysisAnimation({ retryNotice, counters, onCancel, onDismiss, 
                 ? 'Analysis failed'
                 : terminalState?.status === 'cancelled'
                   ? 'Analysis cancelled'
-                  : 'Analyzing repository'}
+                  : title}
             </div>
             <div className="text-[11px] text-ink-400">
               {isTerminal ? 'Review the error and log before closing' : 'Streaming live progress · cancel any time'}

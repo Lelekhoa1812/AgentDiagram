@@ -109,9 +109,9 @@ export default function Page() {
       />
 
       {mode === 'editor' ? (
-        <main className="grid min-h-0 flex-1 bg-ink-950" style={{ gridTemplateColumns: editorGridColumns }}>
+        <main className="grid min-h-0 flex-1 bg-ink-950" style={{ gridTemplateColumns: editorGridColumns, gridTemplateRows: 'minmax(0, 1fr)' }}>
           {isEditorVisible && (
-            <section className="flex min-w-0 flex-col border-r border-ink-700/80 bg-ink-900">
+            <section className="flex min-w-0 min-h-0 overflow-hidden flex-col border-r border-ink-700/80 bg-ink-900">
               <div className="flex min-h-12 items-center justify-between border-b border-ink-700/80 bg-ink-850/80 px-3">
                 <ExampleLoader />
               </div>

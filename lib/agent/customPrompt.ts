@@ -195,7 +195,7 @@ const PLAN_JSON_SCHEMA = {
 const ICON_GUIDANCE = `Available icons: ${knownIconNames().join(', ')}.`;
 const COLOR_GUIDANCE = `Color palette: ${COLOR_NAMES.join(', ')}. Use distinct colors per top-level group so the rendered diagram is easy to read.`;
 
-function formatAnswers(answers: CustomAnswer[]): string {
+export function formatAnswers(answers: CustomAnswer[]): string {
   if (!answers.length) return '(no answers provided — infer reasonable defaults from the prompt)';
   return answers
     .map((a, i) => {

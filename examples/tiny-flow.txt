@@ -1,26 +1,48 @@
-// Tiny example to showcase the DSL.
+// Full-stack web application — microservices architecture.
 
-Frontend [color: sky, icon: monitor] {
-  UI [icon: layout, color: sky]
-  Router [icon: git-branch, color: sky]
+Client [color: sky, icon: monitor] {
+  Web [icon: layout, color: sky]
+  Mobile [icon: smartphone, color: sky]
 }
 
-API [color: indigo, icon: server] {
-  Auth [icon: shield, color: indigo]
-  Users [icon: list, color: indigo]
-  Files [icon: archive, color: indigo]
+Gateway [color: indigo, icon: shield] {
+  API Gateway [icon: server, color: indigo]
+  Auth [icon: lock, color: indigo]
+  Rate Limiter [icon: sliders, color: indigo]
 }
 
-Database [color: green, icon: hard-drive] {
-  Postgres [icon: table, color: green]
-  Redis [icon: cpu, color: green]
+Services [color: purple, icon: cpu] {
+  Users [icon: users, color: purple]
+  Orders [icon: shopping-cart, color: purple]
+  Payments [icon: credit-card, color: purple]
+  Notifications [icon: bell, color: purple]
 }
 
-UI > Router
-Router > Auth
-Router > Users
-Router > Files
-Auth > Postgres
+Data [color: teal, icon: database] {
+  Postgres [icon: table, color: teal]
+  Redis [icon: zap, color: teal]
+  S3 [icon: archive, color: teal]
+}
+
+Queue [color: amber, icon: layers] {
+  Event Bus [icon: radio, color: amber]
+  Worker [icon: settings, color: amber]
+}
+
+Web > API Gateway
+Mobile > API Gateway
+API Gateway > Auth
+API Gateway > Rate Limiter
+Auth > Users
+Rate Limiter > Users
+Rate Limiter > Orders
+Rate Limiter > Payments
 Users > Postgres
-Files > Redis
-Files > Postgres
+Users > Redis
+Orders > Postgres
+Orders > S3
+Orders > Event Bus
+Payments > Orders
+Event Bus > Worker
+Worker > Notifications
+Notifications > Redis

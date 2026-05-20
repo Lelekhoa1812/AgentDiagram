@@ -22,6 +22,7 @@ export function AgentPanel() {
   const quickMode = useDiagramStore((s) => s.quickMode);
   const setMode = useDiagramStore((s) => s.setMode);
   const setDsl = useDiagramStore((s) => s.setDsl);
+  const addGeneratedProject = useDiagramStore((s) => s.addGeneratedProject);
   const setAgentStage = useDiagramStore((s) => s.setAgentStage);
   const pushLog = useDiagramStore((s) => s.pushAgentLog);
   const startAgent = useDiagramStore((s) => s.startAgent);
@@ -120,6 +121,8 @@ export function AgentPanel() {
       } else if (ev.type === 'result') {
         sawResult = true;
         setDsl(ev.dsl);
+        const projectName = rootPath.split('/').filter(Boolean).pop() || 'diagram';
+        addGeneratedProject(projectName, ev.dsl);
         setMode('editor');
       } else if (ev.type === 'done') {
         setAgentStage(null);
