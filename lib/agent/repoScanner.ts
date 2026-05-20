@@ -2,31 +2,22 @@ import fg from 'fast-glob';
 import ignore from 'ignore';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { defaultScannerIgnorePatterns } from './ignoreDefaults';
 
+// Motivation vs Logic: the canonical "skip" list lives in `ignoreDefaults.ts` so the folder
+// browser and the scanner stay in lock-step. We keep a few scanner-specific extras here for
+// security-sensitive patterns (credentials, source-maps, minified assets) that have no reason to
+// surface in either view.
 const DEFAULT_IGNORE = [
-  'node_modules/**', '.next/**', '.turbo/**', '.cache/**', '.parcel-cache/**',
-  '.vercel/**', '.claude/**', '.gemini/**', '.grok/**', '.foundry/**',
-  '.openai/**', '.xai/**', '.azure/**', '.google/**', '.microsoft/**',
-  '.aws/**', '.gcp/**', '.ibm/**', '.oracle/**', '.alibaba/**',
-  '.tencent/**', '.huawei/**', '.baidu/**', '.cursor/**', '.vscode/**',
-  '.github/**', '.gitlab/**', '.bitbucket/**', '.svn/**', '.hg/**',
-  '.bzr/**', '.darcs/**', '.fossil/**', '.mercurial/**', '.cvs/**',
-  '.cvsps/**', '.cvspss/**', '.cvstree/**', '.cvstrac/**', '.cvstest/**',
-  '.cvstree/**', '.cvstrac/**', '.vite/**', 'dist/**', 'build/**',
-  'coverage/**', '.git/**', 'docs/**', 'doc/**', 'documentation/**',
-  '**/docs/**', '**/documentation/**', '**/*.min.js', '**/*.map',
-  '**/*.lock', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml',
-  '**/*.png', '**/*.jpg', '**/*.jpeg', '**/*.gif', '**/*.webp',
-  '**/*.ico', '**/*.pdf', '**/*.zip', '**/*.tar', '**/*.gz',
-  '**/*.pem', '**/*.key', '**/*.crt', '**/.env', '**/.env.*',
-  '**/__tests__/**', '**/__mocks__/**', '**/*.test.*', '**/*.spec.*',
-  'test/**', 'tests/**', 'e2e/**', 'playwright-report/**',
-  '.agentdiagram-cache/**', '**/.agentdiagram-cache/**',
-  '**/diagram.png', '**/diagram.svg', '**/tsconfig.tsbuildinfo',
-  'vendor/**', '**/*.7z', '**/*.rar', '**/*.xz', '**/*.bz2',
-  '**/*.iso', '**/*.exe', '**/*.dll', '**/*.so', '**/*.dylib',
-  '**/*.jar', '**/*.war', '**/*.ear', '**/*.bin', '**/*.o',
-  '**/*.a', '**/*.pyc', '**/*.class', '**/*.pdb',
+  ...defaultScannerIgnorePatterns(),
+  '**/*.min.js',
+  '**/*.min.css',
+  '**/*.lock',
+  '**/*.pem',
+  '**/*.key',
+  '**/*.crt',
+  '**/diagram.png',
+  '**/diagram.svg',
 ];
 
 const MAX_FILE_BYTES = 1024 * 1024; // 1MB
@@ -65,14 +56,15 @@ export const AGENT_ALLOWED_EXTENSIONS = [
   'vue',
 ] as const;
 
+// Motivation vs Logic: `Dockerfile`, `docker-compose.*` and `requirements.txt` used to live
+// here so the scanner could read them as manifests. The product decision is to bypass them
+// entirely (they're hidden from the folder browser too); `pyproject.toml` still covers Python
+// stack detection and `package.json` / `Cargo.toml` / `go.mod` cover everything else.
 export const AGENT_ALLOWED_FILES = [
   'Cargo.toml',
-  'Dockerfile',
   'Gemfile',
   'build.gradle',
   'composer.json',
-  'docker-compose.yaml',
-  'docker-compose.yml',
   'go.mod',
   'next.config.js',
   'next.config.mjs',
@@ -80,7 +72,6 @@ export const AGENT_ALLOWED_FILES = [
   'package.json',
   'pom.xml',
   'pyproject.toml',
-  'requirements.txt',
   'tailwind.config.js',
   'tailwind.config.ts',
   'tsconfig.json',

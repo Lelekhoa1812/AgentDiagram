@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { defaultRepoPath, guardPath } from '@/lib/security/pathGuard';
 import { normalizeIgnoredFolders } from '@/lib/agent/repoScanner';
+import { isHiddenByDefault } from '@/lib/agent/ignoreDefaults';
 
 export const runtime = 'nodejs';
 
@@ -12,36 +13,10 @@ const Body = z.object({
   parent: z.string().optional(),
 });
 
-// Motivation vs Logic: every browse response should mirror the agent's own ignore conventions so users never see and try to ignore folders we already silently skip (caches, VCS metadata, build outputs). Centralising the list here also keeps the picker visually quiet on cluttered monorepos.
-const HIDDEN_DIRS = new Set([
-  '.agentdiagram-cache',
-  '.cache',
-  '.git',
-  '.hg',
-  '.idea',
-  '.next',
-  '.parcel-cache',
-  '.svn',
-  '.turbo',
-  '.vercel',
-  '.vscode',
-  'coverage',
-  'dist',
-  'build',
-  'node_modules',
-  'playwright-report',
-  'vendor',
-]);
-
-const HIDDEN_FILES = new Set([
-  '.DS_Store',
-  'Thumbs.db',
-  'package-lock.json',
-  'pnpm-lock.yaml',
-  'yarn.lock',
-  'tsconfig.tsbuildinfo',
-]);
-
+// Motivation vs Logic: the folder browser must show the same view the agent will scan, so we
+// defer to the shared `isHiddenByDefault` matcher in `lib/agent/ignoreDefaults.ts`. The only
+// extra rule here is the AgentDiagram self-folder, which is dynamic (depends on `process.cwd()`)
+// and therefore lives outside the static pattern list.
 const SELF_ROOT = path.resolve(process.cwd());
 
 function childPath(root: string, rel: string): string | null {
@@ -75,13 +50,9 @@ export async function POST(req: Request) {
 
     const entries = dirents
       .filter((dirent) => {
-        if (dirent.isDirectory()) {
-          if (HIDDEN_DIRS.has(dirent.name)) return false;
-        } else if (dirent.isFile()) {
-          if (HIDDEN_FILES.has(dirent.name)) return false;
-        } else {
-          return false;
-        }
+        const isDir = dirent.isDirectory();
+        if (!isDir && !dirent.isFile()) return false;
+        if (isHiddenByDefault(dirent.name, isDir)) return false;
         // Skip the AgentDiagram app folder itself so users never accidentally
         // pipe our own source back into the agent when scanning a parent dir.
         const abs = path.resolve(absParent, dirent.name);

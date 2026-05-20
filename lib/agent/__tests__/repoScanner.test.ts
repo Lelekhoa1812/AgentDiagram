@@ -86,4 +86,38 @@ describe('repoScanner', () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it('bypasses dotfiles, docker, lockfiles, markdown, logs and test/log folders by default', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentdiagram-scan-defaults-'));
+    try {
+      await write(root, 'src/app.ts', 'export const app = true;\n');
+      // Files the user explicitly asked to bypass
+      await write(root, 'Dockerfile', 'FROM node:20\n');
+      await write(root, 'Dockerfile.prod', 'FROM node:20\n');
+      await write(root, 'docker-compose.yml', 'services: {}\n');
+      await write(root, 'requirements.txt', 'flask\n');
+      await write(root, 'README.md', '# Project\n');
+      await write(root, 'CLAUDE.md', '# Agent guide\n');
+      await write(root, 'docs/architecture.md', '# Architecture\n');
+      await write(root, '.claude/config.json', '{}\n');
+      await write(root, '.rtk/cache.bin', 'x');
+      await write(root, '.gitignore', 'node_modules\n');
+      await write(root, '.dockerignore', '*\n');
+      await write(root, '.hintrc', '{}\n');
+      await write(root, 'package-lock.json', '{}\n');
+      // Folders
+      await write(root, 'tests/foo.ts', 'export const foo = true;\n');
+      await write(root, 'test/bar.ts', 'export const bar = true;\n');
+      await write(root, 'logs/app.log', 'log entry\n');
+      await write(root, 'log/older.log', 'older log\n');
+      await write(root, 'src/feature.log', 'should not be scanned\n');
+
+      const repo = await scanRepo(root, { allowlist: AGENT_FILE_ALLOWLIST });
+      const paths = repo.files.map((file) => file.path).sort();
+
+      expect(paths).toEqual(['src/app.ts']);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
