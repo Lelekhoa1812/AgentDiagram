@@ -217,7 +217,7 @@ export async function runMultiLayerPipeline(
       relevant.map((r) =>
         sumLimit(async () => {
           if (input.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-          const text = await readRepoFile(repoMap.root, r.file.path, 56_000);
+          const text = await readRepoFile(repoMap.root, r.file.path, 180_000);
           const summary = await summarizeFile(input.session, r.file.path, text, {
             signal: input.signal,
             onRetry: onRetry('summarize'),

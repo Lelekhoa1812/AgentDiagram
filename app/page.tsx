@@ -10,6 +10,7 @@ import { AgentPanel } from '@/components/agent/AgentPanel';
 import { MultiLayerPanel } from '@/components/multilayer/MultiLayerPanel';
 import { LayerNavigator } from '@/components/multilayer/LayerNavigator';
 import { useDiagramStore } from '@/lib/state/store';
+import { readUiPreferences, writeUiPreference } from '@/lib/state/uiPreferences';
 import { downloadPng } from '@/lib/export/png';
 import { downloadSvg } from '@/lib/export/svg';
 import flowExample from '../examples/flow.txt';
@@ -20,9 +21,17 @@ export default function Page() {
   const dsl = useDiagramStore((s) => s.dslText);
   const setDsl = useDiagramStore((s) => s.setDsl);
   const clearOverrides = useDiagramStore((s) => s.clearOverrides);
+  const hydrateUiPreferences = useDiagramStore((s) => s.hydrateUiPreferences);
   const canvasRef = useRef<DiagramCanvasHandle>(null);
   const [isEditorVisible, setIsEditorVisible] = useState(true);
   const [isInspectorVisible, setIsInspectorVisible] = useState(true);
+
+  useEffect(() => {
+    hydrateUiPreferences();
+    const preferences = readUiPreferences();
+    if (typeof preferences.isEditorVisible === 'boolean') setIsEditorVisible(preferences.isEditorVisible);
+    if (typeof preferences.isInspectorVisible === 'boolean') setIsInspectorVisible(preferences.isInspectorVisible);
+  }, [hydrateUiPreferences]);
 
   // Seed with the Agentic RFQ example on first load.
   useEffect(() => {
@@ -55,6 +64,22 @@ export default function Page() {
     canvasRef.current?.fitView();
   }, []);
 
+  const onToggleEditor = useCallback(() => {
+    setIsEditorVisible((value) => {
+      const next = !value;
+      writeUiPreference('isEditorVisible', next);
+      return next;
+    });
+  }, []);
+
+  const onToggleInspector = useCallback(() => {
+    setIsInspectorVisible((value) => {
+      const next = !value;
+      writeUiPreference('isInspectorVisible', next);
+      return next;
+    });
+  }, []);
+
   // Motivation vs Logic: side panels are optional workspace tools, so the shell derives grid columns from visibility state instead of leaving collapsed panels mounted with inert width.
   const editorGridColumns = useMemo(
     () =>
@@ -78,8 +103,8 @@ export default function Page() {
         onFitView={onFitView}
         isEditorVisible={isEditorVisible}
         isInspectorVisible={isInspectorVisible}
-        onToggleEditor={() => setIsEditorVisible((value) => !value)}
-        onToggleInspector={() => setIsInspectorVisible((value) => !value)}
+        onToggleEditor={onToggleEditor}
+        onToggleInspector={onToggleInspector}
       />
 
       {mode === 'editor' ? (

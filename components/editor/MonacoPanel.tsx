@@ -3,9 +3,10 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import Editor, { type OnMount } from '@monaco-editor/react';
 import { useDiagramStore } from '@/lib/state/store';
+import { readUiPreference, writeUiPreference, type PersistedEditorTab } from '@/lib/state/uiPreferences';
 import { registerDslLanguage } from './dslLanguage';
 
-type Tab = 'dsl' | 'ir' | 'diagnostics';
+type Tab = PersistedEditorTab;
 
 export function MonacoPanel() {
   const dsl = useDiagramStore((s) => s.dslText);
@@ -18,6 +19,16 @@ export function MonacoPanel() {
 
   const irText = useMemo(() => (diagram ? JSON.stringify(diagram, null, 2) : '// Render the diagram to see the IR'), [diagram]);
   const diagnostics = useMemo(() => diagram?.diagnostics ?? [], [diagram]);
+
+  useEffect(() => {
+    const savedTab = readUiPreference('editorTab');
+    if (savedTab) setTab(savedTab);
+  }, []);
+
+  const selectTab = (nextTab: Tab) => {
+    writeUiPreference('editorTab', nextTab);
+    setTab(nextTab);
+  };
 
   const onMount: OnMount = (editor, monaco) => {
     monacoRef.current = monaco;
@@ -67,7 +78,7 @@ export function MonacoPanel() {
         {(['dsl', 'ir', 'diagnostics'] as Tab[]).map((t) => (
           <button
             key={t}
-            onClick={() => setTab(t)}
+            onClick={() => selectTab(t)}
             className={`px-3 py-2 uppercase tracking-wider transition-colors ${
               tab === t ? 'border-b-2 border-accent text-ink-100' : 'text-ink-400 hover:text-ink-200'
             }`}

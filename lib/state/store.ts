@@ -7,6 +7,7 @@ import type { LayoutResult, LayoutRect } from '../layout/elk';
 import type { LayoutStrategy } from '../layout/strategies';
 import { getProviderDefaultModel } from '@/lib/agent/provider-models';
 import type { ProviderId } from '../agent/providers/types';
+import { readUiPreferences, writeUiPreference } from './uiPreferences';
 
 export type Mode = 'editor' | 'agent' | 'multi-layer';
 export type ThemeMode = 'dark' | 'light';
@@ -95,6 +96,7 @@ interface State {
   setProvider: (cfg: Partial<ProviderConfig>) => void;
   setDiagramType: (t: State['diagramType']) => void;
   setFocusPrompt: (s: string) => void;
+  hydrateUiPreferences: () => void;
   startAgent: (sessionId: string) => void;
   pushAgentLog: (entry: Omit<State['agentLog'][number], 'ts'>) => void;
   setAgentStage: (stage: string | null) => void;
@@ -124,12 +126,21 @@ export const useDiagramStore = create<State>()(
       agentLog: [],
       multiLayer: null,
       activeLayer: 'overview',
-      setMode: (mode) => set({ mode }),
-      setTheme: (theme) => set({ theme }),
+      setMode: (mode) => {
+        writeUiPreference('mode', mode);
+        set({ mode });
+      },
+      setTheme: (theme) => {
+        writeUiPreference('theme', theme);
+        set({ theme });
+      },
       setDsl: (text) => set({ dslText: text }),
       setDiagram: (diagram) => set({ diagram }),
       setLayoutResult: (result) => set({ layoutResult: result }),
-      setStrategy: (strategy) => set({ layoutStrategy: strategy }),
+      setStrategy: (strategy) => {
+        writeUiPreference('layoutStrategy', strategy);
+        set({ layoutStrategy: strategy });
+      },
       setOverride: (scope, id, value) =>
         set((state) => ({
           overrides: {
@@ -140,9 +151,46 @@ export const useDiagramStore = create<State>()(
       clearOverrides: () => set({ overrides: { nodes: {}, groups: {}, edges: {} } }),
       setSelection: (sel) => set({ selection: sel }),
       setViewport: (v) => set({ viewport: v }),
-      setProvider: (cfg) => set((state) => ({ provider: { ...state.provider, ...cfg } })),
-      setDiagramType: (t) => set({ diagramType: t }),
-      setFocusPrompt: (s) => set({ focusPrompt: s }),
+      setProvider: (cfg) =>
+        set((state) => {
+          const provider = { ...state.provider, ...cfg };
+          writeUiPreference('provider', {
+            provider: provider.provider,
+            model: provider.model,
+            customModel: provider.customModel,
+            endpoint: provider.endpoint,
+          });
+          return { provider };
+        }),
+      setDiagramType: (t) => {
+        writeUiPreference('diagramType', t);
+        set({ diagramType: t });
+      },
+      setFocusPrompt: (s) => {
+        writeUiPreference('focusPrompt', s);
+        set({ focusPrompt: s });
+      },
+      hydrateUiPreferences: () => {
+        const preferences = readUiPreferences();
+        // Motivation vs Logic: UI choices should survive reloads, but credentials stay session-only so localStorage never contradicts the API key copy.
+        set((state) => ({
+          ...(preferences.mode ? { mode: preferences.mode } : {}),
+          ...(preferences.theme ? { theme: preferences.theme } : {}),
+          ...(preferences.layoutStrategy ? { layoutStrategy: preferences.layoutStrategy } : {}),
+          ...(preferences.diagramType ? { diagramType: preferences.diagramType } : {}),
+          ...(preferences.focusPrompt !== undefined ? { focusPrompt: preferences.focusPrompt } : {}),
+          ...(preferences.activeLayer ? { activeLayer: preferences.activeLayer } : {}),
+          ...(preferences.provider
+            ? {
+                provider: {
+                  ...state.provider,
+                  ...preferences.provider,
+                  apiKey: state.provider.apiKey,
+                },
+              }
+            : {}),
+        }));
+      },
       startAgent: (sessionId) =>
         set({ agentSessionId: sessionId, agentRunning: true, agentLog: [], agentStage: null }),
       pushAgentLog: (entry) =>
@@ -151,7 +199,10 @@ export const useDiagramStore = create<State>()(
       stopAgent: () => set({ agentRunning: false, agentSessionId: null }),
       setMultiLayer: (output) =>
         set({ multiLayer: output, activeLayer: output ? 'overview' : 'overview' }),
-      setActiveLayer: (name) => set({ activeLayer: name }),
+      setActiveLayer: (name) => {
+        writeUiPreference('activeLayer', name);
+        set({ activeLayer: name });
+      },
     }),
     {
       partialize: (state) => ({
