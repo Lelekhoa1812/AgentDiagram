@@ -10,13 +10,13 @@ export const OPENAI_MODELS = [
 
 export const ANTHROPIC_MODELS = ['opus-4.7', 'sonnet-4.6', 'haiku-4.5'] as const;
 
-export const GEMINI_MODELS = ['gemini-3.1-pro', 'gemini-3.5-flash', 'gemini-3.1-flash-lite'] as const;
+export const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3.1-pro-preview', 'gemini-3.5-flash', 'gemini-3.1-flash-lite'] as const;
 export const GROK_MODELS = ['grok-3', 'grok-3-mini', 'grok-2-1212', 'grok-2-vision-1212'] as const;
 
 export const PROVIDER_DEFAULTS: Record<ProviderId, string> = {
   openai: 'gpt-5.5',
   anthropic: 'opus-4.7',
-  gemini: 'gemini-3.1-pro',
+  gemini: 'gemini-2.5-flash',
   foundry: '',
   grok: 'grok-3',
 };

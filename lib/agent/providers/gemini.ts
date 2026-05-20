@@ -27,8 +27,7 @@ export class GeminiProvider implements Provider {
     const generationConfig: Record<string, unknown> = {};
     if (params.jsonSchema) {
       generationConfig.responseMimeType = 'application/json';
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      generationConfig.responseSchema = params.jsonSchema as any;
+      generationConfig.responseSchema = toGeminiResponseSchema(params.jsonSchema);
     }
     const model = this.client.getGenerativeModel({
       model: params.model,
@@ -45,4 +44,23 @@ export class GeminiProvider implements Provider {
     const res = await chat.sendMessage(last.content);
     return res.response.text();
   }
+}
+
+function toGeminiResponseSchema(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(toGeminiResponseSchema);
+  if (!schema || typeof schema !== 'object') return schema;
+
+  const source = schema as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (key === 'additionalProperties') continue;
+    if (key === 'type' && Array.isArray(value)) {
+      const nonNullTypes = value.filter((t) => t !== 'null');
+      out.type = nonNullTypes[0] ?? 'string';
+      if (value.includes('null')) out.nullable = true;
+      continue;
+    }
+    out[key] = toGeminiResponseSchema(value);
+  }
+  return out;
 }

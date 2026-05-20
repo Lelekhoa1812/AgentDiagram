@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { chatWithRetry, type ProviderSession, type RetryListener } from './providers';
+import { type ProviderSession, type RetryListener } from './providers';
+import { chatStructuredWithRetry } from './structuredOutput';
 import { readCache, writeCache } from './cache';
 import { chunkFile } from './chunker';
 import { sha1 } from '../util/hash';
@@ -208,11 +209,11 @@ async function summarizeText(
     },
   ];
 
-  const raw = await chatWithRetry(session, messages, {
+  return chatStructuredWithRetry(session, messages, {
     signal: opts.signal,
     onRetry: opts.onRetry,
     jsonSchema: SCHEMA,
+    schema: FileSummarySchema,
+    parse: normalizeFileSummary,
   });
-
-  return normalizeFileSummary(JSON.parse(raw));
 }

@@ -104,6 +104,12 @@ function focusBias(focus: string, file: ScannedFile): number {
   return Math.min(0.5, matches * 0.15);
 }
 
+function folderKey(filePath: string): string {
+  const parts = filePath.split('/');
+  if (parts.length <= 1) return '.';
+  return parts.slice(0, Math.min(2, parts.length - 1)).join('/');
+}
+
 export function classifyRelevance(
   map: RepoMap,
   kind: DiagramKind,
@@ -118,5 +124,27 @@ export function classifyRelevance(
     out.push({ file, score: total, reasons });
   }
   out.sort((a, b) => b.score - a.score);
-  return out.slice(0, topK);
+  if (out.length <= topK) return out;
+
+  const selected: Relevance[] = [];
+  const selectedPaths = new Set<string>();
+  const selectedFolders = new Set<string>();
+  const primaryLimit = Math.max(1, Math.floor(topK * 0.5));
+
+  function add(item: Relevance): void {
+    if (selectedPaths.has(item.file.path) || selected.length >= topK) return;
+    selected.push(item);
+    selectedPaths.add(item.file.path);
+    selectedFolders.add(folderKey(item.file.path));
+  }
+
+  for (const item of out.slice(0, primaryLimit)) add(item);
+
+  // Motivation vs Logic: huge repos often have one noisy surface area that scores highest, but useful diagrams need architectural breadth. Reserve part of the budget for the best file from folders not yet represented, then fill remaining slots by score.
+  for (const item of out) {
+    if (!selectedFolders.has(folderKey(item.file.path))) add(item);
+    if (selected.length >= topK) return selected;
+  }
+  for (const item of out) add(item);
+  return selected;
 }

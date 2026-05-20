@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { chatWithRetry, type ProviderSession, type RetryListener } from './providers';
+import { type ProviderSession, type RetryListener } from './providers';
+import { chatStructuredWithRetry } from './structuredOutput';
 import type { FileSummary } from './summarizer';
 import type { RepoMap } from './repoScanner';
 import type { DiagramKind } from './classifier';
@@ -258,12 +259,12 @@ export async function generatePlan(
     { role: 'user' as const, content: userMsg },
   ];
 
-  const raw = await chatWithRetry(session, messages, {
+  return chatStructuredWithRetry(session, messages, {
     signal: opts.signal,
     onRetry: opts.onRetry,
     jsonSchema: SCHEMA,
+    schema: DiagramPlanSchema,
   });
-  return DiagramPlanSchema.parse(JSON.parse(raw));
 }
 
 // =========================================================================
@@ -373,10 +374,10 @@ export async function identifyLayers(
     { role: 'user' as const, content: userMsg },
   ];
 
-  const raw = await chatWithRetry(session, messages, {
+  return chatStructuredWithRetry(session, messages, {
     signal: opts.signal,
     onRetry: opts.onRetry,
     jsonSchema: LAYER_CATALOG_SCHEMA,
+    schema: LayerCatalogSchema,
   });
-  return LayerCatalogSchema.parse(JSON.parse(raw));
 }
