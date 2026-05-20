@@ -19,7 +19,6 @@ import flowExample from '../examples/flow.txt';
 export default function Page() {
   const mode = useDiagramStore((s) => s.mode);
   const theme = useDiagramStore((s) => s.theme);
-  const dsl = useDiagramStore((s) => s.dslText);
   const setDsl = useDiagramStore((s) => s.setDsl);
   const clearOverrides = useDiagramStore((s) => s.clearOverrides);
   const hydrateUiPreferences = useDiagramStore((s) => s.hydrateUiPreferences);
@@ -34,9 +33,13 @@ export default function Page() {
     if (typeof preferences.isInspectorVisible === 'boolean') setIsInspectorVisible(preferences.isInspectorVisible);
   }, [hydrateUiPreferences]);
 
-  // Seed with the Agentic RFQ example on first load.
+  // Seed with the flow example only when there is truly no saved content.
+  // Reading directly from localStorage avoids the closure-stale-value trap:
+  // hydrateUiPreferences() (in the preceding effect) updates the Zustand store
+  // but React hasn't re-rendered yet, so we read the persisted preference
+  // directly instead of relying on the stale `dsl` value from the first render.
   useEffect(() => {
-    if (!dsl) setDsl(flowExample as unknown as string);
+    if (!readUiPreferences().dslText) setDsl(flowExample as unknown as string);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

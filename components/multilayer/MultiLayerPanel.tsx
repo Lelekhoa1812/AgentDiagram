@@ -15,6 +15,7 @@ export function MultiLayerPanel() {
   const quickMode = useDiagramStore((s) => s.quickMode);
   const setMode = useDiagramStore((s) => s.setMode);
   const setDsl = useDiagramStore((s) => s.setDsl);
+  const addGeneratedProject = useDiagramStore((s) => s.addGeneratedProject);
   const setMultiLayer = useDiagramStore((s) => s.setMultiLayer);
   const setActiveLayer = useDiagramStore((s) => s.setActiveLayer);
   const setAgentStage = useDiagramStore((s) => s.setAgentStage);
@@ -117,9 +118,8 @@ export function MultiLayerPanel() {
         clearOverrides();
         setActiveLayer('overview');
         setDsl(out.overview.dsl);
-        // After receiving the result, switch to editor view so the user
-        // immediately sees the rendered overview — the LayerNavigator
-        // appears above it.
+        const projectName = rootPath.split('/').filter(Boolean).pop() || 'diagram';
+        addGeneratedProject(projectName, out.overview.dsl, out);
         setMode('editor');
       } else if (ev.type === 'done') {
         setAgentStage(null);

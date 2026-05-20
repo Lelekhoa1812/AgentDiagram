@@ -21,11 +21,9 @@ const DEFAULT_PROJECTS: DefaultProject[] = [
 ];
 
 export function ExampleLoader() {
-  const setDsl = useDiagramStore((s) => s.setDsl);
-  const clear = useDiagramStore((s) => s.clearOverrides);
   const activeProjectId = useDiagramStore((s) => s.activeProjectId);
-  const setActiveProjectId = useDiagramStore((s) => s.setActiveProjectId);
   const generatedProjects = useDiagramStore((s) => s.generatedProjects);
+  const openProject = useDiagramStore((s) => s.openProject);
   const removeGeneratedProject = useDiagramStore((s) => s.removeGeneratedProject);
   const renameGeneratedProject = useDiagramStore((s) => s.renameGeneratedProject);
   const reorderGeneratedProjects = useDiagramStore((s) => s.reorderGeneratedProjects);
@@ -35,10 +33,11 @@ export function ExampleLoader() {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
 
-  const loadProject = (id: string, dsl: string) => {
-    clear();
-    setDsl(dsl);
-    setActiveProjectId(id);
+  const loadProject = (project: { id: string; dsl: string; multiLayer?: typeof generatedProjects[number]['multiLayer'] }) => {
+    // Root Cause vs Logic: project tabs previously copied only the DSL, so reopening a generated multi-layer project
+    // discarded its stored layer bundle and looked like it had been overwritten. Load the full stored project context
+    // instead so the active tab, DSL, and layer navigator stay aligned.
+    openProject(project);
   };
 
   const commitRename = () => {
@@ -121,7 +120,7 @@ export function ExampleLoader() {
                 />
               ) : (
                 <button
-                  onClick={() => loadProject(proj.id, proj.dsl)}
+                  onClick={() => loadProject(proj)}
                   onDoubleClick={(e) => {
                     e.stopPropagation();
                     setEditingId(proj.id);
@@ -157,7 +156,7 @@ export function ExampleLoader() {
           return (
             <button
               key={proj.id}
-              onClick={() => loadProject(proj.id, proj.dsl)}
+              onClick={() => loadProject({ id: proj.id, dsl: proj.dsl })}
               className={`surface-transition shrink-0 rounded-md border px-2.5 py-1.5 text-[11px] hover:-translate-y-0.5 ${
                 isActive
                   ? 'border-accent/60 bg-accent/10 text-ink-100'

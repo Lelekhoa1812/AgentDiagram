@@ -309,7 +309,7 @@ export function CustomPromptPanel() {
           setActiveLayer('overview');
           setDsl(out.overview.dsl);
           const name = prompt.trim().split(/\s+/).slice(0, 3).join(' ') || 'custom';
-          addGeneratedProject(name, out.overview.dsl);
+          addGeneratedProject(name, out.overview.dsl, out);
           setMode('editor');
         } else if (ev.type === 'done') {
           setAgentStage(null);

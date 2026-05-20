@@ -10,6 +10,7 @@ import type { ProviderId } from '../agent/providers/types';
 import { readUiPreferences, writeUiPreference } from './uiPreferences';
 import {
   type StoredProject,
+  type MultiLayerOutput,
   addStoredProject,
   readStoredProjects,
   removeStoredProject,
@@ -18,6 +19,9 @@ import {
   readActiveProjectId,
   writeActiveProjectId,
 } from './projectStorage';
+
+// Re-export so all existing imports from this module continue to work.
+export type { LayerDiagram, MultiLayerOutput } from './projectStorage';
 
 export type Mode = 'editor' | 'agent' | 'multi-layer' | 'custom-prompt';
 export type ThemeMode = 'dark' | 'light';
@@ -47,20 +51,6 @@ export interface ProviderConfig {
   apiKey: string;
   customModel?: string;
   endpoint?: string;
-}
-
-export interface LayerDiagram {
-  name: string;
-  description: string;
-  dsl: string;
-}
-
-export interface MultiLayerOutput {
-  /** High-level diagram covering all layers */
-  overview: LayerDiagram;
-  /** One sub-diagram per layer */
-  layers: LayerDiagram[];
-  generatedAt: number;
 }
 
 const DEFAULT_PROVIDER: ProviderConfig = {
@@ -121,7 +111,8 @@ interface State {
   setMultiLayer: (output: MultiLayerOutput | null) => void;
   setActiveLayer: (name: string) => void;
   setQuickMode: (enabled: boolean) => void;
-  addGeneratedProject: (name: string, dsl: string) => void;
+  addGeneratedProject: (name: string, dsl: string, multiLayer?: MultiLayerOutput) => void;
+  openProject: (project: { id: string; dsl: string; multiLayer?: MultiLayerOutput | null }) => void;
   removeGeneratedProject: (id: string) => void;
   setActiveProjectId: (id: string | null) => void;
   renameGeneratedProject: (id: string, name: string) => void;
@@ -203,10 +194,13 @@ export const useDiagramStore = create<State>()(
         const preferences = readUiPreferences();
         const generatedProjects = readStoredProjects();
         const activeProjectId = readActiveProjectId();
+        const activeProject = generatedProjects.find((p) => p.id === activeProjectId);
+        const restoredMultiLayer = activeProject?.multiLayer ?? null;
         // Motivation vs Logic: UI choices should survive reloads, but credentials stay session-only so localStorage never contradicts the API key copy.
         set((state) => ({
           generatedProjects,
           activeProjectId,
+          multiLayer: restoredMultiLayer,
           ...(preferences.mode ? { mode: preferences.mode } : {}),
           ...(preferences.theme ? { theme: preferences.theme } : {}),
           ...(preferences.layoutStrategy ? { layoutStrategy: preferences.layoutStrategy } : {}),
@@ -242,13 +236,25 @@ export const useDiagramStore = create<State>()(
         writeUiPreference('quickMode', enabled);
         set({ quickMode: enabled });
       },
-      addGeneratedProject: (name, dsl) => {
-        const project = addStoredProject(name, dsl);
+      addGeneratedProject: (name, dsl, multiLayer?) => {
+        const project = addStoredProject(name, dsl, multiLayer);
         writeActiveProjectId(project.id);
         set((state) => ({
           generatedProjects: [project, ...state.generatedProjects],
           activeProjectId: project.id,
+          ...(multiLayer ? { multiLayer, activeLayer: 'overview' } : {}),
         }));
+      },
+      openProject: (project) => {
+        writeUiPreference('dslText', project.dsl);
+        writeActiveProjectId(project.id);
+        set({
+          dslText: project.dsl,
+          activeProjectId: project.id,
+          multiLayer: project.multiLayer ?? null,
+          activeLayer: 'overview',
+          overrides: { nodes: {}, groups: {}, edges: {} },
+        });
       },
       removeGeneratedProject: (id) => {
         removeStoredProject(id);
