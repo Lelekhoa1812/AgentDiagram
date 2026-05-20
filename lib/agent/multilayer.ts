@@ -35,6 +35,8 @@ export interface MultiLayerInput {
   focus: string;
   topK?: number;
   ignoredFolders?: string[];
+  /** See PipelineInput.quickMode — skips per-file summarization for the layered pipeline too. */
+  quickMode?: boolean;
   signal?: AbortSignal;
 }
 
@@ -212,32 +214,44 @@ export async function runMultiLayerPipeline(
       counters: { docs: docs.length, externals: importGraph.externals.size, clusters: repoContext.folderClusters.length },
     });
 
-    // 5. Summarize
-    send({ type: 'stage', stage: 'summarize', status: 'start' });
-    const sumLimit = pLimit(4);
-    let done = 0;
-    const summaries: Array<{ path: string; summary: FileSummary }> = await Promise.all(
-      relevant.map((r) =>
-        sumLimit(async () => {
-          if (input.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-          const text = await readRepoFile(repoMap.root, r.file.path, 180_000);
-          const summary = await summarizeFile(input.session, r.file.path, text, {
-            signal: input.signal,
-            onRetry: onRetry('summarize'),
-          });
-          done++;
-          send({
-            type: 'stage',
-            stage: 'summarize',
-            status: 'progress',
-            percent: Math.round((done / relevant.length) * 100),
-            counters: { done, total: relevant.length },
-          });
-          return { path: r.file.path, summary };
-        }),
-      ),
-    );
-    send({ type: 'stage', stage: 'summarize', status: 'done', message: `Summarized ${summaries.length} files` });
+    // 5. Summarize — skipped in Quick Mode.
+    let summaries: Array<{ path: string; summary: FileSummary }>;
+    if (input.quickMode) {
+      send({
+        type: 'stage',
+        stage: 'summarize',
+        status: 'done',
+        message: 'Quick Mode: skipped per-file summarization — layers will be inferred from structural digest only',
+        counters: { done: 0, total: relevant.length },
+      });
+      summaries = [];
+    } else {
+      send({ type: 'stage', stage: 'summarize', status: 'start' });
+      const sumLimit = pLimit(4);
+      let done = 0;
+      summaries = await Promise.all(
+        relevant.map((r) =>
+          sumLimit(async () => {
+            if (input.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+            const text = await readRepoFile(repoMap.root, r.file.path, 180_000);
+            const summary = await summarizeFile(input.session, r.file.path, text, {
+              signal: input.signal,
+              onRetry: onRetry('summarize'),
+            });
+            done++;
+            send({
+              type: 'stage',
+              stage: 'summarize',
+              status: 'progress',
+              percent: Math.round((done / relevant.length) * 100),
+              counters: { done, total: relevant.length },
+            });
+            return { path: r.file.path, summary };
+          }),
+        ),
+      );
+      send({ type: 'stage', stage: 'summarize', status: 'done', message: `Summarized ${summaries.length} files` });
+    }
 
     // 6. Identify layers
     send({ type: 'stage', stage: 'layers', status: 'start', message: 'Identifying architectural layers…' });

@@ -1,7 +1,6 @@
 import { z } from 'zod';
-import { runMultiLayerPipeline } from '@/lib/agent/multilayer';
+import { runCustomPlan } from '@/lib/agent/customPipeline';
 import { makeSseStream } from '@/lib/util/stream';
-import { guardPath, defaultRepoPath } from '@/lib/security/pathGuard';
 import { PROVIDER_ENV } from '@/lib/agent/providers';
 
 export const runtime = 'nodejs';
@@ -12,11 +11,19 @@ const Body = z.object({
   model: z.string(),
   apiKey: z.string().optional(),
   endpoint: z.string().optional(),
-  rootPath: z.string().optional(),
-  focus: z.string().default(''),
-  topK: z.number().int().min(10).max(200).optional(),
-  ignoredFolders: z.array(z.string()).max(100).optional(),
-  quickMode: z.boolean().optional().default(false),
+  prompt: z.string().min(4),
+  intentSummary: z.string().optional(),
+  answers: z
+    .array(
+      z.object({
+        question_id: z.string(),
+        question: z.string(),
+        selected_options: z.array(z.string()),
+        custom_text: z.string().optional(),
+      }),
+    )
+    .max(20)
+    .default([]),
 });
 
 export async function POST(req: Request) {
@@ -25,22 +32,18 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return new Response(JSON.stringify({ error: parsed.error.message }), { status: 400 });
   }
+
   const cfg = parsed.data;
   const apiKey = cfg.apiKey?.trim() || process.env[PROVIDER_ENV[cfg.provider]] || '';
   if (!apiKey) {
     return new Response(
       JSON.stringify({
-        error: `No API key for ${cfg.provider}. Set ${PROVIDER_ENV[cfg.provider]} or enter one in the UI.`,
+        error: `No API key found for ${cfg.provider}. Set ${PROVIDER_ENV[cfg.provider]} in .env.local or enter a key in the UI.`,
       }),
       { status: 400 },
     );
   }
 
-  const rootPath = cfg.rootPath || defaultRepoPath();
-  const guard = guardPath(rootPath);
-  if (!guard.ok) {
-    return new Response(JSON.stringify({ error: guard.reason }), { status: 400 });
-  }
   const endpoint =
     cfg.endpoint?.trim() ||
     (cfg.provider === 'foundry'
@@ -53,14 +56,12 @@ export async function POST(req: Request) {
   const ac = new AbortController();
   req.signal.addEventListener('abort', () => ac.abort());
 
-  runMultiLayerPipeline(
+  runCustomPlan(
     {
-      rootPath: guard.resolved,
       session: { id: cfg.provider, model: cfg.model, apiKey, endpoint },
-      focus: cfg.focus,
-      topK: cfg.topK,
-      ignoredFolders: cfg.ignoredFolders,
-      quickMode: cfg.quickMode,
+      prompt: cfg.prompt,
+      intentSummary: cfg.intentSummary,
+      answers: cfg.answers,
       signal: ac.signal,
     },
     send,

@@ -9,7 +9,7 @@ import { getProviderDefaultModel } from '@/lib/agent/provider-models';
 import type { ProviderId } from '../agent/providers/types';
 import { readUiPreferences, writeUiPreference } from './uiPreferences';
 
-export type Mode = 'editor' | 'agent' | 'multi-layer';
+export type Mode = 'editor' | 'agent' | 'multi-layer' | 'custom-prompt';
 export type ThemeMode = 'dark' | 'light';
 
 export type SelectionKind = 'node' | 'group' | 'edge' | null;
@@ -83,6 +83,9 @@ interface State {
   multiLayer: MultiLayerOutput | null;
   activeLayer: string; // 'overview' or one of layers[*].name
 
+  // Quick Mode: skip per-file LLM summarization in agent pipelines. Default off.
+  quickMode: boolean;
+
   setMode: (mode: Mode) => void;
   setTheme: (theme: ThemeMode) => void;
   setDsl: (text: string) => void;
@@ -103,6 +106,7 @@ interface State {
   stopAgent: () => void;
   setMultiLayer: (output: MultiLayerOutput | null) => void;
   setActiveLayer: (name: string) => void;
+  setQuickMode: (enabled: boolean) => void;
 }
 
 export const useDiagramStore = create<State>()(
@@ -126,6 +130,7 @@ export const useDiagramStore = create<State>()(
       agentLog: [],
       multiLayer: null,
       activeLayer: 'overview',
+      quickMode: false,
       setMode: (mode) => {
         writeUiPreference('mode', mode);
         set({ mode });
@@ -134,7 +139,10 @@ export const useDiagramStore = create<State>()(
         writeUiPreference('theme', theme);
         set({ theme });
       },
-      setDsl: (text) => set({ dslText: text }),
+      setDsl: (text) => {
+        writeUiPreference('dslText', text);
+        set({ dslText: text });
+      },
       setDiagram: (diagram) => set({ diagram }),
       setLayoutResult: (result) => set({ layoutResult: result }),
       setStrategy: (strategy) => {
@@ -180,6 +188,8 @@ export const useDiagramStore = create<State>()(
           ...(preferences.diagramType ? { diagramType: preferences.diagramType } : {}),
           ...(preferences.focusPrompt !== undefined ? { focusPrompt: preferences.focusPrompt } : {}),
           ...(preferences.activeLayer ? { activeLayer: preferences.activeLayer } : {}),
+          ...(preferences.dslText !== undefined ? { dslText: preferences.dslText } : {}),
+          ...(preferences.quickMode !== undefined ? { quickMode: preferences.quickMode } : {}),
           ...(preferences.provider
             ? {
                 provider: {
@@ -202,6 +212,10 @@ export const useDiagramStore = create<State>()(
       setActiveLayer: (name) => {
         writeUiPreference('activeLayer', name);
         set({ activeLayer: name });
+      },
+      setQuickMode: (enabled) => {
+        writeUiPreference('quickMode', enabled);
+        set({ quickMode: enabled });
       },
     }),
     {

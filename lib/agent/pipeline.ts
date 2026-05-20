@@ -33,6 +33,13 @@ export interface PipelineInput {
   focus: string;
   topK?: number;
   ignoredFolders?: string[];
+  /**
+   * Quick Mode: skip per-file content reads and LLM summarization. The planner
+   * runs on the deterministic structural digest only (folder clusters, import
+   * graph, central files, routes, exports, env vars, docs). Much faster and
+   * cheaper, but produces a more skeletal diagram.
+   */
+  quickMode?: boolean;
   signal?: AbortSignal;
 }
 
@@ -104,49 +111,81 @@ export async function runPipeline(
       },
     });
 
-    // 5 + 6. Summarize relevant files in parallel
-    send({ type: 'stage', stage: 'summarize', status: 'start', message: 'Summarizing modules…' });
-    const limit = pLimit(4);
-    let done = 0;
-    const summaries = await Promise.all(
-      relevant.map((r) =>
-        limit(async () => {
-          if (input.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-          const text = await readRepoFile(repoMap.root, r.file.path, 180_000);
-          const summary = await summarizeFile(input.session, r.file.path, text, {
-            signal: input.signal,
-            onRetry: onRetry('summarize'),
-          });
-          done++;
-          send({
-            type: 'stage',
-            stage: 'summarize',
-            status: 'progress',
-            percent: Math.round((done / relevant.length) * 100),
-            counters: { done, total: relevant.length },
-          });
-          return { path: r.file.path, summary };
-        }),
-      ),
-    );
-    send({ type: 'stage', stage: 'summarize', status: 'done', message: `Summarized ${summaries.length} files` });
+    // 5 + 6. Summarize relevant files in parallel — skipped in Quick Mode.
+    let summaries: Array<{ path: string; summary: Awaited<ReturnType<typeof summarizeFile>> }>;
+    if (input.quickMode) {
+      send({
+        type: 'stage',
+        stage: 'summarize',
+        status: 'done',
+        message: 'Quick Mode: skipped per-file summarization — planning from structural digest only',
+        counters: { done: 0, total: relevant.length },
+      });
+      summaries = [];
+    } else {
+      send({ type: 'stage', stage: 'summarize', status: 'start', message: 'Summarizing modules…' });
+      const limit = pLimit(4);
+      let done = 0;
+      summaries = await Promise.all(
+        relevant.map((r) =>
+          limit(async () => {
+            if (input.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+            const text = await readRepoFile(repoMap.root, r.file.path, 180_000);
+            const summary = await summarizeFile(input.session, r.file.path, text, {
+              signal: input.signal,
+              onRetry: onRetry('summarize'),
+            });
+            done++;
+            send({
+              type: 'stage',
+              stage: 'summarize',
+              status: 'progress',
+              percent: Math.round((done / relevant.length) * 100),
+              counters: { done, total: relevant.length },
+            });
+            return { path: r.file.path, summary };
+          }),
+        ),
+      );
+      send({ type: 'stage', stage: 'summarize', status: 'done', message: `Summarized ${summaries.length} files` });
+    }
 
     // 7. Subsystem catalog (heuristic now)
     send({ type: 'stage', stage: 'subsystem', status: 'start', message: 'Discovering subsystems…' });
-    const subsystemCount = new Set(summaries.map((s) => s.summary.layer)).size;
+    const subsystemCount = input.quickMode
+      ? clusters.length
+      : new Set(summaries.map((s) => s.summary.layer)).size;
     send({
       type: 'stage',
       stage: 'subsystem',
       status: 'done',
-      message: `Identified ${subsystemCount} subsystem layers + ${clusters.length} folder clusters`,
+      message: input.quickMode
+        ? `Quick Mode: ${clusters.length} folder clusters used as subsystem hints`
+        : `Identified ${subsystemCount} subsystem layers + ${clusters.length} folder clusters`,
       counters: { layers: subsystemCount, clusters: clusters.length },
     });
 
     // 8. Plan
-    send({ type: 'stage', stage: 'plan', status: 'start', message: 'Generating diagram plan…' });
+    send({
+      type: 'stage',
+      stage: 'plan',
+      status: 'start',
+      message: input.quickMode
+        ? 'Generating diagram plan from structural digest…'
+        : 'Generating diagram plan…',
+    });
     const plan = await generatePlan(
       input.session,
-      { repoMap, summaries, imports: importGraph, docs, repoContext, kind: input.kind, focus: input.focus },
+      {
+        repoMap,
+        summaries,
+        imports: importGraph,
+        docs,
+        repoContext,
+        kind: input.kind,
+        focus: input.focus,
+        quickMode: input.quickMode,
+      },
       { signal: input.signal, onRetry: onRetry('plan') },
     );
     send({

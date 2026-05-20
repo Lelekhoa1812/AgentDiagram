@@ -8,12 +8,24 @@ export interface MultiLayerStreamOutput {
   generatedAt: number;
 }
 
+export interface ClarifyStreamOutput {
+  intent_summary: string;
+  questions: Array<{
+    id: string;
+    question: string;
+    rationale: string;
+    options: Array<{ label: string; description: string }>;
+    allow_multiple: boolean;
+  }>;
+}
+
 export type SseEvent =
   | { type: 'stage'; stage: string; status: 'start' | 'progress' | 'done' | 'error'; percent?: number; message?: string; counters?: Record<string, number> }
   | { type: 'retry'; stage: string; attempt: number; delayMs: number; reason: string }
   | { type: 'log'; stage: string; level: 'info' | 'warn' | 'error'; message: string }
   | { type: 'result'; dsl: string }
   | { type: 'result-multilayer'; output: MultiLayerStreamOutput }
+  | { type: 'result-clarify'; output: ClarifyStreamOutput }
   | { type: 'error'; stage: string; message: string }
   | { type: 'done' };
 

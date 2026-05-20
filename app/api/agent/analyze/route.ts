@@ -17,6 +17,7 @@ const Body = z.object({
   focus: z.string().default(''),
   topK: z.number().int().min(5).max(120).optional(),
   ignoredFolders: z.array(z.string()).max(100).optional(),
+  quickMode: z.boolean().optional().default(false),
 });
 
 export async function POST(req: Request) {
@@ -63,6 +64,7 @@ export async function POST(req: Request) {
       focus: cfg.focus,
       topK: cfg.topK,
       ignoredFolders: cfg.ignoredFolders,
+      quickMode: cfg.quickMode,
       signal: ac.signal,
     },
     send,

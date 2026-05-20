@@ -5,12 +5,14 @@ import { useDiagramStore, type MultiLayerOutput } from '@/lib/state/store';
 import { ProviderConfig } from '@/components/agent/ProviderConfig';
 import { RepoInput } from '@/components/agent/RepoInput';
 import { FocusPromptBox } from '@/components/agent/FocusPromptBox';
+import { QuickModeToggle } from '@/components/agent/QuickModeToggle';
 import { AnalysisAnimation } from '@/components/agent/AnalysisAnimation';
 import { readAgentStream, readErrorMessage, type AgentStreamEvent } from '@/components/agent/streamEvents';
 
 export function MultiLayerPanel() {
   const provider = useDiagramStore((s) => s.provider);
   const focus = useDiagramStore((s) => s.focusPrompt);
+  const quickMode = useDiagramStore((s) => s.quickMode);
   const setMode = useDiagramStore((s) => s.setMode);
   const setDsl = useDiagramStore((s) => s.setDsl);
   const setMultiLayer = useDiagramStore((s) => s.setMultiLayer);
@@ -59,6 +61,7 @@ export function MultiLayerPanel() {
           rootPath,
           focus,
           ignoredFolders,
+          quickMode,
         }),
         signal: ac.signal,
       });
@@ -158,6 +161,7 @@ export function MultiLayerPanel() {
           </p>
         </div>
         <FocusPromptBox />
+        <QuickModeToggle />
 
         <div className="col-span-full flex items-center justify-between gap-2 rounded-xl border border-ink-700 bg-ink-900/60 p-4">
           <div className="text-xs text-ink-400">
@@ -167,6 +171,7 @@ export function MultiLayerPanel() {
                 ({scanInfo.fileCount} files)
                 {ignoredFolders.length ? ` · ${ignoredFolders.length} ignored folder${ignoredFolders.length === 1 ? '' : 's'}` : ''} · provider {provider.provider}/
                 {provider.provider === 'foundry' ? provider.customModel ?? '?' : provider.model}
+                {quickMode ? <> · <span className="text-accent">Quick Mode</span></> : null}
               </>
             ) : (
               'Configure provider + preview repo to enable multi-layer analysis'

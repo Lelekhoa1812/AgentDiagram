@@ -6,6 +6,7 @@ import { ProviderConfig } from './ProviderConfig';
 import { RepoInput } from './RepoInput';
 import { DiagramTypePicker } from './DiagramTypePicker';
 import { FocusPromptBox } from './FocusPromptBox';
+import { QuickModeToggle } from './QuickModeToggle';
 import { AnalysisAnimation } from './AnalysisAnimation';
 import { readAgentStream, readErrorMessage, type AgentStreamEvent } from './streamEvents';
 
@@ -18,6 +19,7 @@ export function AgentPanel() {
   const provider = useDiagramStore((s) => s.provider);
   const kind = useDiagramStore((s) => s.diagramType);
   const focus = useDiagramStore((s) => s.focusPrompt);
+  const quickMode = useDiagramStore((s) => s.quickMode);
   const setMode = useDiagramStore((s) => s.setMode);
   const setDsl = useDiagramStore((s) => s.setDsl);
   const setAgentStage = useDiagramStore((s) => s.setAgentStage);
@@ -63,6 +65,7 @@ export function AgentPanel() {
           kind,
           focus,
           ignoredFolders,
+          quickMode,
         }),
         signal: ac.signal,
       });
@@ -146,6 +149,7 @@ export function AgentPanel() {
         />
         <DiagramTypePicker />
         <FocusPromptBox />
+        <QuickModeToggle />
 
         <div className="col-span-full flex items-center justify-between gap-2 rounded-xl border border-ink-700 bg-ink-900/60 p-4">
           <div className="text-xs text-ink-400">
@@ -159,6 +163,7 @@ export function AgentPanel() {
                 <span>
                   {provider.provider}/{provider.provider === 'foundry' ? provider.customModel ?? '?' : provider.model}
                 </span>
+                {quickMode ? <> · <span className="text-accent">Quick Mode</span></> : null}
               </>
             ) : (
               'Configure provider + preview repo to enable analysis'

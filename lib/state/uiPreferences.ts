@@ -5,7 +5,7 @@ import type { ProviderId } from '@/lib/agent/providers/types';
 
 const UI_PREFERENCES_KEY = 'agentdiagram:ui-preferences:v1';
 
-export type PersistedMode = 'editor' | 'agent' | 'multi-layer';
+export type PersistedMode = 'editor' | 'agent' | 'multi-layer' | 'custom-prompt';
 export type PersistedTheme = 'dark' | 'light';
 export type PersistedDiagramType = 'architecture' | 'sequence' | 'class' | 'data-flow' | 'deployment';
 export type PersistedEditorTab = 'dsl' | 'ir' | 'diagnostics';
@@ -30,9 +30,11 @@ export interface UiPreferences {
   editorTab?: PersistedEditorTab;
   repoPath?: string;
   repoIgnoredFolders?: string[];
+  dslText?: string;
+  quickMode?: boolean;
 }
 
-const MODES = new Set<PersistedMode>(['editor', 'agent', 'multi-layer']);
+const MODES = new Set<PersistedMode>(['editor', 'agent', 'multi-layer', 'custom-prompt']);
 const THEMES = new Set<PersistedTheme>(['dark', 'light']);
 const DIAGRAM_TYPES = new Set<PersistedDiagramType>(['architecture', 'sequence', 'class', 'data-flow', 'deployment']);
 const EDITOR_TABS = new Set<PersistedEditorTab>(['dsl', 'ir', 'diagnostics']);
@@ -78,6 +80,7 @@ function sanitizePreferences(value: unknown): UiPreferences {
     preferences.diagramType = value.diagramType as PersistedDiagramType;
   }
   if (typeof value.focusPrompt === 'string') preferences.focusPrompt = value.focusPrompt;
+  if (typeof value.dslText === 'string') preferences.dslText = value.dslText;
   if (typeof value.activeLayer === 'string') preferences.activeLayer = value.activeLayer;
   if (typeof value.isEditorVisible === 'boolean') preferences.isEditorVisible = value.isEditorVisible;
   if (typeof value.isInspectorVisible === 'boolean') preferences.isInspectorVisible = value.isInspectorVisible;
@@ -88,6 +91,7 @@ function sanitizePreferences(value: unknown): UiPreferences {
   if (Array.isArray(value.repoIgnoredFolders)) {
     preferences.repoIgnoredFolders = value.repoIgnoredFolders.filter((item): item is string => typeof item === 'string');
   }
+  if (typeof value.quickMode === 'boolean') preferences.quickMode = value.quickMode;
 
   const provider = sanitizeProvider(value.provider);
   if (provider) preferences.provider = provider;
