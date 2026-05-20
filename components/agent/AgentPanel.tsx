@@ -27,6 +27,7 @@ export function AgentPanel() {
   const agentRunning = useDiagramStore((s) => s.agentRunning);
 
   const [rootPath, setRootPath] = useState<string>('');
+  const [ignoredFolders, setIgnoredFolders] = useState<string[]>([]);
   const [scan, setScan] = useState<ScanResult | null>(null);
   const [retryNotice, setRetryNotice] = useState<{ stage: string; attempt: number; delayMs: number; reason: string } | null>(null);
   const [counters, setCounters] = useState<Record<string, number>>({});
@@ -61,6 +62,7 @@ export function AgentPanel() {
           rootPath,
           kind,
           focus,
+          ignoredFolders,
         }),
         signal: ac.signal,
       });
@@ -130,7 +132,18 @@ export function AgentPanel() {
     <>
       <div className="grid h-full grid-cols-[1fr] gap-4 overflow-y-auto p-6 lg:grid-cols-2">
         <ProviderConfig />
-        <RepoInput onScan={(path, result) => { setRootPath(path); setScan({ resolved: result.resolved, fileCount: result.fileCount }); }} />
+        <RepoInput
+          onConfigChange={(path, ignored) => {
+            setRootPath(path);
+            setIgnoredFolders(ignored);
+            setScan(null);
+          }}
+          onScan={(path, result, ignored) => {
+            setRootPath(path);
+            setIgnoredFolders(ignored);
+            setScan({ resolved: result.resolved, fileCount: result.fileCount });
+          }}
+        />
         <DiagramTypePicker />
         <FocusPromptBox />
 
@@ -139,6 +152,7 @@ export function AgentPanel() {
             {scan ? (
               <>
                 Ready to analyze <span className="font-mono text-ink-200">{scan.resolved}</span> ({scan.fileCount} files)
+                {ignoredFolders.length ? ` · ${ignoredFolders.length} ignored folder${ignoredFolders.length === 1 ? '' : 's'}` : ''}
                 {' · '}
                 <span className="capitalize">{kind}</span>
                 {' · '}

@@ -23,6 +23,7 @@ export function MultiLayerPanel() {
   const clearOverrides = useDiagramStore((s) => s.clearOverrides);
 
   const [rootPath, setRootPath] = useState('');
+  const [ignoredFolders, setIgnoredFolders] = useState<string[]>([]);
   const [scanInfo, setScanInfo] = useState<{ resolved: string; fileCount: number } | null>(null);
   const [retryNotice, setRetryNotice] = useState<{ stage: string; attempt: number; delayMs: number; reason: string } | null>(null);
   const [counters, setCounters] = useState<Record<string, number>>({});
@@ -57,6 +58,7 @@ export function MultiLayerPanel() {
           endpoint: provider.endpoint || undefined,
           rootPath,
           focus,
+          ignoredFolders,
         }),
         signal: ac.signal,
       });
@@ -128,7 +130,18 @@ export function MultiLayerPanel() {
     <>
       <div className="grid h-full grid-cols-[1fr] gap-4 overflow-y-auto p-6 lg:grid-cols-2">
         <ProviderConfig />
-        <RepoInput onScan={(path, info) => { setRootPath(path); setScanInfo({ resolved: info.resolved, fileCount: info.fileCount }); }} />
+        <RepoInput
+          onConfigChange={(path, ignored) => {
+            setRootPath(path);
+            setIgnoredFolders(ignored);
+            setScanInfo(null);
+          }}
+          onScan={(path, info, ignored) => {
+            setRootPath(path);
+            setIgnoredFolders(ignored);
+            setScanInfo({ resolved: info.resolved, fileCount: info.fileCount });
+          }}
+        />
         <div className="space-y-2 rounded-xl border border-ink-700 bg-ink-900/60 p-4 text-xs">
           <div className="text-[10px] uppercase tracking-widest text-ink-400">Multi-Layer mode</div>
           <p className="text-ink-300">
@@ -151,7 +164,8 @@ export function MultiLayerPanel() {
             {scanInfo ? (
               <>
                 Ready · <span className="font-mono text-ink-200">{scanInfo.resolved}</span>{' '}
-                ({scanInfo.fileCount} files) · provider {provider.provider}/
+                ({scanInfo.fileCount} files)
+                {ignoredFolders.length ? ` · ${ignoredFolders.length} ignored folder${ignoredFolders.length === 1 ? '' : 's'}` : ''} · provider {provider.provider}/
                 {provider.provider === 'foundry' ? provider.customModel ?? '?' : provider.model}
               </>
             ) : (
