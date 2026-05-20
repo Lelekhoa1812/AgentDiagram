@@ -2,6 +2,7 @@ import { OpenAIProvider } from './openai';
 import { AnthropicProvider } from './anthropic';
 import { GeminiProvider } from './gemini';
 import { FoundryProvider } from './foundry';
+import { GrokProvider } from './grok';
 import type { Provider, ProviderId, ProviderConfig, ChatParams, ChatMessage, RetryListener } from './types';
 import { withRetry } from './retry';
 
@@ -17,11 +18,14 @@ export const ANTHROPIC_MODELS = ['opus-4.7', 'sonnet-4.6', 'haiku-4.5'] as const
 
 export const GEMINI_MODELS = ['gemini-3.1-pro', 'gemini-3.5-flash', 'gemini-3.1-flash-lite'] as const;
 
+export const GROK_MODELS = ['grok-3', 'grok-3-mini', 'grok-2-1212', 'grok-2-vision-1212'] as const;
+
 export const PROVIDER_DEFAULTS: Record<ProviderId, string> = {
   openai: 'gpt-5.5',
   anthropic: 'opus-4.7',
   gemini: 'gemini-3.1-pro',
   foundry: '',
+  grok: 'grok-3',
 };
 
 export const PROVIDER_ENV: Record<ProviderId, string> = {
@@ -29,11 +33,14 @@ export const PROVIDER_ENV: Record<ProviderId, string> = {
   anthropic: 'CLAUDE_API_KEY',
   gemini: 'GEMINI_API_KEY',
   foundry: 'FOUNDRY_API_KEY',
+  grok: 'GROK_API_KEY',
 };
 
 export function getDefaultProvider(): ProviderId {
   const env = process.env.AGENTDIAGRAM_DEFAULT_PROVIDER?.toLowerCase();
-  if (env === 'openai' || env === 'anthropic' || env === 'gemini' || env === 'foundry') return env;
+  if (env === 'openai' || env === 'anthropic' || env === 'gemini' || env === 'foundry' || env === 'grok') {
+    return env;
+  }
   return 'openai';
 }
 
@@ -47,6 +54,8 @@ export function makeProvider(id: ProviderId, cfg: ProviderConfig): Provider {
       return new GeminiProvider(cfg);
     case 'foundry':
       return new FoundryProvider(cfg);
+    case 'grok':
+      return new GrokProvider(cfg);
   }
 }
 

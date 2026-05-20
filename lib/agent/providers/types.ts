@@ -1,4 +1,4 @@
-export type ProviderId = 'openai' | 'anthropic' | 'gemini' | 'foundry';
+export type ProviderId = 'openai' | 'anthropic' | 'gemini' | 'foundry' | 'grok';
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';

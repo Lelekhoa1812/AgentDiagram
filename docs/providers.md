@@ -1,6 +1,6 @@
 # AI providers
 
-AgentDiagram supports four AI providers. Pick one in the UI; you can switch
+AgentDiagram supports five AI providers. Pick one in the UI; you can switch
 at any time. API keys come from `.env.local` or from a per-session input
 field in the UI (the field value is kept in server memory only and is
 discarded when the analysis finishes).
@@ -44,6 +44,15 @@ on your account, switch down — the API call will fail with a clear
 | Env var    | `GEMINI_API_KEY`                                                 |
 | Models     | `gemini-3.1-pro`, `gemini-3.5-flash`, `gemini-3.1-flash-lite`    |
 | JSON mode  | `generationConfig.responseSchema` + `responseMimeType: application/json` |
+
+## Grok (xAI)
+
+| Setting    | Value                                                           |
+|------------|-----------------------------------------------------------------|
+| Env var    | `GROK_API_KEY`                                                   |
+| Models     | `grok-3`, `grok-3-mini`, `grok-2-1212`, `grok-2-vision-1212`     |
+| Base URL   | `https://api.x.ai/v1` (override with `GROK_API_BASE`)           |
+| JSON mode  | `response_format: json_schema` with `strict: true`              |
 
 ## Azure AI Foundry
 

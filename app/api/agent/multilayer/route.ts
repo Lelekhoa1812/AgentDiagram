@@ -8,7 +8,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const Body = z.object({
-  provider: z.enum(['openai', 'anthropic', 'gemini', 'foundry']),
+  provider: z.enum(['openai', 'anthropic', 'gemini', 'foundry', 'grok']),
   model: z.string(),
   apiKey: z.string().optional(),
   endpoint: z.string().optional(),
@@ -39,7 +39,13 @@ export async function POST(req: Request) {
   if (!guard.ok) {
     return new Response(JSON.stringify({ error: guard.reason }), { status: 400 });
   }
-  const endpoint = cfg.endpoint?.trim() || process.env.FOUNDRY_ENDPOINT;
+  const endpoint =
+    cfg.endpoint?.trim() ||
+    (cfg.provider === 'foundry'
+      ? process.env.FOUNDRY_ENDPOINT
+      : cfg.provider === 'grok'
+      ? process.env.GROK_API_BASE
+      : undefined);
 
   const { stream, send, close } = makeSseStream();
   const ac = new AbortController();

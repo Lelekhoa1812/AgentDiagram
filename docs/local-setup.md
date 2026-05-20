@@ -38,10 +38,13 @@ The dev server runs on http://localhost:3000.
 | `CLAUDE_MODEL`                    | Default Anthropic model                |
 | `GEMINI_API_KEY`                  | Google Gemini provider key             |
 | `GEMINI_MODEL`                    | Default Gemini model                   |
+| `GROK_API_KEY`                    | xAI Grok provider key                  |
+| `GROK_MODEL`                      | Default Grok model                     |
+| `GROK_API_BASE`                   | Optional Grok API base (default https://api.x.ai/v1) |
 | `FOUNDRY_API_KEY`                 | Azure AI Foundry provider key          |
 | `FOUNDRY_ENDPOINT`                | Azure AI Foundry endpoint URL          |
 | `FOUNDRY_MODEL`                   | Azure deployment name                  |
-| `AGENTDIAGRAM_DEFAULT_PROVIDER`   | `openai` / `anthropic` / `gemini` / `foundry` |
+| `AGENTDIAGRAM_DEFAULT_PROVIDER`   | `openai` / `anthropic` / `gemini` / `foundry` / `grok` |
 | `AGENTDIAGRAM_DEFAULT_REPO_PATH`  | Override the parent-directory default  |
 
 Any single provider key is sufficient — switch between them in the UI.

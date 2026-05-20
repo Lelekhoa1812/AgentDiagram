@@ -2,12 +2,20 @@
 
 import { useState } from 'react';
 import { useDiagramStore } from '@/lib/state/store';
-import { OPENAI_MODELS, ANTHROPIC_MODELS, GEMINI_MODELS, PROVIDER_DEFAULTS } from '@/lib/agent/providers';
+import {
+  OPENAI_MODELS,
+  ANTHROPIC_MODELS,
+  GEMINI_MODELS,
+  GROK_MODELS,
+  PROVIDER_DEFAULTS,
+} from '@/lib/agent/providers';
+import type { ProviderId } from '@/lib/agent/providers/types';
 
-const PROVIDERS: Array<{ id: 'openai' | 'anthropic' | 'gemini' | 'foundry'; label: string; envVar: string; note: string }> = [
+const PROVIDERS: Array<{ id: ProviderId; label: string; envVar: string; note: string }> = [
   { id: 'openai', label: 'OpenAI', envVar: 'OPENAI_API_KEY', note: 'Models degrade in capability from top to bottom.' },
   { id: 'anthropic', label: 'Anthropic', envVar: 'CLAUDE_API_KEY', note: 'Models degrade in capability from top to bottom.' },
   { id: 'gemini', label: 'Gemini', envVar: 'GEMINI_API_KEY', note: 'Models degrade in capability from top to bottom.' },
+  { id: 'grok', label: 'xAI Grok', envVar: 'GROK_API_KEY', note: 'Fast multi-modal chat with Grok-family defaults.' },
   { id: 'foundry', label: 'Azure Foundry', envVar: 'FOUNDRY_API_KEY', note: 'Provide the deployment name for your custom model.' },
 ];
 
@@ -16,6 +24,7 @@ const MODELS_BY_PROVIDER: Record<string, readonly string[]> = {
   anthropic: ANTHROPIC_MODELS,
   gemini: GEMINI_MODELS,
   foundry: [],
+  grok: GROK_MODELS,
 };
 
 export function ProviderConfig() {

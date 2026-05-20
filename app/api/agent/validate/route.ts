@@ -5,7 +5,7 @@ import { makeProvider, PROVIDER_ENV } from '@/lib/agent/providers';
 export const runtime = 'nodejs';
 
 const Body = z.object({
-  provider: z.enum(['openai', 'anthropic', 'gemini', 'foundry']),
+  provider: z.enum(['openai', 'anthropic', 'gemini', 'foundry', 'grok']),
   model: z.string(),
   apiKey: z.string().optional(),
   endpoint: z.string().optional(),
@@ -26,9 +26,16 @@ export async function POST(req: Request) {
     });
   }
   try {
+    const endpoint =
+      cfg.endpoint?.trim() ||
+      (cfg.provider === 'foundry'
+        ? process.env.FOUNDRY_ENDPOINT
+        : cfg.provider === 'grok'
+        ? process.env.GROK_API_BASE
+        : undefined);
     const provider = makeProvider(cfg.provider, {
       apiKey,
-      endpoint: cfg.endpoint || process.env.FOUNDRY_ENDPOINT,
+      endpoint,
     });
     const result = await provider.validate(cfg.model);
     return NextResponse.json(result);

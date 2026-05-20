@@ -5,6 +5,7 @@ import { temporal } from 'zundo';
 import type { Diagram, Point } from '../ir/types';
 import type { LayoutResult, LayoutRect } from '../layout/elk';
 import type { LayoutStrategy } from '../layout/strategies';
+import type { ProviderId } from '../agent/providers/types';
 
 export type Mode = 'editor' | 'agent' | 'multi-layer';
 export type ThemeMode = 'dark' | 'light';
@@ -29,7 +30,7 @@ export interface Viewport {
 }
 
 export interface ProviderConfig {
-  provider: 'openai' | 'anthropic' | 'gemini' | 'foundry';
+  provider: ProviderId;
   model: string;
   apiKey: string;
   customModel?: string;

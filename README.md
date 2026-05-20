@@ -61,6 +61,7 @@ Full grammar: [docs/dsl-grammar.md](docs/dsl-grammar.md).
 | OpenAI       | `OPENAI_API_KEY`   | `gpt-5.5`                  |
 | Anthropic    | `CLAUDE_API_KEY`   | `opus-4.7`                 |
 | Gemini       | `GEMINI_API_KEY`   | `gemini-3.1-pro`           |
+| Grok (xAI)   | `GROK_API_KEY`     | `grok-3`                   |
 | Azure Foundry| `FOUNDRY_API_KEY`  | custom deployment name     |
 
 Every provider call goes through an **infinite-retry wrapper with exponential backoff and `Retry-After` honoring**. The UI shows "Retrying in 8s (attempt 3)" live during analysis and lets you cancel.
@@ -94,7 +95,7 @@ npm run test:visual  # visual regression vs examples/v2.1.0.png
 
 - Sequence and class diagrams parse and render through the same flow layout for v1. Dedicated sequence (lifelines) and class (header / fields / methods) layouts are planned.
 - No multi-user persistence; projects save to IndexedDB or as `.diagram.json` files.
-- The default model names (`gpt-5.5`, `opus-4.7`, `gemini-3.1-pro`) match the configured values. If a model isn't yet available on your account, switch via the dropdown — `OPENAI_MODEL` / `CLAUDE_MODEL` / `GEMINI_MODEL` envs also override the in-app default.
+- The default model names (`gpt-5.5`, `opus-4.7`, `gemini-3.1-pro`, `grok-3`) match the configured values. If a model isn't yet available on your account, switch via the dropdown — `OPENAI_MODEL` / `CLAUDE_MODEL` / `GEMINI_MODEL` / `GROK_MODEL` envs also override the in-app default.
 
 ## License
 MIT — see [LICENSE](LICENSE).
