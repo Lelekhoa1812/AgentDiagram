@@ -25,6 +25,28 @@ const HIDDEN_FOLDER_NAMES = [
   '.agentdiagram-cache',
   'vendor',
 
+  // Motivation vs Logic: the user asked to hide scaffolding/config directories and caches so the browser skips them entirely.
+  'sample',
+  'samples',
+  'example',
+  'examples',
+  'config',
+  'configs',
+  'setup',
+  'scripts',
+  'docker',
+  'env',
+  'cache',
+  '.cache',
+  'tmp',
+  'temp',
+
+  // Explicitly blacklist dot-ish configs the user referenced (redundant with the dot rule but good for clarity).
+  'cursor',
+  'claude',
+  'vscode',
+  'rtk',
+
   // Python toolchains and virtualenvs
   '__pycache__',
   '.pytest_cache',
@@ -81,6 +103,8 @@ const HIDDEN_FILE_NAMES = [
   '.DS_Store',
   'Thumbs.db',
   'desktop.ini',
+  'Dockerfile.azure',
+  'docker-compose.azure.yml',
   'tsconfig.tsbuildinfo',
 ] as const;
 
@@ -88,11 +112,55 @@ export const HIDDEN_NAMES: readonly string[] = [...HIDDEN_FOLDER_NAMES, ...HIDDE
 
 // File extensions (with leading dot, lower-case) to hide anywhere in the tree.
 export const HIDDEN_EXTENSIONS: readonly string[] = [
-  // Markdown / docs (per user request: "all .md files")
+// Markdown/docs + config metadata files (per user request to hide txt/json/yaml/toml/etc). 
+// Motivation vs Logic: these extensions are mostly configs, docs, or auxiliary artifacts we never need to parse.
   '.md',
   '.mdx',
   '.rst',
   '.adoc',
+  '.txt',
+  '.json',
+  '.yaml',
+  '.yml',
+  '.toml',
+  '.ini',
+  '.cfg',
+
+  // Data/office/external assets + security artifacts (per request to ignore non-code).
+  '.csv',
+  '.tsv',
+  '.xls',
+  '.xlsx',
+  '.ppt',
+  '.pptx',
+  '.doc',
+  '.docx',
+  '.odt',
+  '.ods',
+  '.odp',
+  '.rtf',
+  '.pem',
+  '.crt',
+  '.key',
+
+  // Media / design / font files that are never source code.
+  '.psd',
+  '.ai',
+  '.eps',
+  '.swf',
+  '.ttf',
+  '.otf',
+  '.woff',
+  '.woff2',
+  '.eot',
+
+  // Archives / intermediate files / temp artifacts
+  '.bak',
+  '.tmp',
+  '.swp',
+  '.db',
+  '.sqlite',
+  '.sqlite3',
 
   // Logs
   '.log',
@@ -130,7 +198,7 @@ export const HIDDEN_EXTENSIONS: readonly string[] = [
   '.ogg',
   '.flac',
 
-  // Binaries
+  // Binaries / installers
   '.bin',
   '.exe',
   '.dll',
@@ -144,6 +212,10 @@ export const HIDDEN_EXTENSIONS: readonly string[] = [
   '.pyc',
   '.class',
   '.pdb',
+  '.apk',
+  '.msi',
+  '.dmg',
+  '.pkg',
 
   // Source maps & minified assets
   '.map',
@@ -170,8 +242,11 @@ export const HIDDEN_PREFIXES: readonly string[] = [
   'AUTHORS',
   'AGENTS',
   'CLAUDE',
+  'CURSOR',
   'GEMINI',
   'COPILOT',
+  'RTK',
+  'VSCODE',
 ];
 
 const HIDDEN_NAME_SET = new Set(HIDDEN_NAMES);
