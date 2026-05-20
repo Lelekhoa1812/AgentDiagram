@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { scanRepo } from '@/lib/agent/repoScanner';
+import { AGENT_FILE_ALLOWLIST, scanRepo } from '@/lib/agent/repoScanner';
 import { guardPath, defaultRepoPath } from '@/lib/security/pathGuard';
 
 export const runtime = 'nodejs';
@@ -8,6 +8,7 @@ export const runtime = 'nodejs';
 const Body = z.object({
   path: z.string().optional(),
   allowSensitive: z.boolean().optional(),
+  ignoredFolders: z.array(z.string()).max(100).optional(),
 });
 
 export async function POST(req: Request) {
@@ -24,7 +25,10 @@ export async function POST(req: Request) {
   }
 
   try {
-    const map = await scanRepo(guard.resolved);
+    const map = await scanRepo(guard.resolved, {
+      allowlist: AGENT_FILE_ALLOWLIST,
+      ignoredFolders: parsed.data.ignoredFolders,
+    });
     return NextResponse.json({
       resolved: guard.resolved,
       root: map.root,

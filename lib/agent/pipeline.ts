@@ -13,7 +13,7 @@
  */
 
 import pLimit from 'p-limit';
-import { scanRepo, readRepoFile } from './repoScanner';
+import { AGENT_FILE_ALLOWLIST, scanRepo, readRepoFile } from './repoScanner';
 import { classifyRelevance, type DiagramKind } from './classifier';
 import { summarizeFile } from './summarizer';
 import { generatePlan } from './planner';
@@ -32,6 +32,7 @@ export interface PipelineInput {
   kind: DiagramKind;
   focus: string;
   topK?: number;
+  ignoredFolders?: string[];
   signal?: AbortSignal;
 }
 
@@ -59,7 +60,10 @@ export async function runPipeline(
 
     // 2. Scan
     send({ type: 'stage', stage: 'scan', status: 'start', message: 'Scanning repository…' });
-    const repoMap = await scanRepo(input.rootPath);
+    const repoMap = await scanRepo(input.rootPath, {
+      allowlist: AGENT_FILE_ALLOWLIST,
+      ignoredFolders: input.ignoredFolders,
+    });
     send({
       type: 'stage',
       stage: 'scan',

@@ -7,10 +7,19 @@ const DEFAULT_IGNORE = [
   'node_modules/**',
   '.next/**',
   '.turbo/**',
+  '.cache/**',
+  '.parcel-cache/**',
+  '.vercel/**',
+  '.vite/**',
   'dist/**',
   'build/**',
   'coverage/**',
   '.git/**',
+  'docs/**',
+  'doc/**',
+  'documentation/**',
+  '**/docs/**',
+  '**/documentation/**',
   '**/*.min.js',
   '**/*.map',
   '**/*.lock',
@@ -32,11 +41,97 @@ const DEFAULT_IGNORE = [
   '**/*.crt',
   '**/.env',
   '**/.env.*',
+  '**/__tests__/**',
+  '**/__mocks__/**',
+  '**/*.test.*',
+  '**/*.spec.*',
+  'test/**',
+  'tests/**',
+  'e2e/**',
+  'playwright-report/**',
   '.agentdiagram-cache/**',
+  '**/.agentdiagram-cache/**',
+  '**/diagram.png',
+  '**/diagram.svg',
+  '**/tsconfig.tsbuildinfo',
   'vendor/**',
 ];
 
 const MAX_FILE_BYTES = 1024 * 1024; // 1MB
+
+export const AGENT_ALLOWED_EXTENSIONS = [
+  'c',
+  'cc',
+  'cjs',
+  'cpp',
+  'cs',
+  'css',
+  'cxx',
+  'go',
+  'graphql',
+  'gql',
+  'h',
+  'hpp',
+  'java',
+  'js',
+  'jsx',
+  'kt',
+  'kts',
+  'mjs',
+  'php',
+  'prisma',
+  'py',
+  'rb',
+  'rs',
+  'scala',
+  'scss',
+  'sql',
+  'svelte',
+  'swift',
+  'ts',
+  'tsx',
+  'vue',
+] as const;
+
+export const AGENT_ALLOWED_FILES = [
+  'Cargo.toml',
+  'Dockerfile',
+  'Gemfile',
+  'build.gradle',
+  'composer.json',
+  'docker-compose.yaml',
+  'docker-compose.yml',
+  'go.mod',
+  'next.config.js',
+  'next.config.mjs',
+  'next.config.ts',
+  'package.json',
+  'pom.xml',
+  'pyproject.toml',
+  'requirements.txt',
+  'tailwind.config.js',
+  'tailwind.config.ts',
+  'tsconfig.json',
+  'vite.config.js',
+  'vite.config.ts',
+  'webpack.config.js',
+  'webpack.config.ts',
+] as const;
+
+export interface RepoScanAllowlist {
+  extensions: readonly string[];
+  fileNames: readonly string[];
+}
+
+export const AGENT_FILE_ALLOWLIST: RepoScanAllowlist = {
+  extensions: AGENT_ALLOWED_EXTENSIONS,
+  fileNames: AGENT_ALLOWED_FILES,
+};
+
+export interface RepoScanOptions {
+  allowlist?: RepoScanAllowlist;
+  ignoredFolders?: readonly string[];
+}
 
 export interface ScannedFile {
   /** Relative POSIX-style path */
@@ -128,19 +223,55 @@ async function readGitignore(root: string): Promise<ReturnType<typeof ignore>> {
   return ig;
 }
 
-export async function scanRepo(root: string): Promise<RepoMap> {
+function normalizeExt(ext: string): string {
+  return ext.replace(/^\./, '').toLowerCase();
+}
+
+export function normalizeIgnoredFolders(folders: readonly string[] = []): string[] {
+  const normalized = new Set<string>();
+  for (const folder of folders) {
+    const cleaned = folder
+      .replace(/\\/g, '/')
+      .replace(/^\/+/, '')
+      .replace(/\/+$/, '')
+      .trim();
+    if (!cleaned || cleaned === '.' || cleaned.startsWith('../') || cleaned.includes('/../')) continue;
+    normalized.add(cleaned);
+  }
+  return [...normalized].sort((a, b) => a.localeCompare(b));
+}
+
+function ignoredFolderPatterns(folders: readonly string[]): string[] {
+  return normalizeIgnoredFolders(folders).map((folder) => `${folder}/**`);
+}
+
+function isAllowedByAllowlist(rel: string, allowlist: RepoScanAllowlist): boolean {
+  // Motivation vs Logic: repo previews and agent runs should only ever admit code-like inputs. Keeping the allowlist here means later stages cannot accidentally read docs, screenshots, cached summaries, or test fixtures just because they share a folder with source.
+  const normalizedRel = rel.replace(/\\/g, '/').toLowerCase();
+  const basename = path.basename(normalizedRel);
+  const allowedFiles = new Set(allowlist.fileNames.map((name) => name.replace(/\\/g, '/').toLowerCase()));
+  if (allowedFiles.has(normalizedRel) || allowedFiles.has(basename)) return true;
+
+  const ext = normalizeExt(path.extname(rel).slice(1));
+  if (!ext) return false;
+  return new Set(allowlist.extensions.map(normalizeExt)).has(ext);
+}
+
+export async function scanRepo(root: string, opts: RepoScanOptions = {}): Promise<RepoMap> {
   const ig = await readGitignore(root);
+  const allowlist = opts.allowlist ?? AGENT_FILE_ALLOWLIST;
+  const ignorePatterns = [...DEFAULT_IGNORE, ...ignoredFolderPatterns(opts.ignoredFolders ?? [])];
 
   const entries = await fg('**/*', {
     cwd: root,
     dot: false,
     onlyFiles: true,
-    ignore: DEFAULT_IGNORE,
+    ignore: ignorePatterns,
     suppressErrors: true,
     followSymbolicLinks: false,
   });
 
-  const filtered = entries.filter((p) => !ig.ignores(p));
+  const filtered = entries.filter((p) => !ig.ignores(p) && isAllowedByAllowlist(p, allowlist));
 
   const map: RepoMap = {
     root,
@@ -158,7 +289,7 @@ export async function scanRepo(root: string): Promise<RepoMap> {
     tests: [],
     docs: [],
     depHints: [],
-    ignoredFolders: DEFAULT_IGNORE,
+    ignoredFolders: ignorePatterns,
     likelyStack: [],
   };
 

@@ -29,6 +29,7 @@ export interface UiPreferences {
   isInspectorVisible?: boolean;
   editorTab?: PersistedEditorTab;
   repoPath?: string;
+  repoIgnoredFolders?: string[];
 }
 
 const MODES = new Set<PersistedMode>(['editor', 'agent', 'multi-layer']);
@@ -84,6 +85,9 @@ function sanitizePreferences(value: unknown): UiPreferences {
     preferences.editorTab = value.editorTab as PersistedEditorTab;
   }
   if (typeof value.repoPath === 'string') preferences.repoPath = value.repoPath;
+  if (Array.isArray(value.repoIgnoredFolders)) {
+    preferences.repoIgnoredFolders = value.repoIgnoredFolders.filter((item): item is string => typeof item === 'string');
+  }
 
   const provider = sanitizeProvider(value.provider);
   if (provider) preferences.provider = provider;

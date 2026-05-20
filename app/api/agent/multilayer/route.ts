@@ -15,6 +15,7 @@ const Body = z.object({
   rootPath: z.string().optional(),
   focus: z.string().default(''),
   topK: z.number().int().min(10).max(200).optional(),
+  ignoredFolders: z.array(z.string()).max(100).optional(),
 });
 
 export async function POST(req: Request) {
@@ -57,6 +58,7 @@ export async function POST(req: Request) {
       session: { id: cfg.provider, model: cfg.model, apiKey, endpoint },
       focus: cfg.focus,
       topK: cfg.topK,
+      ignoredFolders: cfg.ignoredFolders,
       signal: ac.signal,
     },
     send,

@@ -16,6 +16,7 @@ const Body = z.object({
   kind: z.enum(['architecture', 'sequence', 'class', 'data-flow', 'deployment']).default('architecture'),
   focus: z.string().default(''),
   topK: z.number().int().min(5).max(120).optional(),
+  ignoredFolders: z.array(z.string()).max(100).optional(),
 });
 
 export async function POST(req: Request) {
@@ -61,6 +62,7 @@ export async function POST(req: Request) {
       kind: cfg.kind,
       focus: cfg.focus,
       topK: cfg.topK,
+      ignoredFolders: cfg.ignoredFolders,
       signal: ac.signal,
     },
     send,
