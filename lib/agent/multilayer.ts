@@ -257,7 +257,16 @@ export async function runMultiLayerPipeline(
     send({ type: 'stage', stage: 'layers', status: 'start', message: 'Identifying architectural layers…' });
     const catalog = await identifyLayers(
       input.session,
-      { repoMap, summaries, imports: importGraph, docs, repoContext, kind: 'architecture', focus: input.focus },
+      {
+        repoMap,
+        summaries,
+        imports: importGraph,
+        docs,
+        repoContext,
+        kind: 'architecture',
+        focus: input.focus,
+        quickMode: input.quickMode,
+      },
       { signal: input.signal, onRetry: onRetry('layers') },
     );
     send({
@@ -288,7 +297,9 @@ export async function runMultiLayerPipeline(
               message: `planning ${layer.name}`,
             });
 
-            const used = selectLayerContextSummaries(layer, summaries, importGraph, { min: 8, max: 35 });
+            const used = input.quickMode
+              ? []
+              : selectLayerContextSummaries(layer, summaries, importGraph, { min: 8, max: 35 });
             const plan = await generatePlan(
               input.session,
               {
@@ -300,6 +311,7 @@ export async function runMultiLayerPipeline(
                 kind: 'architecture',
                 focus: `Layer "${layer.name}" - ${layer.description}. Show internal structure plus one-hop boundary nodes (dashed). Boundary deps: ${layer.boundary_deps.join(', ') || 'none'}.`,
                 layerFocus: layer.name,
+                quickMode: input.quickMode,
               },
               { signal: input.signal, onRetry: onRetry('sub-plan') },
             );

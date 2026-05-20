@@ -1,7 +1,6 @@
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
-// useMemo is used for allAnswered; keep the import.
 import { Sparkles } from 'lucide-react';
 import { useDiagramStore } from '@/lib/state/store';
 import { ProviderConfig } from './ProviderConfig';

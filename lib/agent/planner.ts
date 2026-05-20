@@ -117,6 +117,12 @@ export interface PlanInput {
   focus: string;
   /** Optional: restrict planning to a single named layer */
   layerFocus?: string;
+  /**
+   * Quick Mode flag: summaries will be empty; the planner should rely entirely on
+   * the deterministic structural digest (folder clusters, central files, routes,
+   * exports, env vars, cross-folder edges) and the import graph.
+   */
+  quickMode?: boolean;
 }
 
 function compactImports(graph: ImportGraph, maxLines = 80): string {
@@ -218,6 +224,9 @@ export async function generatePlan(
   const userMsg = [
     `Diagram type: ${input.kind}`,
     input.layerFocus ? `Layer focus: ${input.layerFocus} — only include components in this layer plus their immediate boundaries.` : '',
+    input.quickMode
+      ? `Mode: QUICK — per-file summaries are intentionally unavailable. Ground the diagram in the deterministic repo context, import graph, routes, exports, env vars, and docs below. Prefer folder clusters as group boundaries; use representative files within each cluster as nodes.`
+      : '',
     `Focus: ${input.focus || '(none — give a general architecture view)'}`,
     `Stack: ${input.repoMap.likelyStack.join(', ') || 'unknown'}`,
     `Top-level files: ${input.repoMap.entrypoints.map((f) => f.path).slice(0, 12).join(', ')}`,
@@ -230,8 +239,9 @@ export async function generatePlan(
     `## Documentation priors`,
     input.docs.length ? compactDocs(input.docs) : '(no documentation found)',
     '',
-    `## File summaries (top ${input.summaries.length})`,
-    compactSummaries(input.summaries),
+    input.quickMode
+      ? `## File summaries\n(skipped — Quick Mode)`
+      : `## File summaries (top ${input.summaries.length})\n${compactSummaries(input.summaries)}`,
     '',
     `## Import graph (sample)`,
     compactImports(input.imports),
@@ -253,7 +263,10 @@ export async function generatePlan(
         `5. Stable, short, human-readable names — they will be displayed in a diagram.\n` +
         `6. Keep the diagram readable: 40-90 nodes total. If the repo is very large, prefer groups over individual files; list omitted detail under 'omitted'.\n` +
         `7. If the layerFocus field is set, restrict the plan to that layer plus immediate boundary nodes (one hop out).\n\n` +
-        `8. Prefer names and boundaries from the deterministic repo context when it conflicts with vague file summaries.\n\n` +
+        `8. Prefer names and boundaries from the deterministic repo context when it conflicts with vague file summaries.\n` +
+        (input.quickMode
+          ? `9. QUICK MODE: per-file summaries are unavailable. Build the plan from folder clusters (treat each as a candidate group), central files, routes, exports, env vars, cross-folder edges, and the import graph. Keep the diagram skeletal — group-level over file-level when in doubt.\n\n`
+          : '\n') +
         ICON_GUIDANCE + '\n\n' + COLOR_GUIDANCE,
     },
     { role: 'user' as const, content: userMsg },
@@ -347,6 +360,9 @@ export async function identifyLayers(
   const userMsg = [
     `Stack: ${input.repoMap.likelyStack.join(', ') || 'unknown'}`,
     `Top externals: ${compactExternals(input.imports, 30)}`,
+    input.quickMode
+      ? `Mode: QUICK — per-file summaries are intentionally unavailable. Derive layers from folder clusters, central files, routes, exports, env vars, and cross-folder dependency edges below. Treat each cohesive folder cluster as a layer candidate.`
+      : '',
     '',
     `## Deterministic repo context`,
     compactRepoContext(input.repoContext),
@@ -354,9 +370,10 @@ export async function identifyLayers(
     `## Documentation`,
     input.docs.length ? compactDocs(input.docs) : '(none)',
     '',
-    `## File summaries`,
-    compactSummaries(input.summaries),
-  ].join('\n');
+    input.quickMode ? `## File summaries\n(skipped — Quick Mode)` : `## File summaries\n${compactSummaries(input.summaries)}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
 
   const messages = [
     {
@@ -368,7 +385,10 @@ export async function identifyLayers(
         `Use the supplied per-file 'layer' field as the strongest signal. Assign every supplied file to exactly one layer (members lists may overlap minimally). ` +
         `For each layer, include representative_files and boundary_deps grounded in the deterministic repo context. ` +
         `Define cross-layer edges: how data and control move BETWEEN layers (not inside). ` +
-        `Output JSON strictly matching the schema; no prose outside it.\n\n` +
+        `Output JSON strictly matching the schema; no prose outside it.\n` +
+        (input.quickMode
+          ? `QUICK MODE: per-file summaries are unavailable. Drive layer identification from folder clusters (each cohesive cluster is a strong layer candidate), routes, central files, exports, env vars, and cross-folder dependency edges. Populate member_files / representative_files from those clusters.\n\n`
+          : '\n') +
         ICON_GUIDANCE + '\n\n' + COLOR_GUIDANCE,
     },
     { role: 'user' as const, content: userMsg },

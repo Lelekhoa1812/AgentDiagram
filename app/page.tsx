@@ -7,6 +7,7 @@ import { ExampleLoader } from '@/components/editor/ExampleLoader';
 import { DiagramCanvas, type DiagramCanvasHandle } from '@/components/diagram/DiagramCanvas';
 import { InspectorPanel } from '@/components/inspector/InspectorPanel';
 import { AgentPanel } from '@/components/agent/AgentPanel';
+import { CustomPromptPanel } from '@/components/agent/CustomPromptPanel';
 import { MultiLayerPanel } from '@/components/multilayer/MultiLayerPanel';
 import { LayerNavigator } from '@/components/multilayer/LayerNavigator';
 import { useDiagramStore } from '@/lib/state/store';
@@ -135,6 +136,10 @@ export default function Page() {
         // Root Cause vs Logic: Multi Layer was reachable from the toggle but fell through to AgentPanel, so the dedicated pipeline UI never mounted. Keep it as an explicit shell branch while editor remains the rendering destination for generated layers.
         <main className="flex-1 min-h-0 overflow-hidden bg-ink-950">
           <MultiLayerPanel />
+        </main>
+      ) : mode === 'custom-prompt' ? (
+        <main className="flex-1 min-h-0 overflow-hidden bg-ink-950">
+          <CustomPromptPanel />
         </main>
       ) : (
         <main className="flex-1 min-h-0 overflow-hidden bg-ink-950">
