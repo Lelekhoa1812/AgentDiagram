@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { useDiagramStore } from '@/lib/state/store';
 import { ProviderConfig } from './ProviderConfig';
 import { RepoInput } from './RepoInput';
+import type { RepoSourceConfig } from './RepoInput';
 import { DiagramTypePicker } from './DiagramTypePicker';
 import { FocusPromptBox } from './FocusPromptBox';
 import { QuickModeToggle } from './QuickModeToggle';
@@ -32,6 +33,7 @@ export function AgentPanel() {
   const [rootPath, setRootPath] = useState<string>('');
   const [ignoredFolders, setIgnoredFolders] = useState<string[]>([]);
   const [scan, setScan] = useState<ScanResult | null>(null);
+  const [repoSource, setRepoSource] = useState<RepoSourceConfig>({ sourceType: 'local', repoPath: '', authMode: 'none' });
   const [retryNotice, setRetryNotice] = useState<{ stage: string; attempt: number; delayMs: number; reason: string } | null>(null);
   const [counters, setCounters] = useState<Record<string, number>>({});
   const [terminalState, setTerminalState] = useState<{ status: 'failed' | 'cancelled'; message: string } | null>(null);
@@ -67,6 +69,7 @@ export function AgentPanel() {
           focus,
           ignoredFolders,
           quickMode,
+          source: repoSource,
         }),
         signal: ac.signal,
       });
@@ -139,14 +142,16 @@ export function AgentPanel() {
       <div className="grid h-full grid-cols-[1fr] gap-4 overflow-y-auto p-6 lg:grid-cols-2">
         <ProviderConfig />
         <RepoInput
-          onConfigChange={(path, ignored) => {
+          onConfigChange={(path, ignored, source) => {
             setRootPath(path);
             setIgnoredFolders(ignored);
+            setRepoSource(source);
             setScan(null);
           }}
-          onScan={(path, result, ignored) => {
+          onScan={(path, result, ignored, source) => {
             setRootPath(path);
             setIgnoredFolders(ignored);
+            setRepoSource(source);
             setScan({ resolved: result.resolved, fileCount: result.fileCount });
           }}
         />

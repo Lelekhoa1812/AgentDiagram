@@ -26,9 +26,19 @@ interface BrowseEntry {
   type: 'dir' | 'file';
 }
 
+export type RepoSourceType = 'local' | 'github';
+export type RepoAuthMode = 'none' | 'pat';
+
+export interface RepoSourceConfig {
+  sourceType: RepoSourceType;
+  repoPath: string;
+  repoUrl?: string;
+  authMode: RepoAuthMode;
+}
+
 interface RepoInputProps {
-  onScan: (path: string, result: ScanResult, ignoredFolders: string[]) => void;
-  onConfigChange?: (path: string, ignoredFolders: string[]) => void;
+  onScan: (path: string, result: ScanResult, ignoredFolders: string[], source: RepoSourceConfig) => void;
+  onConfigChange?: (path: string, ignoredFolders: string[], source: RepoSourceConfig) => void;
 }
 
 // Motivation vs Logic: the browser is the user's main lever to keep noisy folders/files out of
@@ -37,7 +47,11 @@ interface RepoInputProps {
 // reversible — clicking Ignore appends to the existing `ignoredFolders` list which the analyze
 // API already plumbs straight into the scanner.
 export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
+  const [sourceType, setSourceType] = useState<RepoSourceType>('local');
   const [path, setPath] = useState('');
+  const [repoUrl, setRepoUrl] = useState('');
+  const [pat, setPat] = useState('');
+  const [hasLocalCheckout, setHasLocalCheckout] = useState(true);
   const [ignoredFolders, setIgnoredFolders] = useState<string[]>([]);
   const [browserParent, setBrowserParent] = useState('');
   const [entries, setEntries] = useState<BrowseEntry[]>([]);
@@ -51,22 +65,37 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
   const browserRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const savedPath = readUiPreference('repoPath');
+    const savedSourceType = readUiPreference('repoSourceType') ?? 'local';
+    const savedPath = readUiPreference('repoPath') ?? '';
+    const savedRepoUrl = readUiPreference('repoUrl') ?? '';
     const savedIgnored = readUiPreference('repoIgnoredFolders') ?? [];
+    setSourceType(savedSourceType);
+    setRepoUrl(savedRepoUrl);
+    setHasLocalCheckout(savedSourceType === 'local' || Boolean(savedPath));
     if (savedIgnored.length) {
       setIgnoredFolders(savedIgnored);
     }
 
     if (savedPath) {
       setPath(savedPath);
-      onConfigChange?.(savedPath, savedIgnored);
+      onConfigChange?.(savedPath, savedIgnored, {
+        sourceType: savedSourceType,
+        repoPath: savedPath,
+        repoUrl: savedRepoUrl,
+        authMode: 'none',
+      });
     } else {
       fetch('/api/repo/scan')
         .then((r) => r.json())
         .then((d: { defaultPath?: string }) => {
           if (d.defaultPath) {
             setPath(d.defaultPath);
-            onConfigChange?.(d.defaultPath, savedIgnored);
+            onConfigChange?.(d.defaultPath, savedIgnored, {
+              sourceType: savedSourceType,
+              repoPath: d.defaultPath,
+              repoUrl: savedRepoUrl,
+              authMode: 'none',
+            });
           }
         })
         .catch(() => {});
@@ -134,8 +163,32 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
   const onPathChange = (value: string) => {
     writeUiPreference('repoPath', value);
     setPath(value);
+    if (sourceType === 'local') {
+      setHasLocalCheckout(Boolean(value.trim()));
+    }
     setResult(null);
-    onConfigChange?.(value, ignoredFolders);
+    onConfigChange?.(value, ignoredFolders, {
+      sourceType,
+      repoPath: value,
+      repoUrl,
+      authMode: pat.trim() ? 'pat' : 'none',
+    });
+  };
+
+  const onSourceTypeChange = (value: RepoSourceType) => {
+    setSourceType(value);
+    writeUiPreference('repoSourceType', value);
+    if (value === 'local') {
+      setHasLocalCheckout(Boolean(path.trim()));
+    } else {
+      setHasLocalCheckout(false);
+    }
+    onConfigChange?.(path, ignoredFolders, {
+      sourceType: value,
+      repoPath: path,
+      repoUrl,
+      authMode: pat.trim() ? 'pat' : 'none',
+    });
   };
 
   const updateIgnoredFolders = (next: string[]) => {
@@ -145,7 +198,12 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
     setIgnoredFolders(cleaned);
     writeUiPreference('repoIgnoredFolders', cleaned);
     setResult(null);
-    onConfigChange?.(path, cleaned);
+    onConfigChange?.(path, cleaned, {
+      sourceType,
+      repoPath: path,
+      repoUrl,
+      authMode: pat.trim() ? 'pat' : 'none',
+    });
   };
 
   const parentFolder = browserParent ? browserParent.split('/').slice(0, -1).join('/') : '';
@@ -201,7 +259,13 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
         return;
       }
       setResult(data);
-      onScan(data.resolved, data, ignoredFolders);
+      setHasLocalCheckout(true);
+      onScan(data.resolved, data, ignoredFolders, {
+        sourceType,
+        repoPath: data.resolved,
+        repoUrl: repoUrl.trim(),
+        authMode: pat.trim() ? 'pat' : 'none',
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -212,6 +276,69 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
   return (
     <div className="space-y-3 rounded-xl border border-ink-700 bg-ink-900/60 p-4 text-xs">
       <div className="text-[10px] uppercase tracking-widest text-ink-400">Repository</div>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => onSourceTypeChange('local')}
+          className={`rounded-md border px-2.5 py-1 text-[11px] ${sourceType === 'local' ? 'border-accent/60 bg-accent/20 text-accent' : 'border-ink-700 bg-ink-800 text-ink-300'}`}
+        >
+          Local Path
+        </button>
+        <button
+          type="button"
+          onClick={() => onSourceTypeChange('github')}
+          className={`rounded-md border px-2.5 py-1 text-[11px] ${sourceType === 'github' ? 'border-accent/60 bg-accent/20 text-accent' : 'border-ink-700 bg-ink-800 text-ink-300'}`}
+        >
+          GitHub URL
+        </button>
+      </div>
+
+      {sourceType === 'github' && (
+        <div className="space-y-2 rounded-md border border-ink-800 bg-ink-950/70 p-2">
+          <div>
+            <div className="mb-1 text-[10px] uppercase tracking-widest text-ink-400">Repository URL</div>
+            <input
+              value={repoUrl}
+              onChange={(e) => {
+                const value = e.target.value;
+                setRepoUrl(value);
+                writeUiPreference('repoUrl', value);
+                setResult(null);
+                onConfigChange?.(path, ignoredFolders, {
+                  sourceType,
+                  repoPath: path,
+                  repoUrl: value,
+                  authMode: pat.trim() ? 'pat' : 'none',
+                });
+              }}
+              placeholder="https://github.com/org/repo or .../repo.git"
+              className="w-full rounded-md border border-ink-700 bg-ink-900 px-2 py-1.5 font-mono text-[11px]"
+            />
+          </div>
+          <div>
+            <div className="mb-1 text-[10px] uppercase tracking-widest text-ink-400">Personal access token (optional)</div>
+            <input
+              type="password"
+              autoComplete="off"
+              value={pat}
+              onChange={(e) => {
+                const value = e.target.value;
+                setPat(value);
+                onConfigChange?.(path, ignoredFolders, {
+                  sourceType,
+                  repoPath: path,
+                  repoUrl,
+                  authMode: value.trim() ? 'pat' : 'none',
+                });
+              }}
+              placeholder="ghp_…"
+              className="w-full rounded-md border border-ink-700 bg-ink-900 px-2 py-1.5 font-mono text-[11px]"
+            />
+            <div className="mt-1 text-[10px] text-ink-400">PAT is optional for public repositories.</div>
+            <div className="text-[10px] text-ink-400">If clone fails with auth/permission errors, provide a PAT and retry.</div>
+          </div>
+        </div>
+      )}
 
       <div>
         <div className="mb-1 text-[10px] uppercase tracking-widest text-ink-400">Absolute path</div>
@@ -281,7 +408,7 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
             <button
               type="button"
               onClick={() => void loadEntries(parentFolder)}
-              disabled={!browserParent || loadingEntries}
+              disabled={!hasLocalCheckout || !browserParent || loadingEntries}
               className="rounded border border-ink-700 bg-ink-800 px-2 py-1 text-[11px] hover:bg-ink-700 disabled:opacity-50"
             >
               Up
@@ -289,7 +416,7 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
             <button
               type="button"
               onClick={() => void loadEntries('')}
-              disabled={!path || loadingEntries}
+              disabled={!hasLocalCheckout || !path || loadingEntries}
               className="rounded border border-ink-700 bg-ink-800 px-2 py-1 text-[11px] hover:bg-ink-700 disabled:opacity-50"
             >
               Root
@@ -302,7 +429,9 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
         )}
 
         <div className="max-h-72 space-y-0.5 overflow-y-auto rounded border border-ink-800 bg-ink-900/70 p-1">
-          {loadingEntries ? (
+          {!hasLocalCheckout ? (
+            <div className="p-2 text-ink-500">Directory browsing unlocks after clone completes and a local checkout path exists.</div>
+          ) : loadingEntries ? (
             <div className="p-2 text-ink-400">Loading…</div>
           ) : visibleEntries.length ? (
             visibleEntries.map((entry) => {

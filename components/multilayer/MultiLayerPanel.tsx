@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { useDiagramStore, type MultiLayerOutput } from '@/lib/state/store';
 import { ProviderConfig } from '@/components/agent/ProviderConfig';
 import { RepoInput } from '@/components/agent/RepoInput';
+import type { RepoSourceConfig } from '@/components/agent/RepoInput';
 import { FocusPromptBox } from '@/components/agent/FocusPromptBox';
 import { QuickModeToggle } from '@/components/agent/QuickModeToggle';
 import { AnalysisAnimation } from '@/components/agent/AnalysisAnimation';
@@ -28,6 +29,7 @@ export function MultiLayerPanel() {
   const [rootPath, setRootPath] = useState('');
   const [ignoredFolders, setIgnoredFolders] = useState<string[]>([]);
   const [scanInfo, setScanInfo] = useState<{ resolved: string; fileCount: number } | null>(null);
+  const [repoSource, setRepoSource] = useState<RepoSourceConfig>({ sourceType: 'local', repoPath: '', authMode: 'none' });
   const [retryNotice, setRetryNotice] = useState<{ stage: string; attempt: number; delayMs: number; reason: string } | null>(null);
   const [counters, setCounters] = useState<Record<string, number>>({});
   const [terminalState, setTerminalState] = useState<{ status: 'failed' | 'cancelled'; message: string } | null>(null);
@@ -63,6 +65,7 @@ export function MultiLayerPanel() {
           focus,
           ignoredFolders,
           quickMode,
+          source: repoSource,
         }),
         signal: ac.signal,
       });
@@ -134,14 +137,16 @@ export function MultiLayerPanel() {
       <div className="grid h-full grid-cols-[1fr] gap-4 overflow-y-auto p-6 lg:grid-cols-2">
         <ProviderConfig />
         <RepoInput
-          onConfigChange={(path, ignored) => {
+          onConfigChange={(path, ignored, source) => {
             setRootPath(path);
             setIgnoredFolders(ignored);
+            setRepoSource(source);
             setScanInfo(null);
           }}
-          onScan={(path, info, ignored) => {
+          onScan={(path, info, ignored, source) => {
             setRootPath(path);
             setIgnoredFolders(ignored);
+            setRepoSource(source);
             setScanInfo({ resolved: info.resolved, fileCount: info.fileCount });
           }}
         />
