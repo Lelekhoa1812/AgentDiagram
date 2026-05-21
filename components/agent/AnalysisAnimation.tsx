@@ -39,6 +39,24 @@ export function AnalysisAnimation({ retryNotice, counters, onCancel, onDismiss, 
 
   const activeIdx = stages.findIndex((s) => s.id === stage);
   const isTerminal = terminalState !== null && terminalState !== undefined;
+  const estimatedTokens = (() => {
+    if (stage === 'scan') {
+      const files = counters?.files ?? 0;
+      return files > 0 ? Math.round(files * 120) : 0;
+    }
+    if (stage === 'summarize') {
+      const done = counters?.done ?? 0;
+      const total = counters?.total ?? counters?.selected ?? 0;
+      if (total <= 0) return 0;
+      const avgPerFile = 1_300;
+      return Math.round(Math.max(done, 1) * avgPerFile);
+    }
+    if (stage === 'plan' || stage === 'subsystem' || stage === 'compile') {
+      const selected = counters?.selected ?? counters?.total ?? 0;
+      return selected > 0 ? Math.round(selected * 350) : 0;
+    }
+    return 0;
+  })();
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/85 backdrop-blur-sm">
@@ -117,6 +135,7 @@ export function AnalysisAnimation({ retryNotice, counters, onCancel, onDismiss, 
           {counters?.done !== undefined && counters?.total !== undefined && (
             <div>✓ {counters.done}/{counters.total} summarized</div>
           )}
+          {estimatedTokens > 0 && <div>🧠 ≈ {estimatedTokens.toLocaleString()} tokens</div>}
         </div>
 
         <details className="mt-3 rounded-lg border border-ink-700 bg-ink-950/40 p-2 text-[11px]">
