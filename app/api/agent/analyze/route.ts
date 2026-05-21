@@ -21,6 +21,7 @@ const Body = z.object({
   topK: z.number().int().min(5).max(120).optional(),
   ignoredFolders: z.array(z.string()).max(100).optional(),
   quickMode: z.boolean().optional().default(false),
+  maxMode: z.boolean().optional().default(false),
   source: z
     .object({
       sourceType: z.enum(['local', 'github']).optional(),
@@ -110,6 +111,7 @@ export async function POST(req: Request) {
       topK: cfg.topK,
       ignoredFolders: cfg.ignoredFolders,
       quickMode: cfg.quickMode,
+      maxMode: cfg.maxMode,
       signal: ac.signal,
     },
     send,

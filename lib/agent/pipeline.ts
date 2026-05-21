@@ -40,6 +40,7 @@ export interface PipelineInput {
    * cheaper, but produces a more skeletal diagram.
    */
   quickMode?: boolean;
+  maxMode?: boolean;
   signal?: AbortSignal;
 }
 
@@ -81,12 +82,15 @@ export async function runPipeline(
 
     // 3. Classify
     send({ type: 'stage', stage: 'classify', status: 'start', message: 'Scoring relevance…' });
-    const relevant = classifyRelevance(repoMap, input.kind, input.focus, input.topK ?? 60);
+    const relevantCap = input.maxMode ? repoMap.files.length : (input.topK ?? 60);
+    const relevant = classifyRelevance(repoMap, input.kind, input.focus, relevantCap);
     send({
       type: 'stage',
       stage: 'classify',
       status: 'done',
-      message: `Selected ${relevant.length} files for deep analysis`,
+      message: input.maxMode
+        ? `MAX mode: selected all ${relevant.length} relevant files for deep analysis`
+        : `Selected ${relevant.length} files for deep analysis`,
       counters: { selected: relevant.length },
     });
 
