@@ -40,6 +40,7 @@ interface RepoInputProps {
 export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
   const [sourceType, setSourceType] = useState<RepoSourceType>('local');
   const [path, setPath] = useState('');
+  const [localPath, setLocalPath] = useState('');
   const [repoUrl, setRepoUrl] = useState('');
   const [pat, setPat] = useState('');
   const [hasLocalCheckout, setHasLocalCheckout] = useState(true);
@@ -77,20 +78,24 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
   useEffect(() => {
     const savedSourceType = readUiPreference('repoSourceType') ?? 'local';
     const savedPath = readUiPreference('repoPath') ?? '';
+    const savedLocalPath = readUiPreference('repoLocalPath') ?? '';
     const savedRepoUrl = readUiPreference('repoUrl') ?? '';
     const savedIgnored = readUiPreference('repoIgnoredFolders') ?? [];
+    const initialLocalPath = savedSourceType === 'local' ? savedPath || savedLocalPath : savedLocalPath;
+    const initialActivePath = savedSourceType === 'local' ? savedPath || savedLocalPath : savedPath;
     setSourceType(savedSourceType);
     setRepoUrl(savedRepoUrl);
-    setHasLocalCheckout(savedSourceType === 'local' || Boolean(savedPath));
+    setLocalPath(initialLocalPath);
+    setHasLocalCheckout(savedSourceType === 'local' || Boolean(initialActivePath));
     if (savedIgnored.length) {
       setIgnoredFolders(savedIgnored);
     }
 
-    if (savedPath) {
-      setPath(savedPath);
-      emitConfigChange(savedPath, savedIgnored, {
+    if (initialActivePath) {
+      setPath(initialActivePath);
+      emitConfigChange(initialActivePath, savedIgnored, {
         sourceType: savedSourceType,
-        repoPath: savedPath,
+        repoPath: initialActivePath,
         repoUrl: savedRepoUrl,
         authMode: 'none',
       });
@@ -100,6 +105,8 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
         .then((d: { defaultPath?: string }) => {
           if (d.defaultPath) {
             setPath(d.defaultPath);
+            setLocalPath(d.defaultPath);
+            writeUiPreference('repoLocalPath', d.defaultPath);
             emitConfigChange(d.defaultPath, savedIgnored, {
               sourceType: savedSourceType,
               repoPath: d.defaultPath,
@@ -173,6 +180,10 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
 
   const onPathChange = (value: string) => {
     writeUiPreference('repoPath', value);
+    if (sourceType === 'local') {
+      setLocalPath(value);
+      writeUiPreference('repoLocalPath', value);
+    }
     setPath(value);
     if (sourceType === 'local') {
       setHasLocalCheckout(Boolean(value.trim()));
@@ -186,17 +197,34 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
   };
 
   const onSourceTypeChange = (value: RepoSourceType) => {
+    // Root Cause vs Logic: the same `path` state was backing both local checkout browsing and
+    // GitHub clone mode, so switching sources leaked the previous local path into GitHub mode.
+    // We now remember the local path separately, blank the active field in GitHub mode, and
+    // restore the local path when the user switches back.
     setSourceType(value);
     writeUiPreference('repoSourceType', value);
     setResult(null);
     if (value === 'local') {
-      setHasLocalCheckout(Boolean(path.trim()));
+      const restored = localPath.trim();
+      setPath(restored);
+      setHasLocalCheckout(Boolean(restored));
+      if (restored) {
+        writeUiPreference('repoPath', restored);
+      }
     } else {
+      if (path.trim()) {
+        setLocalPath(path);
+        writeUiPreference('repoLocalPath', path);
+      }
+      setPath('');
+      writeUiPreference('repoPath', '');
       setHasLocalCheckout(false);
+      setEntries([]);
+      setBrowserParent('');
     }
-    emitConfigChange(path, ignoredFolders, {
+    emitConfigChange(value === 'local' ? localPath : '', ignoredFolders, {
       sourceType: value,
-      repoPath: path,
+      repoPath: value === 'local' ? localPath : '',
       repoUrl,
     });
   };

@@ -9,6 +9,9 @@ coverage
 .env
 .env.local
 .env.*.local
+# Root Cause vs Logic: GitHub-mode clones are cached under `.cache/github-repos`, and without
+# ignoring the cache root a user can accidentally `git add` an embedded checkout into the app repo.
+.cache/
 .agentdiagram-cache
 playwright-report
 test-results
