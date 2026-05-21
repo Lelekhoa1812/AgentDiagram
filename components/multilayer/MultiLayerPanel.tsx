@@ -14,6 +14,8 @@ export function MultiLayerPanel() {
   const provider = useDiagramStore((s) => s.provider);
   const focus = useDiagramStore((s) => s.focusPrompt);
   const quickMode = useDiagramStore((s) => s.quickMode);
+  const maxMode = useDiagramStore((s) => s.maxMode);
+  const setMaxMode = useDiagramStore((s) => s.setMaxMode);
   const setMode = useDiagramStore((s) => s.setMode);
   const setDsl = useDiagramStore((s) => s.setDsl);
   const addGeneratedProject = useDiagramStore((s) => s.addGeneratedProject);
@@ -56,17 +58,18 @@ export function MultiLayerPanel() {
       const res = await fetch('/api/agent/multilayer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider: provider.provider,
-          model: provider.provider === 'foundry' ? provider.customModel ?? '' : provider.model,
-          apiKey: provider.apiKey || undefined,
-          endpoint: provider.endpoint || undefined,
-          rootPath,
-          focus,
-          ignoredFolders,
-          quickMode,
-          source: repoSource,
-        }),
+          body: JSON.stringify({
+            provider: provider.provider,
+            model: provider.provider === 'foundry' ? provider.customModel ?? '' : provider.model,
+            apiKey: provider.apiKey || undefined,
+            endpoint: provider.endpoint || undefined,
+            rootPath,
+            focus,
+            ignoredFolders,
+            quickMode,
+            maxMode,
+            source: repoSource,
+          }),
         signal: ac.signal,
       });
       if (!res.ok || !res.body) {
@@ -137,6 +140,8 @@ export function MultiLayerPanel() {
       <div className="grid h-full grid-cols-[1fr] gap-4 overflow-y-auto p-6 lg:grid-cols-2">
         <ProviderConfig />
         <RepoInput
+          maxMode={maxMode}
+          onMaxModeChange={setMaxMode}
           onConfigChange={(path, ignored, source) => {
             setRootPath(path);
             setIgnoredFolders(ignored);
@@ -177,6 +182,7 @@ export function MultiLayerPanel() {
                 {ignoredFolders.length ? ` · ${ignoredFolders.length} ignored folder${ignoredFolders.length === 1 ? '' : 's'}` : ''} · provider {provider.provider}/
                 {provider.provider === 'foundry' ? provider.customModel ?? '?' : provider.model}
                 {quickMode ? <> · <span className="text-accent">Quick Mode</span></> : null}
+                {maxMode ? <> · <span className="text-coral">MAX</span></> : null}
               </>
             ) : (
               'Configure provider + preview repo to enable multi-layer analysis'

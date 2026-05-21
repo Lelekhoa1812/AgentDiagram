@@ -44,6 +44,24 @@ export interface PipelineInput {
   signal?: AbortSignal;
 }
 
+export function validateRenderableDsl(dsl: string): string | null {
+  const diagram = compile(dsl);
+  const errors = diagram.diagnostics.filter((d) => d.severity === 'error');
+  if (errors.length > 0) {
+    return `Generated DSL is still invalid after repair: ${errors[0]?.message ?? 'syntax error'}`;
+  }
+  if (diagram.nodes.length + diagram.groups.length === 0) {
+    return 'Generated DSL did not contain any nodes or groups.';
+  }
+  const hasMeaningfulLabel = [...diagram.nodes, ...diagram.groups].some((item) =>
+    /[A-Za-z0-9]/.test(item.label ?? item.name),
+  );
+  if (!hasMeaningfulLabel) {
+    return 'Generated DSL did not contain any renderable node or group labels.';
+  }
+  return null;
+}
+
 export async function runPipeline(
   input: PipelineInput,
   send: (ev: SseEvent) => void,
@@ -227,6 +245,13 @@ export async function runPipeline(
         level: repaired.errors === 0 ? 'info' : 'warn',
         message: repaired.errors === 0 ? 'Repaired successfully' : `${repaired.errors} errors remain after repair`,
       });
+    }
+    const finalError = validateRenderableDsl(dsl);
+    if (finalError) {
+      // Root Cause vs Logic: malformed repair output such as "/" was treated as a successful result and saved into project tabs. Stop before emitting `result` so the UI reports failure instead of persisting an unrenderable diagram.
+      send({ type: 'error', stage: 'validate-dsl', message: finalError });
+      send({ type: 'done' });
+      return { dsl: '' };
     }
     send({ type: 'stage', stage: 'validate-dsl', status: 'done', message: 'Validation complete' });
 

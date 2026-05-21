@@ -5,6 +5,7 @@ import { methodNotAllowedResponse } from '@/lib/util/http';
 import { defaultRepoPath } from '@/lib/security/pathGuard';
 import { PROVIDER_ENV } from '@/lib/agent/providers';
 import { RepoSourceError, resolveRepoSource } from '@/lib/agent/repoSource';
+import { optionalUrl } from '@/lib/agent/requestValidation';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -20,11 +21,12 @@ const Body = z.object({
   topK: z.number().int().min(10).max(200).optional(),
   ignoredFolders: z.array(z.string()).max(100).optional(),
   quickMode: z.boolean().optional().default(false),
+  maxMode: z.boolean().optional().default(false),
   source: z
     .object({
       sourceType: z.enum(['local', 'github']).optional(),
       repoPath: z.string().optional(),
-      repoUrl: z.string().url().optional(),
+      repoUrl: optionalUrl,
       authMode: z.enum(['none', 'pat']).optional(),
       pat: z.string().optional(),
     })
@@ -106,6 +108,7 @@ export async function POST(req: Request) {
       topK: cfg.topK,
       ignoredFolders: cfg.ignoredFolders,
       quickMode: cfg.quickMode,
+      maxMode: cfg.maxMode,
       signal: ac.signal,
     },
     send,

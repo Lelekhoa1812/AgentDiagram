@@ -86,6 +86,9 @@ interface State {
   // Quick Mode: skip per-file LLM summarization in agent pipelines. Default off.
   quickMode: boolean;
 
+  // MAX Mode: remove the default relevance cap so analysis can consider every scanned file.
+  maxMode: boolean;
+
   // Project tabs — user-generated projects saved to localStorage
   generatedProjects: StoredProject[];
   activeProjectId: string | null;
@@ -111,6 +114,7 @@ interface State {
   setMultiLayer: (output: MultiLayerOutput | null) => void;
   setActiveLayer: (name: string) => void;
   setQuickMode: (enabled: boolean) => void;
+  setMaxMode: (enabled: boolean) => void;
   addGeneratedProject: (name: string, dsl: string, multiLayer?: MultiLayerOutput) => void;
   openProject: (project: { id: string; dsl: string; multiLayer?: MultiLayerOutput | null }) => void;
   removeGeneratedProject: (id: string) => void;
@@ -141,6 +145,7 @@ export const useDiagramStore = create<State>()(
       multiLayer: null,
       activeLayer: 'overview',
       quickMode: false,
+      maxMode: false,
       generatedProjects: [],
       activeProjectId: null,
       setMode: (mode) => {
@@ -196,7 +201,8 @@ export const useDiagramStore = create<State>()(
         const activeProjectId = readActiveProjectId();
         const activeProject = generatedProjects.find((p) => p.id === activeProjectId);
         const restoredMultiLayer = activeProject?.multiLayer ?? null;
-        // Motivation vs Logic: UI choices should survive reloads, but credentials stay session-only so localStorage never contradicts the API key copy.
+        const restoredDsl = activeProject?.dsl ?? preferences.dslText;
+        // Root Cause vs Logic: the active project tab and the editor text were restored from different localStorage keys, so a generated repo tab could show stale scratch text like "/" and render no diagram. Prefer the active project's saved DSL whenever that project still exists.
         set((state) => ({
           generatedProjects,
           activeProjectId,
@@ -207,8 +213,9 @@ export const useDiagramStore = create<State>()(
           ...(preferences.diagramType ? { diagramType: preferences.diagramType } : {}),
           ...(preferences.focusPrompt !== undefined ? { focusPrompt: preferences.focusPrompt } : {}),
           ...(preferences.activeLayer ? { activeLayer: preferences.activeLayer } : {}),
-          ...(preferences.dslText !== undefined ? { dslText: preferences.dslText } : {}),
+          ...(restoredDsl !== undefined ? { dslText: restoredDsl } : {}),
           ...(preferences.quickMode !== undefined ? { quickMode: preferences.quickMode } : {}),
+          ...(preferences.maxMode !== undefined ? { maxMode: preferences.maxMode } : {}),
           ...(preferences.provider
             ? {
                 provider: {
@@ -235,6 +242,10 @@ export const useDiagramStore = create<State>()(
       setQuickMode: (enabled) => {
         writeUiPreference('quickMode', enabled);
         set({ quickMode: enabled });
+      },
+      setMaxMode: (enabled) => {
+        writeUiPreference('maxMode', enabled);
+        set({ maxMode: enabled });
       },
       addGeneratedProject: (name, dsl, multiLayer?) => {
         const project = addStoredProject(name, dsl, multiLayer);

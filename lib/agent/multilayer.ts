@@ -37,6 +37,8 @@ export interface MultiLayerInput {
   ignoredFolders?: string[];
   /** See PipelineInput.quickMode — skips per-file summarization for the layered pipeline too. */
   quickMode?: boolean;
+  /** MAX mode removes the default relevance cap so the layered planner can consider every file. */
+  maxMode?: boolean;
   signal?: AbortSignal;
 }
 
@@ -190,12 +192,15 @@ export async function runMultiLayerPipeline(
 
     // 3. Classify
     send({ type: 'stage', stage: 'classify', status: 'start' });
-    const relevant = classifyRelevance(repoMap, 'architecture', input.focus, input.topK ?? 80);
+    // Motivation vs Logic: the layered pipeline uses the same MAX semantics as Agentic Explorer,
+    // so the toggle must lift the file-budget cap here rather than only changing the UI state.
+    const relevantCap = input.maxMode ? repoMap.files.length : (input.topK ?? 80);
+    const relevant = classifyRelevance(repoMap, 'architecture', input.focus, relevantCap);
     send({
       type: 'stage',
       stage: 'classify',
       status: 'done',
-      message: `${relevant.length} files selected`,
+      message: input.maxMode ? `MAX mode: selected all ${relevant.length} relevant files` : `${relevant.length} files selected`,
       counters: { selected: relevant.length },
     });
 

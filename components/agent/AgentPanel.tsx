@@ -21,6 +21,8 @@ export function AgentPanel() {
   const kind = useDiagramStore((s) => s.diagramType);
   const focus = useDiagramStore((s) => s.focusPrompt);
   const quickMode = useDiagramStore((s) => s.quickMode);
+  const maxMode = useDiagramStore((s) => s.maxMode);
+  const setMaxMode = useDiagramStore((s) => s.setMaxMode);
   const setMode = useDiagramStore((s) => s.setMode);
   const setDsl = useDiagramStore((s) => s.setDsl);
   const addGeneratedProject = useDiagramStore((s) => s.addGeneratedProject);
@@ -35,7 +37,6 @@ export function AgentPanel() {
   const [scan, setScan] = useState<ScanResult | null>(null);
   const [repoSource, setRepoSource] = useState<RepoSourceConfig>({ sourceType: 'local', repoPath: '', authMode: 'none' });
   const [retryNotice, setRetryNotice] = useState<{ stage: string; attempt: number; delayMs: number; reason: string } | null>(null);
-  const [maxMode, setMaxMode] = useState(false);
   const [counters, setCounters] = useState<Record<string, number>>({});
   const [terminalState, setTerminalState] = useState<{ status: 'failed' | 'cancelled'; message: string } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -144,6 +145,8 @@ export function AgentPanel() {
       <div className="grid h-full grid-cols-[1fr] gap-4 overflow-y-auto p-6 lg:grid-cols-2">
         <ProviderConfig />
         <RepoInput
+          maxMode={maxMode}
+          onMaxModeChange={setMaxMode}
           onConfigChange={(path, ignored, source) => {
             setRootPath(path);
             setIgnoredFolders(ignored);
@@ -160,19 +163,6 @@ export function AgentPanel() {
         <DiagramTypePicker />
         <FocusPromptBox />
         <QuickModeToggle />
-        <label className="col-span-full flex items-center gap-2 rounded-xl border border-ink-700 bg-ink-900/60 p-3 text-xs text-ink-300">
-          <input
-            type="checkbox"
-            checked={maxMode}
-            onChange={(e) => setMaxMode(e.target.checked)}
-            className="h-4 w-4 rounded border-ink-600 bg-ink-800"
-          />
-          <span>
-            <span className="font-semibold text-ink-100">MAX mode</span> — remove the default relevant-file cap and scan/summarize all
-            matched files.
-          </span>
-        </label>
-
         <div className="col-span-full flex items-center justify-between gap-2 rounded-xl border border-ink-700 bg-ink-900/60 p-4">
           <div className="text-xs text-ink-400">
             {scan ? (

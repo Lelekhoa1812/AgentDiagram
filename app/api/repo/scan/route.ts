@@ -3,13 +3,14 @@ import { z } from 'zod';
 import { AGENT_FILE_ALLOWLIST, scanRepo } from '@/lib/agent/repoScanner';
 import { defaultRepoPath } from '@/lib/security/pathGuard';
 import { RepoSourceError, resolveRepoSource } from '@/lib/agent/repoSource';
+import { optionalUrl } from '@/lib/agent/requestValidation';
 
 export const runtime = 'nodejs';
 
 const RepoSourceBody = z.object({
   sourceType: z.enum(['local', 'github']).optional(),
   repoPath: z.string().optional(),
-  repoUrl: z.string().url().optional(),
+  repoUrl: optionalUrl,
   authMode: z.enum(['none', 'pat']).optional(),
   pat: z.string().optional(),
 });
@@ -17,7 +18,7 @@ const RepoSourceBody = z.object({
 const Body = z.object({
   path: z.string().min(1).optional(),
   rootPath: z.string().min(1).optional(),
-  repoUrl: z.string().url().optional(),
+  repoUrl: optionalUrl,
   pat: z.string().min(1).optional(),
   source: RepoSourceBody.partial().optional(),
   allowSensitive: z.boolean().optional(),
@@ -86,4 +87,3 @@ export async function POST(req: Request) {
 export function GET() {
   return NextResponse.json({ defaultPath: defaultRepoPath() });
 }
-

@@ -30,6 +30,8 @@ interface BrowseEntry {
 interface RepoInputProps {
   onScan: (path: string, result: ScanResult, ignoredFolders: string[], source: RepoSourceConfig) => void;
   onConfigChange?: (path: string, ignoredFolders: string[], source: RepoSourceConfig) => void;
+  maxMode: boolean;
+  onMaxModeChange: (next: boolean) => void;
 }
 
 // Motivation vs Logic: the browser is the user's main lever to keep noisy folders/files out of
@@ -37,7 +39,7 @@ interface RepoInputProps {
 // modal. Each row exposes a kebab menu with Cancel/Ignore so the action is explicit and
 // reversible — clicking Ignore appends to the existing `ignoredFolders` list which the analyze
 // API already plumbs straight into the scanner.
-export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
+export function RepoInput({ onScan, onConfigChange, maxMode, onMaxModeChange }: RepoInputProps) {
   const [sourceType, setSourceType] = useState<RepoSourceType>('local');
   const [path, setPath] = useState('');
   const [localPath, setLocalPath] = useState('');
@@ -63,12 +65,18 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
 
   const composeSourceConfig = useCallback(
     (overrides: Partial<RepoSourceConfig> = {}): RepoSourceConfig => ({
+      // Root Cause vs Logic: local-path mode and GitHub mode share one config object, so blank
+      // optional GitHub fields can leak into requests unless we normalize them at the edge.
       sourceType: overrides.sourceType ?? sourceType,
       repoPath: overrides.repoPath ?? path,
-      repoUrl: (overrides.sourceType ?? sourceType) === 'github' ? overrides.repoUrl ?? repoUrl : undefined,
+      repoUrl:
+        (overrides.sourceType ?? sourceType) === 'github'
+          ? (overrides.repoUrl ?? repoUrl).trim() || undefined
+          : undefined,
       authMode:
-        overrides.authMode ?? ((overrides.sourceType ?? sourceType) === 'github' && (overrides.pat ?? pat.trim()) ? 'pat' : 'none'),
-      pat: (overrides.sourceType ?? sourceType) === 'github' ? overrides.pat ?? (pat.trim() || undefined) : undefined,
+        overrides.authMode ??
+        ((overrides.sourceType ?? sourceType) === 'github' && (overrides.pat ?? pat.trim()) ? 'pat' : 'none'),
+      pat: (overrides.sourceType ?? sourceType) === 'github' ? (overrides.pat ?? pat).trim() || undefined : undefined,
     }),
     [path, pat, repoUrl, sourceType],
   );
@@ -105,12 +113,16 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
 
     if (initialActivePath) {
       setPath(initialActivePath);
-      onConfigChange?.(initialActivePath, savedIgnored, {
-        sourceType: savedSourceType,
-        repoPath: initialActivePath,
-        repoUrl: savedRepoUrl,
-        authMode: 'none',
-      });
+      onConfigChange?.(
+        initialActivePath,
+        savedIgnored,
+        composeSourceConfig({
+          sourceType: savedSourceType,
+          repoPath: initialActivePath,
+          repoUrl: savedRepoUrl,
+          authMode: 'none',
+        }),
+      );
     } else if (savedSourceType === 'local') {
       fetch('/api/repo/scan')
         .then((r) => r.json())
@@ -119,12 +131,16 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
             setPath(d.defaultPath);
             setLocalPath(d.defaultPath);
             writeUiPreference('repoLocalPath', d.defaultPath);
-            onConfigChange?.(d.defaultPath, savedIgnored, {
-              sourceType: savedSourceType,
-              repoPath: d.defaultPath,
-              repoUrl: savedRepoUrl,
-              authMode: 'none',
-            });
+            onConfigChange?.(
+              d.defaultPath,
+              savedIgnored,
+              composeSourceConfig({
+                sourceType: savedSourceType,
+                repoPath: d.defaultPath,
+                repoUrl: savedRepoUrl,
+                authMode: 'none',
+              }),
+            );
           }
         })
         .catch(() => {});
@@ -309,21 +325,12 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
       // Root Cause vs Logic: GitHub mode was previously funneled through the local-path body,
       // so the scan endpoint never saw a cloneable URL. We now submit the selected source shape
       // directly and let the server resolve or clone before scanning.
-      const source =
-        sourceType === 'github'
-          ? {
-              sourceType,
-              repoPath: path,
-              repoUrl: repoUrl.trim(),
-              authMode: pat.trim() ? 'pat' : 'none',
-              pat: pat.trim() || undefined,
-            }
-          : {
-              sourceType,
-              repoPath: path,
-              repoUrl: repoUrl.trim() || undefined,
-              authMode: 'none' as const,
-            };
+      const source = composeSourceConfig({
+        sourceType,
+        repoPath: path,
+        repoUrl,
+        pat,
+      });
       const res = await fetch('/api/repo/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -353,15 +360,9 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
           : {
               kind: 'success',
               message: 'Repository preview completed successfully.',
-            },
+          },
       );
-      onScan(data.resolved, data, ignoredFolders, {
-        sourceType,
-        repoPath: data.resolved,
-        repoUrl: repoUrl.trim(),
-        authMode: sourceType === 'github' && pat.trim() ? 'pat' : 'none',
-        pat: sourceType === 'github' ? pat.trim() || undefined : undefined,
-      });
+      onScan(data.resolved, data, ignoredFolders, composeSourceConfig({ sourceType, repoPath: data.resolved, repoUrl, pat }));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setError(message);
@@ -654,14 +655,35 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
         </div>
       </div>
 
-      <button
-        type="button"
-        onClick={onPreview}
-        disabled={previewDisabled}
-        className="rounded-md border border-ink-700 bg-ink-800 px-3 py-1.5 hover:bg-ink-700 disabled:opacity-50"
-      >
-        {scanning ? 'Scanning…' : sourceType === 'github' ? 'Clone & scan' : 'Preview repo'}
-      </button>
+      {/* Motivation vs Logic: keep the analysis budget control beside the preview action so the
+          repo-selection flow and the "scan everything" choice stay visible in one place. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <label
+          className={`flex cursor-pointer items-center gap-2 rounded-md border px-3 py-1.5 text-[11px] transition-colors ${
+            maxMode
+              ? 'border-coral/60 bg-coral/10 text-coral'
+              : 'border-ink-700 bg-ink-800 text-ink-300 hover:bg-ink-700'
+          }`}
+          title="MAX mode scans all relevant files instead of stopping at the default cap."
+        >
+          <input
+            type="checkbox"
+            checked={maxMode}
+            onChange={(e) => onMaxModeChange(e.target.checked)}
+            className="h-4 w-4 rounded border-ink-600 bg-ink-800"
+            aria-label="Enable MAX mode"
+          />
+          <span className="font-semibold uppercase tracking-wider">MAX mode</span>
+        </label>
+        <button
+          type="button"
+          onClick={onPreview}
+          disabled={previewDisabled}
+          className="rounded-md border border-ink-700 bg-ink-800 px-3 py-1.5 hover:bg-ink-700 disabled:opacity-50"
+        >
+          {scanning ? 'Scanning…' : sourceType === 'github' ? 'Clone & scan' : 'Preview repo'}
+        </button>
+      </div>
 
       {error && <div className="rounded border border-red-500/50 bg-red-500/10 p-2 text-red-200">{error}</div>}
 

@@ -35,6 +35,7 @@ export interface UiPreferences {
   repoIgnoredFolders?: string[];
   dslText?: string;
   quickMode?: boolean;
+  maxMode?: boolean;
 }
 
 const MODES = new Set<PersistedMode>(['editor', 'agent', 'multi-layer', 'custom-prompt']);
@@ -100,6 +101,7 @@ function sanitizePreferences(value: unknown): UiPreferences {
     preferences.repoIgnoredFolders = value.repoIgnoredFolders.filter((item): item is string => typeof item === 'string');
   }
   if (typeof value.quickMode === 'boolean') preferences.quickMode = value.quickMode;
+  if (typeof value.maxMode === 'boolean') preferences.maxMode = value.maxMode;
 
   const provider = sanitizeProvider(value.provider);
   if (provider) preferences.provider = provider;

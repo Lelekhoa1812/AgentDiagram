@@ -19,6 +19,35 @@ const EDGE_LANE_SPACING = 28;
 const EDGE_CLEARANCE = 18;
 const OBSTACLE_PADDING = 8;
 const TURN_PENALTY = 36;
+const LOCAL_OBSTACLE_MARGIN = 180;
+const ROUTING_OBSTACLE_LIMIT = 12;
+const ROUTING_OBSTACLE_CAP = 24;
+const ROUTING_FAST_ROUTE_THRESHOLD = 120;
+
+interface Bounds {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+}
+
+function boundsBetween(from: Point, to: Point, margin = LOCAL_OBSTACLE_MARGIN): Bounds {
+  return {
+    minX: Math.min(from.x, to.x) - margin,
+    maxX: Math.max(from.x, to.x) + margin,
+    minY: Math.min(from.y, to.y) - margin,
+    maxY: Math.max(from.y, to.y) + margin,
+  };
+}
+
+function rectIntersectsBounds(rect: LayoutRect, bounds: Bounds): boolean {
+  return (
+    rect.x <= bounds.maxX &&
+    rect.x + rect.width >= bounds.minX &&
+    rect.y <= bounds.maxY &&
+    rect.y + rect.height >= bounds.minY
+  );
+}
 
 type Side = 'left' | 'right' | 'top' | 'bottom';
 type Axis = 'horizontal' | 'vertical';
@@ -254,37 +283,76 @@ function collectObstacles(
   end: Point,
 ): Obstacle[] {
   const out: Obstacle[] = [];
-  const addNode = (id: string, rect: LayoutRect) => {
-    if (id === sourceId || id === targetId) return;
-    out.push({ id, rect: expandedRect(rect, OBSTACLE_PADDING) });
-  };
-  const addGroup = (id: string, rect: LayoutRect) => {
-    if (id === sourceId || id === targetId) return;
+  // Root Cause vs Logic: checking every node/group for every edge blew up for huge diagrams, so we clamp obstacles to the local corridor before routing.
+  const localBounds = boundsBetween(start, end);
+  const addNode = (id: string, rect: LayoutRect): boolean => {
+    if (id === sourceId || id === targetId) return false;
     const padded = expandedRect(rect, OBSTACLE_PADDING);
-    if (insideRect(start, padded) || insideRect(end, padded)) return;
+    if (!rectIntersectsBounds(padded, localBounds)) return false;
     out.push({ id, rect: padded });
+    return out.length >= ROUTING_OBSTACLE_CAP;
+  };
+  const addGroup = (id: string, rect: LayoutRect): boolean => {
+    if (id === sourceId || id === targetId) return false;
+    const padded = expandedRect(rect, OBSTACLE_PADDING);
+    if (!rectIntersectsBounds(padded, localBounds)) return false;
+    if (insideRect(start, padded) || insideRect(end, padded)) return false;
+    out.push({ id, rect: padded });
+    return out.length >= ROUTING_OBSTACLE_CAP;
   };
 
   for (const [id, base] of layout.nodes) {
     const ov = overrides?.nodes?.[id];
-    addNode(id, {
+    const capped = addNode(id, {
       x: ov?.x ?? base.x,
       y: ov?.y ?? base.y,
       width: ov?.width ?? base.width,
       height: ov?.height ?? base.height,
     });
+    if (capped) {
+      break;
+    }
   }
   for (const [id, base] of layout.groups) {
     const ov = overrides?.groups?.[id];
-    addGroup(id, {
+    const capped = addGroup(id, {
       x: ov?.x ?? base.x,
       y: ov?.y ?? base.y,
       width: ov?.width ?? base.width,
       height: ov?.height ?? base.height,
     });
+    if (capped) {
+      break;
+    }
   }
 
   return out;
+}
+
+function fastRoute(
+  start: Point,
+  end: Point,
+  preferredAxis: Axis,
+  laneOffset: number,
+): Point[] {
+  const lane = Math.abs(laneOffset) < EPSILON ? 0 : laneOffset;
+  if (preferredAxis === 'horizontal') {
+    const bendX = (start.x + end.x) / 2 + lane;
+    return orthogonalizePolyline([
+      start,
+      { x: bendX, y: start.y },
+      { x: bendX, y: end.y },
+      end,
+    ]);
+  }
+
+  const bendY = (start.y + end.y) / 2 + lane;
+  return orthogonalizePolyline([
+    start,
+    { x: start.x, y: bendY },
+    { x: end.x, y: bendY },
+    end,
+  ]);
 }
 
 function sideNormal(side: Side): Point {
@@ -419,19 +487,8 @@ function gridRoute(start: Point, end: Point, obstacles: Obstacle[]): Point[] | n
   )
     return direct;
 
-  const localBounds = {
-    minX: Math.min(start.x, end.x) - 180,
-    maxX: Math.max(start.x, end.x) + 180,
-    minY: Math.min(start.y, end.y) - 180,
-    maxY: Math.max(start.y, end.y) + 180,
-  };
-  const routeObstacles = obstacles.filter(
-    (obstacle) =>
-      obstacle.rect.x <= localBounds.maxX &&
-      obstacle.rect.x + obstacle.rect.width >= localBounds.minX &&
-      obstacle.rect.y <= localBounds.maxY &&
-      obstacle.rect.y + obstacle.rect.height >= localBounds.minY,
-  );
+  const localBounds = boundsBetween(start, end);
+  const routeObstacles = obstacles.filter((obstacle) => rectIntersectsBounds(obstacle.rect, localBounds));
   const blockers = routeObstacles.length ? routeObstacles : obstacles;
   const minX = Math.min(start.x, end.x, ...blockers.map((o) => o.rect.x)) - EDGE_CLEARANCE * 2;
   const maxX =
@@ -664,6 +721,9 @@ function automaticRoute(
   const sourceCenter = center(sourceRect);
   const targetCenter = center(targetRect);
   const preferredAxis = directAxis(sourceCenter, targetCenter);
+  // Root Cause vs Logic: obstacle-aware search is great for small diagrams but turns into a per-edge CPU sink on dense graphs, so the router switches to a deterministic Manhattan fallback once the layout is large enough to threaten responsiveness.
+  const largeDiagram =
+    layout.nodes.size + layout.groups.size + layout.edges.size >= ROUTING_FAST_ROUTE_THRESHOLD;
   let best: { points: Point[]; score: number } | null = null;
 
   for (const [[sourceSide, targetSide], sideRank] of sidePairs(sourceRect, targetRect).map(
@@ -671,9 +731,21 @@ function automaticRoute(
   )) {
     const start = sideAnchor(sourceRect, sourceSide, targetCenter);
     const end = sideAnchor(targetRect, targetSide, sourceCenter);
+    if (largeDiagram) {
+      const points = fastRoute(start, end, preferredAxis, laneOffset);
+      const score = scorePath(points, [], preferredAxis, sideRank);
+      if (!best || score < best.score) best = { points, score };
+      continue;
+    }
     const startOut = outPoint(start, sourceSide);
     const endOut = outPoint(end, targetSide);
     const obstacles = collectObstacles(layout, overrides, sourceId, targetId, startOut, endOut);
+    if (obstacles.length >= ROUTING_OBSTACLE_LIMIT) {
+      const points = fastRoute(start, end, preferredAxis, laneOffset);
+      const score = scorePath(points, obstacles, preferredAxis, sideRank);
+      if (!best || score < best.score) best = { points, score };
+      continue;
+    }
     const simple = simpleRoute(startOut, endOut, obstacles);
     const grid =
       simple.intersections > 0 && obstacles.length <= 28

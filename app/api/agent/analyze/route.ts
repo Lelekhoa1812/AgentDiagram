@@ -5,6 +5,7 @@ import { methodNotAllowedResponse } from '@/lib/util/http';
 import { defaultRepoPath } from '@/lib/security/pathGuard';
 import { PROVIDER_ENV } from '@/lib/agent/providers';
 import { RepoSourceError, resolveRepoSource } from '@/lib/agent/repoSource';
+import { optionalUrl } from '@/lib/agent/requestValidation';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -26,7 +27,7 @@ const Body = z.object({
     .object({
       sourceType: z.enum(['local', 'github']).optional(),
       repoPath: z.string().optional(),
-      repoUrl: z.string().url().optional(),
+      repoUrl: optionalUrl,
       authMode: z.enum(['none', 'pat']).optional(),
       pat: z.string().optional(),
     })

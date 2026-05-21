@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { useDiagramStore, type MultiLayerOutput } from '../store';
-import { addStoredProject, writeStoredProjects } from '../projectStorage';
+import { addStoredProject, writeActiveProjectId, writeStoredProjects } from '../projectStorage';
+import { writeUiPreference } from '../uiPreferences';
 
 describe('project tab loading', () => {
   const storage = new Map<string, string>();
@@ -52,6 +53,7 @@ describe('project tab loading', () => {
       activeProjectId: null,
       generatedProjects: [],
       overrides: { nodes: {}, groups: {}, edges: {} },
+      maxMode: false,
     });
   });
 
@@ -89,5 +91,25 @@ describe('project tab loading', () => {
     expect(state.dslText).toBe('flow example');
     expect(state.multiLayer).toBeNull();
     expect(state.activeLayer).toBe('overview');
+  });
+
+  it('hydrates the active project DSL instead of stale editor scratch text', () => {
+    const project = addStoredProject('Huge Repo', 'Frontend\nBackend\nFrontend > Backend');
+    writeActiveProjectId(project.id);
+    writeUiPreference('dslText', '/');
+
+    useDiagramStore.getState().hydrateUiPreferences();
+
+    const state = useDiagramStore.getState();
+    expect(state.activeProjectId).toBe(project.id);
+    expect(state.dslText).toBe(project.dsl);
+  });
+
+  it('hydrates max mode from saved ui preferences', () => {
+    writeUiPreference('maxMode', true);
+
+    useDiagramStore.getState().hydrateUiPreferences();
+
+    expect(useDiagramStore.getState().maxMode).toBe(true);
   });
 });
