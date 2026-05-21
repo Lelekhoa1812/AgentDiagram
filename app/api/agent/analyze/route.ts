@@ -2,8 +2,8 @@ import { z } from 'zod';
 import { runPipeline } from '@/lib/agent/pipeline';
 import { makeSseStream } from '@/lib/util/stream';
 import { methodNotAllowedResponse } from '@/lib/util/http';
-import { guardPath, defaultRepoPath } from '@/lib/security/pathGuard';
 import { PROVIDER_ENV } from '@/lib/agent/providers';
+import { resolveRepoSource } from '@/lib/agent/repoSourceResolver';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -13,7 +13,10 @@ const Body = z.object({
   model: z.string(),
   apiKey: z.string().optional(),
   endpoint: z.string().optional(),
+  sourceType: z.enum(['local', 'github']).optional(),
   rootPath: z.string().optional(),
+  githubUrl: z.string().optional(),
+  githubPat: z.string().optional(),
   kind: z.enum(['architecture', 'sequence', 'class', 'data-flow', 'deployment']).default('architecture'),
   focus: z.string().default(''),
   topK: z.number().int().min(5).max(120).optional(),
@@ -27,7 +30,6 @@ const analyzeMethodNotAllowed = () =>
     ['POST'],
   );
 
-// Motivation vs Logic: this makes the agent analyzer explain its POST-only contract instead of showing the default 404.
 export function GET() {
   return analyzeMethodNotAllowed();
 }
@@ -54,10 +56,12 @@ export async function POST(req: Request) {
     );
   }
 
-  const rootPath = cfg.rootPath || defaultRepoPath();
-  const guard = guardPath(rootPath);
-  if (!guard.ok) {
-    return new Response(JSON.stringify({ error: guard.reason }), { status: 400 });
+  const source =
+    cfg.sourceType === 'github'
+      ? await resolveRepoSource({ sourceType: 'github', githubUrl: cfg.githubUrl ?? '', githubPat: cfg.githubPat })
+      : await resolveRepoSource({ sourceType: 'local', rootPath: cfg.rootPath });
+  if (!source.ok) {
+    return new Response(JSON.stringify({ error: source.message, code: source.code, details: source.details }), { status: 400 });
   }
 
   const endpoint =
@@ -74,7 +78,7 @@ export async function POST(req: Request) {
 
   runPipeline(
     {
-      rootPath: guard.resolved,
+      rootPath: source.resolvedRootPath,
       session: { id: cfg.provider, model: cfg.model, apiKey, endpoint },
       kind: cfg.kind,
       focus: cfg.focus,

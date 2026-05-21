@@ -1,12 +1,17 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { AGENT_FILE_ALLOWLIST, scanRepo } from '@/lib/agent/repoScanner';
-import { guardPath, defaultRepoPath } from '@/lib/security/pathGuard';
+import { defaultRepoPath } from '@/lib/security/pathGuard';
+import { resolveRepoSource } from '@/lib/agent/repoSourceResolver';
 
 export const runtime = 'nodejs';
 
 const Body = z.object({
+  sourceType: z.enum(['local', 'github']).optional(),
   path: z.string().optional(),
+  rootPath: z.string().optional(),
+  githubUrl: z.string().optional(),
+  githubPat: z.string().optional(),
   allowSensitive: z.boolean().optional(),
   ignoredFolders: z.array(z.string()).max(100).optional(),
 });
@@ -18,19 +23,30 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 
-  const inputPath = parsed.data.path ?? defaultRepoPath();
-  const guard = guardPath(inputPath, { allowSensitive: parsed.data.allowSensitive });
-  if (!guard.ok) {
-    return NextResponse.json({ error: guard.reason, resolved: guard.resolved }, { status: 400 });
+  const source =
+    parsed.data.sourceType === 'github'
+      ? await resolveRepoSource({
+          sourceType: 'github',
+          githubUrl: parsed.data.githubUrl ?? '',
+          githubPat: parsed.data.githubPat,
+        })
+      : await resolveRepoSource({
+          sourceType: 'local',
+          rootPath: parsed.data.rootPath ?? parsed.data.path,
+          allowSensitive: parsed.data.allowSensitive,
+        });
+
+  if (!source.ok) {
+    return NextResponse.json({ error: source.message, code: source.code, details: source.details }, { status: 400 });
   }
 
   try {
-    const map = await scanRepo(guard.resolved, {
+    const map = await scanRepo(source.resolvedRootPath, {
       allowlist: AGENT_FILE_ALLOWLIST,
       ignoredFolders: parsed.data.ignoredFolders,
     });
     return NextResponse.json({
-      resolved: guard.resolved,
+      resolved: source.resolvedRootPath,
       root: map.root,
       fileCount: map.fileCount,
       totalBytes: map.totalBytes,

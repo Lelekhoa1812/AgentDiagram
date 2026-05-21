@@ -2,8 +2,8 @@ import { z } from 'zod';
 import { runMultiLayerPipeline } from '@/lib/agent/multilayer';
 import { makeSseStream } from '@/lib/util/stream';
 import { methodNotAllowedResponse } from '@/lib/util/http';
-import { guardPath, defaultRepoPath } from '@/lib/security/pathGuard';
 import { PROVIDER_ENV } from '@/lib/agent/providers';
+import { resolveRepoSource } from '@/lib/agent/repoSourceResolver';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -13,7 +13,10 @@ const Body = z.object({
   model: z.string(),
   apiKey: z.string().optional(),
   endpoint: z.string().optional(),
+  sourceType: z.enum(['local', 'github']).optional(),
   rootPath: z.string().optional(),
+  githubUrl: z.string().optional(),
+  githubPat: z.string().optional(),
   focus: z.string().default(''),
   topK: z.number().int().min(10).max(200).optional(),
   ignoredFolders: z.array(z.string()).max(100).optional(),
@@ -26,7 +29,6 @@ const multilayerMethodNotAllowed = () =>
     ['POST'],
   );
 
-// Motivation vs Logic: avoid the generic 404 page by clearly stating that this SSE endpoint is POST-only.
 export function GET() {
   return multilayerMethodNotAllowed();
 }
@@ -52,11 +54,14 @@ export async function POST(req: Request) {
     );
   }
 
-  const rootPath = cfg.rootPath || defaultRepoPath();
-  const guard = guardPath(rootPath);
-  if (!guard.ok) {
-    return new Response(JSON.stringify({ error: guard.reason }), { status: 400 });
+  const source =
+    cfg.sourceType === 'github'
+      ? await resolveRepoSource({ sourceType: 'github', githubUrl: cfg.githubUrl ?? '', githubPat: cfg.githubPat })
+      : await resolveRepoSource({ sourceType: 'local', rootPath: cfg.rootPath });
+  if (!source.ok) {
+    return new Response(JSON.stringify({ error: source.message, code: source.code, details: source.details }), { status: 400 });
   }
+
   const endpoint =
     cfg.endpoint?.trim() ||
     (cfg.provider === 'foundry'
@@ -71,7 +76,7 @@ export async function POST(req: Request) {
 
   runMultiLayerPipeline(
     {
-      rootPath: guard.resolved,
+      rootPath: source.resolvedRootPath,
       session: { id: cfg.provider, model: cfg.model, apiKey, endpoint },
       focus: cfg.focus,
       topK: cfg.topK,
