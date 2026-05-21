@@ -17,3 +17,7 @@ playwright-report
 test-results
 tests/visual/__snapshots__/*.actual.png
 tests/visual/__snapshots__/*.diff.png
+
+.claude
+.cursor
+.vscode

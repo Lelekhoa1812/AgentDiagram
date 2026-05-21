@@ -39,6 +39,10 @@ function getRepoCacheRoot(): string {
   return join(process.cwd(), '.cache', 'github-repos');
 }
 
+function getRepoIgnorePath(): string {
+  return join(process.cwd(), '.gitignore');
+}
+
 function isCachedCheckoutPath(candidate: string): boolean {
   const cacheRoot = resolvePath(getRepoCacheRoot());
   const resolved = resolvePath(candidate);
@@ -147,6 +151,19 @@ esac
   return scriptPath;
 }
 
+async function ensureGithubCacheIgnored(): Promise<void> {
+  const ignoreLine = '.cache/github-repos/';
+  try {
+    const current = await readFile(getRepoIgnorePath(), 'utf8');
+    const lines = current.split(/\r?\n/);
+    if (lines.some((line) => line.trim() === ignoreLine)) return;
+    const next = current.endsWith('\n') || current.length === 0 ? `${current}${ignoreLine}\n` : `${current}\n${ignoreLine}\n`;
+    await writeFile(getRepoIgnorePath(), next, 'utf8');
+  } catch {
+    await writeFile(getRepoIgnorePath(), `${ignoreLine}\n`, 'utf8');
+  }
+}
+
 async function writeCheckoutMetadata(checkoutPath: string, normalizedUrl: string): Promise<void> {
   await writeFile(getCheckoutMetadataPath(checkoutPath), JSON.stringify({ clonedFrom: normalizedUrl }), 'utf8');
 }
@@ -198,6 +215,7 @@ async function cloneOrUpdateGitHubRepo(repoUrl: string, pat?: string): Promise<{
   const checkoutPath = getCheckoutPath(normalizedUrl);
   const cacheRoot = getRepoCacheRoot();
   await mkdir(dirname(checkoutPath), { recursive: true });
+  await ensureGithubCacheIgnored();
 
   if (await isGitRepository(checkoutPath)) {
     try {

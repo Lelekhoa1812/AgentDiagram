@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -107,6 +107,7 @@ describe('repoSource', () => {
       expect(first.sourceType).toBe('github');
       expect(first.rootPath).toContain(join('.cache', 'github-repos'));
       expect(first.clonedFrom).toBe('https://github.com/openai/example.git');
+      expect(await readFile('.gitignore', 'utf8')).toContain('.cache/github-repos/');
       expect(
         mockedExecFile.mock.calls.filter(
           ([file, args]) => file === 'git' && Array.isArray(args) && args.includes('clone'),
