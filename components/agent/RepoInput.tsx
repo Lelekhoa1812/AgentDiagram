@@ -57,6 +57,7 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ScanResult | null>(null);
+  const hydratedRef = useRef(false);
 
   const browserRef = useRef<HTMLDivElement | null>(null);
 
@@ -79,7 +80,14 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
     [composeSourceConfig, ignoredFolders, onConfigChange, path],
   );
 
+  // Root Cause vs Logic: this bootstrap effect was keyed off `emitConfigChange`, which changes
+  // whenever `path` changes. A successful preview updates `path`, so the effect replayed the
+  // saved-config hydration and emitted a fresh config change that cleared the parent scan state.
+  // We run it once on mount so preview success can keep the repo marked ready.
   useEffect(() => {
+    if (hydratedRef.current) return;
+    hydratedRef.current = true;
+
     const savedSourceType = readUiPreference('repoSourceType') ?? 'local';
     const savedPath = readUiPreference('repoPath') ?? '';
     const savedLocalPath = readUiPreference('repoLocalPath') ?? '';
@@ -97,7 +105,7 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
 
     if (initialActivePath) {
       setPath(initialActivePath);
-      emitConfigChange(initialActivePath, savedIgnored, {
+      onConfigChange?.(initialActivePath, savedIgnored, {
         sourceType: savedSourceType,
         repoPath: initialActivePath,
         repoUrl: savedRepoUrl,
@@ -111,7 +119,7 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
             setPath(d.defaultPath);
             setLocalPath(d.defaultPath);
             writeUiPreference('repoLocalPath', d.defaultPath);
-            emitConfigChange(d.defaultPath, savedIgnored, {
+            onConfigChange?.(d.defaultPath, savedIgnored, {
               sourceType: savedSourceType,
               repoPath: d.defaultPath,
               repoUrl: savedRepoUrl,
@@ -123,7 +131,7 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
     } else {
       setPath('');
     }
-  }, [emitConfigChange]);
+  }, [onConfigChange]);
 
   const loadEntries = useCallback(
     async (parent = '') => {
