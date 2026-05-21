@@ -21,3 +21,4 @@ tests/visual/__snapshots__/*.diff.png
 .claude
 .cursor
 .vscode
+.cache/github-repos/

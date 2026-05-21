@@ -51,6 +51,10 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
   const [browseError, setBrowseError] = useState<string | null>(null);
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [previewStatus, setPreviewStatus] = useState<{
+    kind: 'loading' | 'success' | 'error';
+    message: string;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ScanResult | null>(null);
 
@@ -189,6 +193,7 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
       setHasLocalCheckout(Boolean(value.trim()));
     }
     setResult(null);
+    setPreviewStatus(null);
     emitConfigChange(value, ignoredFolders, {
       sourceType,
       repoPath: value,
@@ -204,6 +209,7 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
     setSourceType(value);
     writeUiPreference('repoSourceType', value);
     setResult(null);
+    setPreviewStatus(null);
     if (value === 'local') {
       const restored = localPath.trim();
       setPath(restored);
@@ -236,6 +242,7 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
     setIgnoredFolders(cleaned);
     writeUiPreference('repoIgnoredFolders', cleaned);
     setResult(null);
+    setPreviewStatus(null);
     emitConfigChange(path, cleaned, {
       sourceType,
       repoPath: path,
@@ -283,6 +290,13 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
   const onPreview = async () => {
     setScanning(true);
     setError(null);
+    setPreviewStatus({
+      kind: 'loading',
+      message:
+        sourceType === 'github'
+          ? 'Cloning and scanning the GitHub repository...'
+          : 'Scanning the selected local repository...',
+    });
     try {
       // Root Cause vs Logic: GitHub mode was previously funneled through the local-path body,
       // so the scan endpoint never saw a cloneable URL. We now submit the selected source shape
@@ -315,12 +329,24 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
       if (!res.ok) {
         setError(data.error ?? 'Scan failed');
         setResult(null);
+        setPreviewStatus({ kind: 'error', message: data.error ?? 'Scan failed' });
         return;
       }
       setResult(data);
       setHasLocalCheckout(true);
       setPath(data.resolved);
       writeUiPreference('repoPath', data.resolved);
+      setPreviewStatus(
+        sourceType === 'github'
+          ? {
+              kind: 'success',
+              message: `GitHub repository cloned successfully${data.clonedFrom ? ` from ${data.clonedFrom}` : ''}.`,
+            }
+          : {
+              kind: 'success',
+              message: 'Repository preview completed successfully.',
+            },
+      );
       onScan(data.resolved, data, ignoredFolders, {
         sourceType,
         repoPath: data.resolved,
@@ -329,11 +355,15 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
         pat: sourceType === 'github' ? pat.trim() || undefined : undefined,
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      setPreviewStatus({ kind: 'error', message });
     } finally {
       setScanning(false);
     }
   };
+
+  const previewDisabled = scanning || (sourceType === 'github' ? !repoUrl.trim() : !path.trim());
 
   return (
     <div className="space-y-3 rounded-xl border border-ink-700 bg-ink-900/60 p-4 text-xs">
@@ -359,16 +389,17 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
         <div className="space-y-2 rounded-md border border-ink-800 bg-ink-950/70 p-2">
           <div>
             <div className="mb-1 text-[10px] uppercase tracking-widest text-ink-400">Repository URL</div>
-            <input
-              value={repoUrl}
-              onChange={(e) => {
-                const value = e.target.value;
-                setRepoUrl(value);
-                writeUiPreference('repoUrl', value);
-                setResult(null);
-                emitConfigChange(path, ignoredFolders, {
-                  sourceType,
-                  repoPath: path,
+          <input
+            value={repoUrl}
+            onChange={(e) => {
+              const value = e.target.value;
+              setRepoUrl(value);
+              writeUiPreference('repoUrl', value);
+              setResult(null);
+              setPreviewStatus(null);
+              emitConfigChange(path, ignoredFolders, {
+                sourceType,
+                repoPath: path,
                   repoUrl: value,
                 });
               }}
@@ -382,13 +413,14 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
               type="password"
               autoComplete="off"
               value={pat}
-              onChange={(e) => {
-                const value = e.target.value;
-                setPat(value);
-                setResult(null);
-                emitConfigChange(path, ignoredFolders, {
-                  sourceType,
-                  repoPath: path,
+            onChange={(e) => {
+              const value = e.target.value;
+              setPat(value);
+              setResult(null);
+              setPreviewStatus(null);
+              emitConfigChange(path, ignoredFolders, {
+                sourceType,
+                repoPath: path,
                   repoUrl,
                   pat: value.trim() || undefined,
                 });
@@ -466,6 +498,29 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
           <div className="text-[11px] text-ink-500">No extra folders ignored.</div>
         )}
       </div>
+
+      {/* Motivation vs Logic: preview is the source-resolution step, so the user needs immediate feedback
+          that a clone/scan is happening and when the GitHub checkout becomes available. */}
+      {previewStatus && (
+        <div
+          className={`flex items-center gap-2 rounded-md border px-3 py-2 text-[11px] ${
+            previewStatus.kind === 'loading'
+              ? 'border-blue-400/40 bg-blue-400/10 text-blue-100'
+              : previewStatus.kind === 'success'
+                ? 'border-green-400/40 bg-green-400/10 text-green-100'
+                : 'border-red-400/40 bg-red-400/10 text-red-100'
+          }`}
+        >
+          {previewStatus.kind === 'loading' ? (
+            <span className="inline-block h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />
+          ) : previewStatus.kind === 'success' ? (
+            <span className="text-green-300">✓</span>
+          ) : (
+            <span className="text-red-300">!</span>
+          )}
+          <span>{previewStatus.message}</span>
+        </div>
+      )}
 
       <div ref={browserRef} className="space-y-2 rounded-md border border-ink-700 bg-ink-950 p-3">
         <div className="flex items-center justify-between gap-2">
@@ -594,7 +649,7 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
       <button
         type="button"
         onClick={onPreview}
-        disabled={scanning || (sourceType === 'github' ? !repoUrl.trim() : !path.trim())}
+        disabled={previewDisabled}
         className="rounded-md border border-ink-700 bg-ink-800 px-3 py-1.5 hover:bg-ink-700 disabled:opacity-50"
       >
         {scanning ? 'Scanning…' : sourceType === 'github' ? 'Clone & scan' : 'Preview repo'}
