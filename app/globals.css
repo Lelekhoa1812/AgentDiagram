@@ -52,6 +52,50 @@
   --canvas-vignette: rgba(58, 96, 229, 0.12);
 }
 
+/* Motivation vs Logic: the light theme keeps the same shared ink scale for backgrounds and text, but several UI surfaces use the mid-tone text utilities on white panels, which made labels wash out. Remap the muted text roles in light mode so shared components stay readable without splitting the design system. */
+[data-theme='light'] .text-ink-700,
+[data-theme='light'] .text-ink-600 {
+  color: rgb(var(--ink-100));
+}
+
+[data-theme='light'] .text-ink-500 {
+  color: rgb(var(--ink-200));
+}
+
+[data-theme='light'] .text-ink-400 {
+  color: rgb(var(--ink-300));
+}
+
+[data-theme='light'] .text-ink-300 {
+  color: rgb(var(--ink-400));
+}
+
+[data-theme='light'] .text-ink-200 {
+  color: rgb(var(--ink-100));
+}
+
+[data-theme='light'] .text-ink-100 {
+  color: rgb(var(--ink-100));
+}
+
+[data-theme='light'] input::placeholder,
+[data-theme='light'] textarea::placeholder {
+  color: rgb(var(--ink-400));
+}
+
+/* Root Cause vs Logic: success/status widgets reused pale green utility classes that read well on dark surfaces but nearly vanished against the light theme. Override the green text roles in light mode so every shared success chip and banner stays legible without duplicating per-component theme branches. */
+[data-theme='light'] .text-green-100 {
+  color: rgb(22 101 52);
+}
+
+[data-theme='light'] .text-green-200 {
+  color: rgb(21 128 61);
+}
+
+[data-theme='light'] .text-green-300 {
+  color: rgb(21 128 61);
+}
+
 html,
 body {
   height: 100%;
