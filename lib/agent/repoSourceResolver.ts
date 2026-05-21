@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { defaultRepoPath, guardPath } from '@/lib/security/pathGuard';
 
 const execFileAsync = promisify(execFile);
+const GIT_ENV = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
 
 export type RepoSourceInput =
   | { sourceType?: 'local'; rootPath?: string; allowSensitive?: boolean }
@@ -18,8 +19,7 @@ export type RepoSourceResolution =
   | { ok: false; code: RepoSourceErrorCode; message: string; details?: string };
 
 function parseGithubUrl(input: string): { owner: string; repo: string; httpsUrl: string } | null {
-  const raw = (input || '').trim();
-  if (!raw) return null;
+  const raw = input.trim();
   const httpsMatch = raw.match(/^https:\/\/github\.com\/([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i);
   if (httpsMatch) return { owner: httpsMatch[1]!, repo: httpsMatch[2]!, httpsUrl: `https://github.com/${httpsMatch[1]}/${httpsMatch[2]}.git` };
   const sshMatch = raw.match(/^git@github\.com:([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i);
@@ -27,9 +27,14 @@ function parseGithubUrl(input: string): { owner: string; repo: string; httpsUrl:
   return null;
 }
 
-async function gitLsRemote(url: string): Promise<{ ok: true } | { ok: false; output: string }> {
+function authHeaderFromPat(pat: string): string {
+  const token = Buffer.from(`x-access-token:${pat.trim()}`).toString('base64');
+  return `AUTHORIZATION: basic ${token}`;
+}
+
+async function runGit(args: string[]): Promise<{ ok: true } | { ok: false; output: string }> {
   try {
-    await execFileAsync('git', ['ls-remote', '--heads', url], { timeout: 30_000 });
+    await execFileAsync('git', args, { timeout: 120_000, env: GIT_ENV });
     return { ok: true };
   } catch (err) {
     const e = err as { stdout?: string; stderr?: string; message?: string };
@@ -37,12 +42,10 @@ async function gitLsRemote(url: string): Promise<{ ok: true } | { ok: false; out
   }
 }
 
-const withPat = (url: string, pat: string) => url.replace('https://', `https://${encodeURIComponent(pat.trim())}@`);
-
 function classifyAuthError(output: string): 'bad_pat' | 'private_repo_auth_required' | 'clone_failed' {
   const text = output.toLowerCase();
   if (text.includes('authentication failed') || text.includes('invalid username or password')) return 'bad_pat';
-  if (text.includes('could not read username') || text.includes('repository not found') || text.includes('403')) return 'private_repo_auth_required';
+  if (text.includes('could not read username') || text.includes('repository not found') || text.includes('403') || text.includes('401')) return 'private_repo_auth_required';
   return 'clone_failed';
 }
 
@@ -51,31 +54,48 @@ async function cloneGithubRepo(parsed: { owner: string; repo: string; httpsUrl: 
   await fs.mkdir(baseDir, { recursive: true });
   const targetDir = path.join(baseDir, `${parsed.owner}-${parsed.repo}-${Date.now()}-${randomBytes(4).toString('hex')}`);
 
-  const publicProbe = await gitLsRemote(parsed.httpsUrl);
-  let cloneUrl = parsed.httpsUrl;
+  const publicProbe = await runGit(['ls-remote', '--heads', parsed.httpsUrl]);
   if (!publicProbe.ok) {
-    if (!pat?.trim()) return { ok: false, code: 'private_repo_auth_required', message: 'GitHub Personal Access Token is required for this repository.', details: publicProbe.output };
-    cloneUrl = withPat(parsed.httpsUrl, pat);
-    const authProbe = await gitLsRemote(cloneUrl);
+    if (!pat?.trim()) {
+      return { ok: false, code: 'private_repo_auth_required', message: 'GitHub Personal Access Token is required for this repository.', details: publicProbe.output };
+    }
+
+    const authProbe = await runGit([
+      '-c',
+      `http.https://github.com/.extraheader=${authHeaderFromPat(pat)}`,
+      'ls-remote',
+      '--heads',
+      parsed.httpsUrl,
+    ]);
     if (!authProbe.ok) {
       const code = classifyAuthError(authProbe.output);
       return { ok: false, code, message: code === 'bad_pat' ? 'Provided GitHub PAT is invalid.' : 'Failed to authenticate to GitHub repository.', details: authProbe.output };
     }
+
+    const authedClone = await runGit([
+      '-c',
+      `http.https://github.com/.extraheader=${authHeaderFromPat(pat)}`,
+      'clone',
+      '--depth',
+      '1',
+      parsed.httpsUrl,
+      targetDir,
+    ]);
+    if (!authedClone.ok) {
+      return { ok: false, code: classifyAuthError(authedClone.output), message: 'Failed to clone GitHub repository.', details: authedClone.output };
+    }
+
+    return { ok: true, sourceType: 'github', resolvedRootPath: targetDir };
   }
 
-  try {
-    await execFileAsync('git', ['clone', '--depth', '1', cloneUrl, targetDir], { timeout: 120_000 });
-  } catch (err) {
-    const e = err as { stdout?: string; stderr?: string; message?: string };
-    const output = [e.stderr, e.stdout, e.message].filter(Boolean).join('\n');
-    return { ok: false, code: classifyAuthError(output), message: 'Failed to clone GitHub repository.', details: output };
-  }
+  const clone = await runGit(['clone', '--depth', '1', parsed.httpsUrl, targetDir]);
+  if (!clone.ok) return { ok: false, code: classifyAuthError(clone.output), message: 'Failed to clone GitHub repository.', details: clone.output };
   return { ok: true, sourceType: 'github', resolvedRootPath: targetDir };
 }
 
 export async function resolveRepoSource(input: RepoSourceInput): Promise<RepoSourceResolution> {
   if (input.sourceType === 'github') {
-    const parsed = parseGithubUrl(input.githubUrl);
+    const parsed = parseGithubUrl(input.githubUrl || '');
     if (!parsed) return { ok: false, code: 'invalid_url', message: 'Invalid GitHub URL. Expected github.com/<owner>/<repo>.' };
     return cloneGithubRepo(parsed, input.githubPat);
   }
