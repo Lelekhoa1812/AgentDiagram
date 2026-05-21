@@ -15,6 +15,7 @@ coverage
 .agentdiagram-cache
 playwright-report
 test-results
+tests/
 tests/visual/__snapshots__/*.actual.png
 tests/visual/__snapshots__/*.diff.png
 
