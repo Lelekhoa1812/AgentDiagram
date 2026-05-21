@@ -72,6 +72,7 @@ interface State {
   provider: ProviderConfig;
   diagramType: 'architecture' | 'sequence' | 'class' | 'data-flow' | 'deployment';
   focusPrompt: string;
+  instructionMarkdown: string;
 
   // Agent mode
   agentSessionId: string | null;
@@ -106,6 +107,7 @@ interface State {
   setProvider: (cfg: Partial<ProviderConfig>) => void;
   setDiagramType: (t: State['diagramType']) => void;
   setFocusPrompt: (s: string) => void;
+  setInstructionMarkdown: (markdown: string) => void;
   hydrateUiPreferences: () => void;
   startAgent: (sessionId: string) => void;
   pushAgentLog: (entry: Omit<State['agentLog'][number], 'ts'>) => void;
@@ -115,8 +117,8 @@ interface State {
   setActiveLayer: (name: string) => void;
   setQuickMode: (enabled: boolean) => void;
   setMaxMode: (enabled: boolean) => void;
-  addGeneratedProject: (name: string, dsl: string, multiLayer?: MultiLayerOutput) => void;
-  openProject: (project: { id: string; dsl: string; multiLayer?: MultiLayerOutput | null }) => void;
+  addGeneratedProject: (name: string, dsl: string, multiLayer?: MultiLayerOutput, instructionMarkdown?: string) => void;
+  openProject: (project: { id: string; dsl: string; multiLayer?: MultiLayerOutput | null; instructionMarkdown?: string }) => void;
   removeGeneratedProject: (id: string) => void;
   setActiveProjectId: (id: string | null) => void;
   renameGeneratedProject: (id: string, name: string) => void;
@@ -138,6 +140,7 @@ export const useDiagramStore = create<State>()(
       provider: DEFAULT_PROVIDER,
       diagramType: 'architecture',
       focusPrompt: '',
+      instructionMarkdown: '',
       agentSessionId: null,
       agentRunning: false,
       agentStage: null,
@@ -202,6 +205,7 @@ export const useDiagramStore = create<State>()(
         const activeProject = generatedProjects.find((p) => p.id === activeProjectId);
         const restoredMultiLayer = activeProject?.multiLayer ?? null;
         const restoredDsl = activeProject?.dsl ?? preferences.dslText;
+        const restoredInstructionMarkdown = activeProject?.instructionMarkdown ?? preferences.instructionMarkdown ?? '';
         // Root Cause vs Logic: the active project tab and the editor text were restored from different localStorage keys, so a generated repo tab could show stale scratch text like "/" and render no diagram. Prefer the active project's saved DSL whenever that project still exists.
         set((state) => ({
           generatedProjects,
@@ -212,6 +216,7 @@ export const useDiagramStore = create<State>()(
           ...(preferences.layoutStrategy ? { layoutStrategy: preferences.layoutStrategy } : {}),
           ...(preferences.diagramType ? { diagramType: preferences.diagramType } : {}),
           ...(preferences.focusPrompt !== undefined ? { focusPrompt: preferences.focusPrompt } : {}),
+          instructionMarkdown: restoredInstructionMarkdown,
           ...(preferences.activeLayer ? { activeLayer: preferences.activeLayer } : {}),
           ...(restoredDsl !== undefined ? { dslText: restoredDsl } : {}),
           ...(preferences.quickMode !== undefined ? { quickMode: preferences.quickMode } : {}),
@@ -235,6 +240,10 @@ export const useDiagramStore = create<State>()(
       stopAgent: () => set({ agentRunning: false, agentSessionId: null }),
       setMultiLayer: (output) =>
         set({ multiLayer: output, activeLayer: output ? 'overview' : 'overview' }),
+      setInstructionMarkdown: (markdown) => {
+        writeUiPreference('instructionMarkdown', markdown);
+        set({ instructionMarkdown: markdown });
+      },
       setActiveLayer: (name) => {
         writeUiPreference('activeLayer', name);
         set({ activeLayer: name });
@@ -247,22 +256,26 @@ export const useDiagramStore = create<State>()(
         writeUiPreference('maxMode', enabled);
         set({ maxMode: enabled });
       },
-      addGeneratedProject: (name, dsl, multiLayer?) => {
-        const project = addStoredProject(name, dsl, multiLayer);
+      addGeneratedProject: (name, dsl, multiLayer?, instructionMarkdown?) => {
+        const project = addStoredProject(name, dsl, multiLayer, instructionMarkdown);
         writeActiveProjectId(project.id);
+        if (instructionMarkdown !== undefined) writeUiPreference('instructionMarkdown', instructionMarkdown);
         set((state) => ({
           generatedProjects: [project, ...state.generatedProjects],
           activeProjectId: project.id,
+          instructionMarkdown: instructionMarkdown ?? '',
           ...(multiLayer ? { multiLayer, activeLayer: 'overview' } : {}),
         }));
       },
       openProject: (project) => {
         writeUiPreference('dslText', project.dsl);
+        writeUiPreference('instructionMarkdown', project.instructionMarkdown ?? '');
         writeActiveProjectId(project.id);
         set({
           dslText: project.dsl,
           activeProjectId: project.id,
           multiLayer: project.multiLayer ?? null,
+          instructionMarkdown: project.instructionMarkdown ?? '',
           activeLayer: 'overview',
           overrides: { nodes: {}, groups: {}, edges: {} },
         });

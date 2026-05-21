@@ -1,8 +1,7 @@
 /**
- * Documentation reader — pulls README, ADRs, and major doc files to use
- * as priors for the planner. Documentation often names the very
- * subsystems we want the diagram to surface, so feeding it in early
- * dramatically improves layer / group naming.
+ * Documentation reader — pulls the single README exception to use as a
+ * planning prior. We intentionally avoid general doc surfaces so the agent
+ * stays focused on source code, not prose-heavy repo scaffolding.
  */
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -17,18 +16,13 @@ export interface DocPrior {
 
 function classify(p: string): DocPrior['kind'] {
   const lower = p.toLowerCase();
-  if (/(^|\/)readme\.(md|mdx|txt|rst)$/.test(lower)) return 'readme';
-  if (/(^|\/)(adr|docs\/adr|architecture-decision)/.test(lower)) return 'adr';
+  if (/(^|\/)readme\.md$/.test(lower)) return 'readme';
   return 'doc';
 }
 
 const PRIORITY: Array<RegExp> = [
-  /^readme\.(md|mdx|txt|rst)$/i,
-  /^docs?\/readme\.(md|mdx)$/i,
-  /^docs?\/architecture\.(md|mdx)$/i,
-  /^docs?\/overview\.(md|mdx)$/i,
-  /^architecture\.(md|mdx)$/i,
-  /^contributing\.(md|mdx)$/i,
+  /^readme\.md$/i,
+  /^docs?\/readme\.md$/i,
 ];
 
 function priorityFor(p: string): number {

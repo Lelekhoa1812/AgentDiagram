@@ -25,6 +25,7 @@ const Body = z.object({
     )
     .max(20)
     .default([]),
+  instructionMode: z.boolean().optional().default(false),
 });
 
 const customMethodNotAllowed = () =>
@@ -78,6 +79,7 @@ export async function POST(req: Request) {
       prompt: cfg.prompt,
       intentSummary: cfg.intentSummary,
       answers: cfg.answers,
+      instructionMode: cfg.instructionMode,
       signal: ac.signal,
     },
     send,

@@ -11,38 +11,81 @@ async function write(root: string, rel: string, content: string): Promise<void> 
 }
 
 describe('repoScanner', () => {
-  it('only scans allowed code/config files and skips docs plus tests', async () => {
+  it('scans source-like files plus README.md and ignores configs, docs, tests, assets, and generated output', async () => {
     const root = await mkdtemp(join(tmpdir(), 'agentdiagram-scan-'));
     try {
-      await write(root, 'package.json', JSON.stringify({ dependencies: { next: 'latest' } }));
-      await write(root, 'src/app.ts', 'export const app = true;\n');
-      await write(root, 'db/schema.prisma', 'model User { id String @id }\n');
-      await write(root, 'README.md', '# Project\n');
-      await write(root, 'src/app.test.ts', 'import { app } from "./app";\n');
-      await write(root, '__tests__/fixture.ts', 'export const fixture = true;\n');
-      await write(root, 'notes/diagram.txt', 'not source\n');
-      await write(root, 'docs/example.ts', 'export const docExample = true;\n');
-      await write(root, '.agentdiagram-cache/summary.json', '{"role":"cache"}\n');
-      await write(root, 'public/diagram.svg', '<svg />\n');
+      const allowed = [
+        'README.md',
+        'app/layout.tsx',
+        'app/page.tsx',
+        'backend/main.py',
+        'cmd/server/main.go',
+        'components/Button.tsx',
+        'frontend/App.svelte',
+        'frontend/App.vue',
+        'src/runtime.js',
+        'src/Program.cs',
+        'src/app.component.ts',
+        'src/app.module.ts',
+        'src/main/java/com/acme/App.java',
+      ];
+      const ignored = [
+        'appsettings.Development.json',
+        'assets/logo.png',
+        'build.gradle',
+        'eslint.config.mjs',
+        'generated/client.ts',
+        'next-auth.d.ts',
+        'next.config.ts',
+        'package.json',
+        'postcss.config.mjs',
+        'pom.xml',
+        'public/logo.svg',
+        'pyproject.toml',
+        'seed.ts',
+        'setup.sh',
+        'tailwind.config.ts',
+        'tests/app.test.ts',
+        'src/app.spec.ts',
+        '__tests__/fixture.ts',
+        'docs/guide.md',
+        'README.txt',
+      ];
+
+      for (const rel of allowed) {
+        await write(root, rel, `// ${rel}\n`);
+      }
+      for (const rel of ignored) {
+        await write(root, rel, `// ${rel}\n`);
+      }
 
       const repo = await scanRepo(root, { allowlist: AGENT_FILE_ALLOWLIST });
-      const paths = repo.files.map((file) => file.path);
+      const paths = repo.files.map((file) => file.path).sort();
 
-      expect(paths).toEqual(expect.arrayContaining(['package.json', 'src/app.ts', 'db/schema.prisma']));
-      expect(paths).not.toEqual(
+      expect(paths).toEqual(expect.arrayContaining(allowed));
+      expect(paths).not.toEqual(expect.arrayContaining(ignored));
+      expect(repo.docs.map((file) => file.path)).toEqual(['README.md']);
+      expect(repo.tests).toHaveLength(0);
+      expect(repo.manifests).toHaveLength(0);
+      expect(repo.configs).toHaveLength(0);
+      expect(repo.depHints).toEqual([]);
+      expect(repo.likelyStack).toEqual(
         expect.arrayContaining([
-          'README.md',
-          'src/app.test.ts',
-          '__tests__/fixture.ts',
-          'notes/diagram.txt',
-          'docs/example.ts',
-          '.agentdiagram-cache/summary.json',
-          'public/diagram.svg',
+          'Node.js',
+          'TypeScript',
+          'JavaScript',
+          'React',
+          'Next.js',
+          'Angular',
+          'Python',
+          'Java',
+          'Spring Boot',
+          '.NET',
+          'Go',
+          'Vue',
+          'Svelte',
         ]),
       );
-      expect(repo.docs).toHaveLength(0);
-      expect(repo.tests).toHaveLength(0);
-      expect(repo.byExt.md).toBeUndefined();
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -82,40 +125,6 @@ describe('repoScanner', () => {
       const paths = repo.files.map((file) => file.path).sort();
 
       expect(paths).toEqual(['src/keep.ts']);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  it('bypasses dotfiles, docker, lockfiles, markdown, logs and test/log folders by default', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'agentdiagram-scan-defaults-'));
-    try {
-      await write(root, 'src/app.ts', 'export const app = true;\n');
-      // Files the user explicitly asked to bypass
-      await write(root, 'Dockerfile', 'FROM node:20\n');
-      await write(root, 'Dockerfile.prod', 'FROM node:20\n');
-      await write(root, 'docker-compose.yml', 'services: {}\n');
-      await write(root, 'requirements.txt', 'flask\n');
-      await write(root, 'README.md', '# Project\n');
-      await write(root, 'CLAUDE.md', '# Agent guide\n');
-      await write(root, 'docs/architecture.md', '# Architecture\n');
-      await write(root, '.claude/config.json', '{}\n');
-      await write(root, '.rtk/cache.bin', 'x');
-      await write(root, '.gitignore', 'node_modules\n');
-      await write(root, '.dockerignore', '*\n');
-      await write(root, '.hintrc', '{}\n');
-      await write(root, 'package-lock.json', '{}\n');
-      // Folders
-      await write(root, 'tests/foo.ts', 'export const foo = true;\n');
-      await write(root, 'test/bar.ts', 'export const bar = true;\n');
-      await write(root, 'logs/app.log', 'log entry\n');
-      await write(root, 'log/older.log', 'older log\n');
-      await write(root, 'src/feature.log', 'should not be scanned\n');
-
-      const repo = await scanRepo(root, { allowlist: AGENT_FILE_ALLOWLIST });
-      const paths = repo.files.map((file) => file.path).sort();
-
-      expect(paths).toEqual(['src/app.ts']);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

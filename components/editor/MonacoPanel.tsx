@@ -18,7 +18,16 @@ export function MonacoPanel() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const monacoRef = useRef<any>(null);
 
-  const irText = useMemo(() => (diagram ? JSON.stringify(diagram, null, 2) : '// Render the diagram to see the IR'), [diagram]);
+  // Root Cause vs Logic: the IR tab was eagerly stringifying the entire compiled diagram on every DSL change, even while the DSL tab was active. Large generated diagrams could spend most of the render budget serializing JSON that the user wasn't looking at yet, which made the editor feel frozen. Only materialize the IR payload when the IR tab is actually selected.
+  const irText = useMemo(
+    () =>
+      tab === 'ir'
+        ? diagram
+          ? JSON.stringify(diagram, null, 2)
+          : '// Render the diagram to see the IR'
+        : '// Switch to JSON IR to inspect the compiled diagram',
+    [diagram, tab],
+  );
   const diagnostics = useMemo(() => diagram?.diagnostics ?? [], [diagram]);
 
   useEffect(() => {

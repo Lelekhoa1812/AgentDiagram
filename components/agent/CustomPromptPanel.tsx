@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Layers3, Sparkles, SquareIcon } from 'lucide-react';
+import { BookOpenText, Layers3, Sparkles, SquareIcon } from 'lucide-react';
 import { useDiagramStore, type MultiLayerOutput } from '@/lib/state/store';
 import { ProviderConfig } from './ProviderConfig';
 import { AnalysisAnimation } from './AnalysisAnimation';
@@ -28,6 +28,8 @@ const SINGLE_PLAN_STAGES = [
   { id: 'validate-dsl', label: 'Validating syntax' },
 ];
 
+const INSTRUCTION_STAGE = { id: 'instruction', label: 'Writing Instruction Mode guide' };
+
 const MULTI_PLAN_STAGES = [
   { id: 'validate', label: 'Validating credentials' },
   { id: 'layer-plan', label: 'Planning layer structure' },
@@ -43,6 +45,7 @@ interface PersistedCustomPromptState {
   prompt: string;
   step: 'prompt' | 'questions';
   diagramStyle: DiagramStyle;
+  instructionMode: boolean;
   clarify: ClarifyStreamOutput | null;
   answers: Record<string, { selected: string[]; custom: string }>;
 }
@@ -77,6 +80,7 @@ export function CustomPromptPanel() {
   const setDsl = useDiagramStore((s) => s.setDsl);
   const setMultiLayer = useDiagramStore((s) => s.setMultiLayer);
   const setActiveLayer = useDiagramStore((s) => s.setActiveLayer);
+  const setInstructionMarkdown = useDiagramStore((s) => s.setInstructionMarkdown);
   const clearOverrides = useDiagramStore((s) => s.clearOverrides);
   const addGeneratedProject = useDiagramStore((s) => s.addGeneratedProject);
   const setAgentStage = useDiagramStore((s) => s.setAgentStage);
@@ -88,6 +92,7 @@ export function CustomPromptPanel() {
   const [step, setStep] = useState<Step>('prompt');
   const [prompt, setPrompt] = useState('');
   const [diagramStyle, setDiagramStyle] = useState<DiagramStyle>('single');
+  const [instructionMode, setInstructionMode] = useState(false);
   const [clarify, setClarify] = useState<ClarifyStreamOutput | null>(null);
   const [answers, setAnswers] = useState<Record<string, AnswerState>>({});
   const [retryNotice, setRetryNotice] = useState<{ stage: string; attempt: number; delayMs: number; reason: string } | null>(null);
@@ -103,6 +108,7 @@ export function CustomPromptPanel() {
     if (!saved) return;
     if (saved.prompt) setPrompt(saved.prompt);
     if (saved.diagramStyle) setDiagramStyle(saved.diagramStyle);
+    if (typeof saved.instructionMode === 'boolean') setInstructionMode(saved.instructionMode);
     if (saved.step === 'questions' && saved.clarify) {
       setClarify(saved.clarify);
       // Rehydrate Set-based answers from serialized arrays
@@ -127,10 +133,11 @@ export function CustomPromptPanel() {
       prompt,
       step: step as 'prompt' | 'questions',
       diagramStyle,
+      instructionMode,
       clarify,
       answers: serializedAnswers,
     });
-  }, [prompt, step, diagramStyle, clarify, answers]);
+  }, [prompt, step, diagramStyle, instructionMode, clarify, answers]);
 
   // -------------------------------------------------------------------------
   // Step 1 → Step 2: ask clarifying questions
@@ -242,10 +249,14 @@ export function CustomPromptPanel() {
     const isMulti = diagramStyle === 'multi-layer';
     const sessionId = `cp2-${Date.now()}`;
     startAgent(sessionId);
+    setInstructionMarkdown('');
     setCounters({});
     setRetryNotice(null);
     setTerminalState(null);
-    setActiveStages(isMulti ? MULTI_PLAN_STAGES : SINGLE_PLAN_STAGES);
+    setActiveStages([
+      ...(isMulti ? MULTI_PLAN_STAGES : SINGLE_PLAN_STAGES),
+      ...(instructionMode ? [INSTRUCTION_STAGE] : []),
+    ]);
     setAnimTitle(isMulti ? 'Generating multi-layer diagram…' : 'Generating diagram…');
     setStep('generating');
 
@@ -268,6 +279,7 @@ export function CustomPromptPanel() {
           prompt,
           intentSummary: clarify.intent_summary,
           answers: compiledAnswers,
+          instructionMode,
         }),
         signal: ac.signal,
       });
@@ -296,20 +308,24 @@ export function CustomPromptPanel() {
         } else if (ev.type === 'result') {
           // Single-layer result
           sawResult = true;
+          const instructionMarkdown = ev.instructionMarkdown ?? '';
+          setInstructionMarkdown(instructionMarkdown);
           setDsl(ev.dsl);
           const name = prompt.trim().split(/\s+/).slice(0, 3).join(' ') || 'custom';
-          addGeneratedProject(name, ev.dsl);
+          addGeneratedProject(name, ev.dsl, undefined, instructionMarkdown);
           setMode('editor');
         } else if (ev.type === 'result-multilayer') {
           // Multi-layer result — wire into LayerNavigator
           sawResult = true;
+          const instructionMarkdown = ev.instructionMarkdown ?? '';
+          setInstructionMarkdown(instructionMarkdown);
           const out = ev.output as MultiLayerOutput;
           setMultiLayer(out);
           clearOverrides();
           setActiveLayer('overview');
           setDsl(out.overview.dsl);
           const name = prompt.trim().split(/\s+/).slice(0, 3).join(' ') || 'custom';
-          addGeneratedProject(name, out.overview.dsl, out);
+          addGeneratedProject(name, out.overview.dsl, out, instructionMarkdown);
           setMode('editor');
         } else if (ev.type === 'done') {
           setAgentStage(null);
@@ -569,6 +585,25 @@ export function CustomPromptPanel() {
                     </div>
                   </button>
                 </div>
+
+                {/* Motivation vs Logic: Instruction Mode is a workflow preference layered on top of the diagram shape, so it sits after the single/multi choice and sends an explicit flag to the agent instead of overloading either diagram option. */}
+                <label className="flex cursor-pointer items-start gap-3 rounded-md border border-ink-700 bg-ink-900/60 p-3 transition-colors hover:border-accent/40">
+                  <input
+                    checked={instructionMode}
+                    className="mt-0.5 h-4 w-4 rounded border-ink-600 bg-ink-900 accent-[rgb(var(--accent))]"
+                    onChange={(e) => setInstructionMode(e.target.checked)}
+                    type="checkbox"
+                  />
+                  <span className="min-w-0">
+                    <span className="flex items-center gap-2 text-sm font-medium text-ink-100">
+                      <BookOpenText size={14} className={instructionMode ? 'text-accent' : 'text-ink-400'} />
+                      Instruction Mode
+                    </span>
+                    <span className="mt-1 block text-[11px] leading-5 text-ink-400">
+                      Also generate a Markdown mentor guide with step-by-step implementation or best-practice instructions.
+                    </span>
+                  </span>
+                </label>
 
                 <div className="flex items-center justify-between pt-1">
                   <div className="text-[11px] text-ink-400">

@@ -21,7 +21,7 @@ import { z } from 'zod';
 import type { ProviderSession, RetryListener } from './providers';
 import { validateWithRetry } from './providers';
 import { chatStructuredWithRetry } from './structuredOutput';
-import { generatePlanFromPrompt, formatAnswers, type CustomAnswer } from './customPrompt';
+import { generateInstructionGuide, generatePlanFromPrompt, formatAnswers, type CustomAnswer } from './customPrompt';
 import { planToDsl } from './dslCompiler';
 import { tryRepair } from './repair';
 import { compile } from '../dsl/compiler';
@@ -257,6 +257,7 @@ export interface CustomMultiLayerInput {
   prompt: string;
   intentSummary?: string;
   answers: CustomAnswer[];
+  instructionMode?: boolean;
   signal?: AbortSignal;
 }
 
@@ -391,7 +392,23 @@ export async function runCustomMultiLayerPlan(
       generatedAt: Date.now(),
     };
 
-    send({ type: 'result-multilayer', output: result });
+    let instructionMarkdown: string | undefined;
+    if (input.instructionMode) {
+      send({ type: 'stage', stage: 'instruction', status: 'start', message: 'Writing Instruction Mode guide…' });
+      instructionMarkdown = await generateInstructionGuide(
+        input.session,
+        {
+          prompt: input.prompt,
+          intentSummary: input.intentSummary,
+          answers: input.answers,
+          diagramStyle: 'multi-layer',
+        },
+        { signal: input.signal, onRetry: onRetry('instruction') },
+      );
+      send({ type: 'stage', stage: 'instruction', status: 'done', message: 'Instruction guide ready' });
+    }
+
+    send({ type: 'result-multilayer', output: result, instructionMarkdown });
     send({ type: 'done' });
     return result;
   } catch (err) {

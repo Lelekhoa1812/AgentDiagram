@@ -23,8 +23,8 @@ export type SseEvent =
   | { type: 'stage'; stage: string; status: 'start' | 'progress' | 'done' | 'error'; percent?: number; message?: string; counters?: Record<string, number> }
   | { type: 'retry'; stage: string; attempt: number; delayMs: number; reason: string }
   | { type: 'log'; stage: string; level: 'info' | 'warn' | 'error'; message: string }
-  | { type: 'result'; dsl: string }
-  | { type: 'result-multilayer'; output: MultiLayerStreamOutput }
+  | { type: 'result'; dsl: string; instructionMarkdown?: string }
+  | { type: 'result-multilayer'; output: MultiLayerStreamOutput; instructionMarkdown?: string }
   | { type: 'result-clarify'; output: ClarifyStreamOutput }
   | { type: 'error'; stage: string; message: string }
   | { type: 'done' };

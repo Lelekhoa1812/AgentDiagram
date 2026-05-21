@@ -56,29 +56,11 @@ export const AGENT_ALLOWED_EXTENSIONS = [
   'vue',
 ] as const;
 
-// Motivation vs Logic: `Dockerfile`, `docker-compose.*` and `requirements.txt` used to live
-// here so the scanner could read them as manifests. The product decision is to bypass them
-// entirely (they're hidden from the folder browser too); `pyproject.toml` still covers Python
-// stack detection and `package.json` / `Cargo.toml` / `go.mod` cover everything else.
+// Motivation vs Logic: the scanner now treats dependency/config manifests as noise and only
+// admits source-like files plus the exact README.md document exception. That keeps the repo
+// explorer focused on the code the agent can actually reason about.
 export const AGENT_ALLOWED_FILES = [
-  'Cargo.toml',
-  'Gemfile',
-  'build.gradle',
-  'composer.json',
-  'go.mod',
-  'next.config.js',
-  'next.config.mjs',
-  'next.config.ts',
-  'package.json',
-  'pom.xml',
-  'pyproject.toml',
-  'tailwind.config.js',
-  'tailwind.config.ts',
-  'tsconfig.json',
-  'vite.config.js',
-  'vite.config.ts',
-  'webpack.config.js',
-  'webpack.config.ts',
+  'README.md',
 ] as const;
 
 export interface RepoScanAllowlist {
@@ -123,24 +105,9 @@ export interface RepoMap {
   likelyStack: string[];
 }
 
-const MANIFESTS = new Set([
-  'package.json',
-  'pnpm-workspace.yaml',
-  'Cargo.toml',
-  'pyproject.toml',
-  'requirements.txt',
-  'go.mod',
-  'pom.xml',
-  'build.gradle',
-  'Gemfile',
-  'composer.json',
-]);
-
 function classify(file: ScannedFile, map: RepoMap): void {
   const p = file.path.toLowerCase();
-  const name = path.basename(p);
 
-  if (MANIFESTS.has(name)) map.manifests.push(file);
   if (/(^|\/)(index|main|app|server)\.(ts|tsx|js|jsx|py|go|rs|java|kt)$/.test(p))
     map.entrypoints.push(file);
   if (/(^|\/)(api|routes|handlers)\//.test(p) && /\.(ts|tsx|js|jsx|py|go)$/.test(p))
@@ -158,20 +125,46 @@ function classify(file: ScannedFile, map: RepoMap): void {
     map.infra.push(file);
   if (/(test|spec)\.(ts|tsx|js|jsx|py|go|rb|java)$/.test(p) || /__tests__\//.test(p))
     map.tests.push(file);
-  if (/(^|\/)(readme|docs|adr)/.test(p) || /\.(md|mdx)$/.test(p)) map.docs.push(file);
+  if (/(^|\/)readme\.md$/.test(p)) map.docs.push(file);
 }
 
 function detectStack(map: RepoMap): string[] {
+  // Motivation vs Logic: stack hints now come from source evidence only. That lets the agent
+  // stay on the code surface even when package/build manifests are intentionally hidden.
   const stack: string[] = [];
-  if (map.manifests.some((f) => path.basename(f.path) === 'package.json')) stack.push('Node.js');
-  if (map.files.some((f) => f.path.includes('next.config'))) stack.push('Next.js');
-  if (map.files.some((f) => f.ext === 'tsx' || f.ext === 'jsx')) stack.push('React');
-  if (map.manifests.some((f) => path.basename(f.path) === 'pyproject.toml' || path.basename(f.path) === 'requirements.txt'))
-    stack.push('Python');
-  if (map.manifests.some((f) => path.basename(f.path) === 'Cargo.toml')) stack.push('Rust');
-  if (map.manifests.some((f) => path.basename(f.path) === 'go.mod')) stack.push('Go');
-  if (map.files.some((f) => f.path.includes('Dockerfile'))) stack.push('Docker');
-  if (map.files.some((f) => f.path.includes('prisma'))) stack.push('Prisma');
+  const hasExt = (...exts: string[]): boolean => map.files.some((f) => exts.includes(f.ext));
+  const hasPath = (pattern: RegExp): boolean => map.files.some((f) => pattern.test(f.path.toLowerCase()));
+  const add = (label: string): void => {
+    if (!stack.includes(label)) stack.push(label);
+  };
+
+  if (hasExt('js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs')) add('Node.js');
+  if (hasExt('ts', 'tsx')) add('TypeScript');
+  if (hasExt('js', 'jsx', 'mjs', 'cjs')) add('JavaScript');
+  if (hasExt('tsx', 'jsx') || hasPath(/(^|\/)(components|app|pages|src\/app|src\/pages)\//)) add('React');
+  if (
+    hasPath(
+      /(^|\/)(app|pages)\/.+\/(page|layout|loading|error|not-found|route|middleware)\.(ts|tsx|js|jsx)$/,
+    ) ||
+    hasPath(/(^|\/)(src\/)?(app|pages)\//)
+  )
+    add('Next.js');
+  if (hasExt('vue')) add('Vue');
+  if (hasExt('svelte')) add('Svelte');
+  if (hasExt('py')) add('Python');
+  if (hasExt('java', 'kt', 'kts')) {
+    add('Java');
+    if (hasPath(/(^|\/)src\/main\/java\//) || hasPath(/(^|\/)(controller|service|repository|entity)\.(java|kt)$/))
+      add('Spring Boot');
+  }
+  if (hasExt('cs') || hasPath(/\.sln$/) || hasPath(/\.csproj$/) || hasPath(/\.fsproj$/) || hasPath(/\.vbproj$/)) add('.NET');
+  if (hasExt('go')) add('Go');
+  if (hasExt('rs')) add('Rust');
+  if (hasExt('rb')) add('Ruby');
+  if (hasExt('php')) add('PHP');
+  if (hasPath(/prisma/)) add('Prisma');
+  if (hasPath(/\.component\.ts$/) || hasPath(/\.module\.ts$/) || hasPath(/\.service\.ts$/)) add('Angular');
+
   return stack;
 }
 
@@ -283,21 +276,8 @@ export async function scanRepo(root: string, opts: RepoScanOptions = {}): Promis
     }
   }
 
-  // Pull dependency hints from package.json
-  const pkg = map.manifests.find((f) => path.basename(f.path) === 'package.json');
-  if (pkg) {
-    try {
-      const txt = await fs.readFile(path.join(root, pkg.path), 'utf8');
-      const json = JSON.parse(txt) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
-      map.depHints = [
-        ...Object.keys(json.dependencies ?? {}),
-        ...Object.keys(json.devDependencies ?? {}),
-      ].slice(0, 40);
-    } catch {
-      /* malformed */
-    }
-  }
-
+  // Root Cause vs Logic: dependency manifests are now intentionally excluded from the readable
+  // surface, so dependency hints are left empty and stack detection derives from source files.
   map.likelyStack = detectStack(map);
   return map;
 }

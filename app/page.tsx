@@ -5,7 +5,7 @@ import { TopBar } from '@/components/shell/TopBar';
 import { MonacoPanel } from '@/components/editor/MonacoPanel';
 import { ExampleLoader } from '@/components/editor/ExampleLoader';
 import { DiagramCanvas, type DiagramCanvasHandle } from '@/components/diagram/DiagramCanvas';
-import { InspectorPanel } from '@/components/inspector/InspectorPanel';
+import { InspectorWorkspacePanel } from '@/components/inspector/InspectorWorkspacePanel';
 import { AgentPanel } from '@/components/agent/AgentPanel';
 import { CustomPromptPanel } from '@/components/agent/CustomPromptPanel';
 import { MultiLayerPanel } from '@/components/multilayer/MultiLayerPanel';
@@ -90,7 +90,7 @@ export default function Page() {
       [
         isEditorVisible ? 'minmax(320px, 420px)' : null,
         'minmax(0, 1fr)',
-        isInspectorVisible ? 'minmax(280px, 340px)' : null,
+        isInspectorVisible ? 'minmax(340px, 460px)' : null,
       ]
         .filter(Boolean)
         .join(' '),
@@ -131,7 +131,7 @@ export default function Page() {
           </section>
           {isInspectorVisible && (
             <aside className="min-w-0 border-l border-ink-700/80 bg-ink-900">
-              <InspectorPanel />
+              <InspectorWorkspacePanel />
             </aside>
           )}
         </main>

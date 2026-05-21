@@ -34,8 +34,11 @@ export interface UiPreferences {
   repoUrl?: string;
   repoIgnoredFolders?: string[];
   dslText?: string;
+  instructionMarkdown?: string;
   quickMode?: boolean;
   maxMode?: boolean;
+  isInspectorPropertiesVisible?: boolean;
+  isInstructionVisible?: boolean;
 }
 
 const MODES = new Set<PersistedMode>(['editor', 'agent', 'multi-layer', 'custom-prompt']);
@@ -85,9 +88,14 @@ function sanitizePreferences(value: unknown): UiPreferences {
   }
   if (typeof value.focusPrompt === 'string') preferences.focusPrompt = value.focusPrompt;
   if (typeof value.dslText === 'string') preferences.dslText = value.dslText;
+  if (typeof value.instructionMarkdown === 'string') preferences.instructionMarkdown = value.instructionMarkdown;
   if (typeof value.activeLayer === 'string') preferences.activeLayer = value.activeLayer;
   if (typeof value.isEditorVisible === 'boolean') preferences.isEditorVisible = value.isEditorVisible;
   if (typeof value.isInspectorVisible === 'boolean') preferences.isInspectorVisible = value.isInspectorVisible;
+  if (typeof value.isInspectorPropertiesVisible === 'boolean') {
+    preferences.isInspectorPropertiesVisible = value.isInspectorPropertiesVisible;
+  }
+  if (typeof value.isInstructionVisible === 'boolean') preferences.isInstructionVisible = value.isInstructionVisible;
   if (typeof value.editorTab === 'string' && EDITOR_TABS.has(value.editorTab as PersistedEditorTab)) {
     preferences.editorTab = value.editorTab as PersistedEditorTab;
   }

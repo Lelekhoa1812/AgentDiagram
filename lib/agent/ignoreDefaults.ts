@@ -1,11 +1,13 @@
 // Motivation vs Logic: keep one canonical list of "things the agent never needs to read" so the
 // folder browser and the repo scanner stay perfectly in sync. Before this module each side had
 // its own ad-hoc allow/deny rules and the browser would show entries the scanner already skipped
-// (and vice versa), which was confusing. Here we model the policy in three small lists:
+// (and vice versa), which was confusing. Here we model the policy in three small lists plus one
+// explicit exception:
 //
 //  - HIDDEN_NAMES         exact folder OR file names hidden anywhere in the tree
 //  - HIDDEN_EXTENSIONS    file extensions hidden anywhere (binary/media, markdown, logs, …)
-//  - HIDDEN_PREFIXES      filename prefixes hidden anywhere (README*, LICENSE*, …)
+//  - HIDDEN_PREFIXES      filename prefixes hidden anywhere (LICENSE*, setup*, seed*, …)
+//  - README.md            the only document file that stays visible/readable by default
 //
 // Plus a single rule: any name starting with "." is hidden. That single rule covers the long tail
 // of dot-files users asked us to filter (.claude, .rtk, .gitignore, .dockerignore, .hintrc,
@@ -22,6 +24,7 @@ const HIDDEN_FOLDER_NAMES = [
   'obj',
   'coverage',
   'playwright-report',
+  'test-results',
   '.agentdiagram-cache',
   'vendor',
 
@@ -30,6 +33,8 @@ const HIDDEN_FOLDER_NAMES = [
   'samples',
   'example',
   'examples',
+  'fixture',
+  'fixtures',
   'config',
   'configs',
   'setup',
@@ -40,6 +45,13 @@ const HIDDEN_FOLDER_NAMES = [
   '.cache',
   'tmp',
   'temp',
+  'generated',
+  'gen',
+  'public',
+  'assets',
+  'static',
+  'storybook',
+  'stories',
 
   // Explicitly blacklist dot-ish configs the user referenced (redundant with the dot rule but good for clarity).
   'cursor',
@@ -77,6 +89,7 @@ const HIDDEN_FOLDER_NAMES = [
   'test',
   '__tests__',
   '__mocks__',
+  '__fixtures__',
   'e2e',
   'spec',
   'specs',
@@ -94,8 +107,11 @@ const HIDDEN_FOLDER_NAMES = [
 const HIDDEN_FILE_NAMES = [
   // Lockfiles
   'package-lock.json',
+  'package.json',
   'yarn.lock',
   'pnpm-lock.yaml',
+  'bun.lock',
+  'bun.lockb',
   'poetry.lock',
   'Pipfile.lock',
   'Gemfile.lock',
@@ -104,14 +120,45 @@ const HIDDEN_FILE_NAMES = [
 
   // Manifests the user explicitly asked to bypass
   'requirements.txt',
+  'pyproject.toml',
   'Pipfile',
+  'go.mod',
+  'Cargo.toml',
+  'composer.json',
+  'Gemfile',
+  'pom.xml',
 
   // Docker (per user request)
   'Dockerfile',
+  'dockerfile',
   'docker-compose.yml',
   'docker-compose.yaml',
   'compose.yml',
   'compose.yaml',
+  'pnpm-workspace.yaml',
+
+  // Common root-level configs and build metadata across JS/TS, Java, Python, and .NET stacks.
+  'angular.json',
+  'appsettings.json',
+  'appsettings.Development.json',
+  'appsettings.Production.json',
+  'appsettings.Staging.json',
+  'appsettings.Test.json',
+  'build.gradle',
+  'build.gradle.kts',
+  'gradle.properties',
+  'jsconfig.json',
+  'mvnw',
+  'mvnw.cmd',
+  'netlify.toml',
+  'settings.gradle',
+  'settings.gradle.kts',
+  'tsconfig.json',
+  'turbo.json',
+  'vercel.json',
+  'web.config',
+  'web.Debug.config',
+  'web.Release.config',
 
   // Misc OS / IDE noise
   '.DS_Store',
@@ -126,8 +173,9 @@ export const HIDDEN_NAMES: readonly string[] = [...HIDDEN_FOLDER_NAMES, ...HIDDE
 
 // File extensions (with leading dot, lower-case) to hide anywhere in the tree.
 export const HIDDEN_EXTENSIONS: readonly string[] = [
-// Markdown/docs + config metadata files (per user request to hide txt/json/yaml/toml/etc). 
-// Motivation vs Logic: these extensions are mostly configs, docs, or auxiliary artifacts we never need to parse.
+  // Markdown/docs + config metadata files. README.md is handled as a special-case exception.
+  // Motivation vs Logic: these extensions are mostly configs, docs, or auxiliary artifacts we
+  // never need to parse.
   '.md',
   '.mdx',
   '.rst',
@@ -139,6 +187,7 @@ export const HIDDEN_EXTENSIONS: readonly string[] = [
   '.toml',
   '.ini',
   '.cfg',
+  '.tsbuildinfo',
 
   // Data/office/external assets + security artifacts (per request to ignore non-code).
   '.csv',
@@ -230,12 +279,15 @@ export const HIDDEN_EXTENSIONS: readonly string[] = [
   '.msi',
   '.dmg',
   '.pkg',
+  '.bat',
+  '.ps1',
+  '.sh',
 
   // Source maps & minified assets
   '.map',
 ];
 
-// Case-insensitive filename prefixes that should be hidden (covers README, README.md, README.txt…)
+// Case-insensitive filename prefixes that should be hidden.
 export const HIDDEN_PREFIXES: readonly string[] = [
   'README',
   'CHANGELOG',
@@ -254,6 +306,9 @@ export const HIDDEN_PREFIXES: readonly string[] = [
   'SUPPORT',
   'MAINTAINERS',
   'AUTHORS',
+  'requirements',
+  'setup',
+  'seed',
   'AGENTS',
   'CLAUDE',
   'CURSOR',
@@ -266,6 +321,30 @@ export const HIDDEN_PREFIXES: readonly string[] = [
 const HIDDEN_NAME_SET = new Set(HIDDEN_NAMES);
 const HIDDEN_EXT_SET = new Set(HIDDEN_EXTENSIONS.map((ext) => ext.toLowerCase()));
 const HIDDEN_PREFIX_SET = HIDDEN_PREFIXES.map((prefix) => prefix.toLowerCase());
+const README_MD = 'readme.md';
+const HIDDEN_FILE_PATTERNS: readonly RegExp[] = [
+  /\.config\.[^.]+$/i,
+  /\.d\.[^.]+$/i,
+  /\.(test|spec|story|stories)\.[^.]+$/i,
+  /(?:^|\/)test_[^.]+\.[^.]+$/i,
+  /(?:^|\/)[^.]+_(?:test|tests|spec|specs)\.[^.]+$/i,
+  /^[A-Za-z0-9]+(?:Test|Tests|Spec|Specs)\.[^.]+$/,
+  /\.(generated|gen|g|designer|auto)\.[^.]+$/i,
+  /\.min\.[^.]+$/i,
+  /^(?:setup|seed)\.[^.]+$/i,
+  /^(?:tsconfig|jsconfig)\.[^.]+$/i,
+  /^(?:application|bootstrap|appsettings)(?:[-.][^.]+)?\.[^.]+$/i,
+  /^dockerfile(?:\.[^.]+)?$/i,
+];
+
+function isHiddenReadme(name: string): boolean {
+  const lower = name.toLowerCase();
+  return lower.startsWith('readme') && lower !== README_MD;
+}
+
+function matchesHiddenFilePattern(name: string): boolean {
+  return HIDDEN_FILE_PATTERNS.some((pattern) => pattern.test(name));
+}
 
 /**
  * Returns true when an entry should never appear in the user-facing folder browser AND should
@@ -279,22 +358,24 @@ export function isHiddenByDefault(name: string, isDirectory: boolean): boolean {
   // .editorconfig, .nvmrc, .yarnrc, .babelrc, IDE configs like .vscode/.idea, etc.).
   if (name.startsWith('.')) return true;
 
+  if (name.toLowerCase() === README_MD) return false;
+  if (isHiddenReadme(name)) return true;
+
   if (HIDDEN_NAME_SET.has(name)) return true;
 
   if (!isDirectory) {
     const lower = name.toLowerCase();
 
+    if (matchesHiddenFilePattern(name)) return true;
+
     // Extension match (handles multi-dot files via lastIndexOf).
     const dot = lower.lastIndexOf('.');
     if (dot >= 0 && HIDDEN_EXT_SET.has(lower.slice(dot))) return true;
 
-    // Prefix match (README, LICENSE, CLAUDE.md, AGENTS.md, …).
+    // Prefix match (LICENSE, CLAUDE.md, AGENTS.md, requirements*.txt, setup*.py, seed*.ts, …).
     for (const prefix of HIDDEN_PREFIX_SET) {
       if (lower.startsWith(prefix)) return true;
     }
-
-    // Dockerfile variants (Dockerfile.dev, Dockerfile.prod, …).
-    if (lower === 'dockerfile' || lower.startsWith('dockerfile.')) return true;
   }
 
   return false;
@@ -319,17 +400,50 @@ export function defaultScannerIgnorePatterns(): string[] {
   }
 
   for (const ext of HIDDEN_EXTENSIONS) {
+    if (ext === '.md' || ext === '.mdx') continue;
     patterns.push(`**/*${ext}`);
   }
 
   for (const prefix of HIDDEN_PREFIXES) {
+    if (prefix.toLowerCase() === 'readme') continue;
     patterns.push(`**/${prefix}*`);
   }
 
-  patterns.push('**/Dockerfile.*');
-
-  // Test-file naming conventions across stacks.
-  patterns.push('**/*.test.*', '**/*.spec.*');
+  patterns.push(
+    '**/*.config.*',
+    '**/*.d.*',
+    '**/*.test.*',
+    '**/*.spec.*',
+    '**/*.story.*',
+    '**/*.stories.*',
+    '**/*Test.*',
+    '**/*Tests.*',
+    '**/*Spec.*',
+    '**/*Specs.*',
+    '**/test_*.*',
+    '**/*_test.*',
+    '**/spec_*.*',
+    '**/*_spec.*',
+    '**/*.generated.*',
+    '**/*.gen.*',
+    '**/*.g.*',
+    '**/*.designer.*',
+    '**/*.auto.*',
+    '**/*.min.*',
+    '**/setup.*',
+    '**/seed.*',
+    '**/tsconfig.*',
+    '**/jsconfig.*',
+    '**/appsettings.*',
+    '**/application.*',
+    '**/application-*.*',
+    '**/bootstrap.*',
+    '**/bootstrap-*.*',
+    '**/Dockerfile',
+    '**/Dockerfile.*',
+    '**/dockerfile',
+    '**/dockerfile.*',
+  );
 
   return patterns;
 }

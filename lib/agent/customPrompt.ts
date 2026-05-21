@@ -19,6 +19,7 @@
 
 import { z } from 'zod';
 import type { ProviderSession, RetryListener } from './providers';
+import { chatWithRetry } from './providers';
 import { chatStructuredWithRetry } from './structuredOutput';
 import { DiagramPlanSchema, type DiagramPlan } from './planner';
 import { COLOR_NAMES } from '../ir/types';
@@ -255,4 +256,56 @@ export async function generatePlanFromPrompt(
     jsonSchema: PLAN_JSON_SCHEMA,
     schema: DiagramPlanSchema,
   });
+}
+
+// Motivation vs Logic: Instruction Mode is an additive mentor layer, so the diagram planner remains structured JSON while this dedicated raw-Markdown call receives the instructional system prompt verbatim and can produce rich prose.
+export const INSTRUCTION_MODE_SYSTEM_PROMPT = `You are an expert technical mentor and system architect. Your objective is to provide a comprehensive, step-by-step guide tailored to the user's request. First, evaluate whether the user's prompt is a codebase problem or a general conceptual practice.
+
+If it is a codebase problem, provide a sequential implementation guide. Include precise code snippets, explain where the code belongs within the architecture, and detail the logic behind each step so the user understands the implementation.
+
+If it is a conceptual or non-coding problem, provide a highly structured set of best practices, architectural steps, or design instructions to guide the user toward their goal.
+
+Always structure your entire response in well-formatted Markdown. Use clear headings for distinct sections, numbered lists for sequential steps, and properly tagged code blocks. Your tone must be authoritative, highly instructional, and strictly focused on helping the user successfully complete their exact task.`;
+
+export async function generateInstructionGuide(
+  session: ProviderSession,
+  input: {
+    prompt: string;
+    intentSummary?: string;
+    answers: CustomAnswer[];
+    diagramStyle: 'single' | 'multi-layer';
+  },
+  opts: { signal?: AbortSignal; onRetry?: RetryListener } = {},
+): Promise<string> {
+  const userMsg = [
+    `## User's original request`,
+    input.prompt.trim(),
+    '',
+    input.intentSummary ? `## Restated intent\n${input.intentSummary}` : '',
+    '',
+    `## Clarifying answers`,
+    formatAnswers(input.answers),
+    '',
+    `## Diagram output context`,
+    `The user selected ${input.diagramStyle === 'multi-layer' ? 'a multi-layer diagram' : 'a single diagram'}.`,
+    '',
+    `Produce the Instruction Mode Markdown guide now.`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const raw = await chatWithRetry(
+    session,
+    [
+      { role: 'system', content: INSTRUCTION_MODE_SYSTEM_PROMPT },
+      {
+        role: 'user',
+        content:
+          `${userMsg}\n\nReturn Markdown only. Do not wrap the whole response in a code fence unless the entire requested deliverable is code.`,
+      },
+    ],
+    { signal: opts.signal, onRetry: opts.onRetry },
+  );
+
+  return raw.trim();
 }
