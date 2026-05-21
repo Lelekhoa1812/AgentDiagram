@@ -2,8 +2,9 @@ import { z } from 'zod';
 import { runPipeline } from '@/lib/agent/pipeline';
 import { makeSseStream } from '@/lib/util/stream';
 import { methodNotAllowedResponse } from '@/lib/util/http';
-import { guardPath, defaultRepoPath } from '@/lib/security/pathGuard';
+import { defaultRepoPath } from '@/lib/security/pathGuard';
 import { PROVIDER_ENV } from '@/lib/agent/providers';
+import { RepoSourceError, resolveRepoSource } from '@/lib/agent/repoSource';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -14,11 +15,22 @@ const Body = z.object({
   apiKey: z.string().optional(),
   endpoint: z.string().optional(),
   rootPath: z.string().optional(),
+  allowSensitive: z.boolean().optional(),
   kind: z.enum(['architecture', 'sequence', 'class', 'data-flow', 'deployment']).default('architecture'),
   focus: z.string().default(''),
   topK: z.number().int().min(5).max(120).optional(),
   ignoredFolders: z.array(z.string()).max(100).optional(),
   quickMode: z.boolean().optional().default(false),
+  source: z
+    .object({
+      sourceType: z.enum(['local', 'github']).optional(),
+      repoPath: z.string().optional(),
+      repoUrl: z.string().url().optional(),
+      authMode: z.enum(['none', 'pat']).optional(),
+      pat: z.string().optional(),
+    })
+    .partial()
+    .optional(),
 });
 
 const analyzeMethodNotAllowed = () =>
@@ -54,10 +66,27 @@ export async function POST(req: Request) {
     );
   }
 
-  const rootPath = cfg.rootPath || defaultRepoPath();
-  const guard = guardPath(rootPath);
-  if (!guard.ok) {
-    return new Response(JSON.stringify({ error: guard.reason }), { status: 400 });
+  let rootPath: string;
+  try {
+    const resolved = await resolveRepoSource({
+      path: cfg.rootPath ?? defaultRepoPath(),
+      allowSensitive: cfg.allowSensitive,
+      source: cfg.source
+        ? {
+            sourceType: cfg.source.sourceType,
+            repoPath: cfg.source.repoPath,
+            repoUrl: cfg.source.repoUrl,
+            authMode: cfg.source.authMode,
+            pat: cfg.source.pat,
+          }
+        : undefined,
+    });
+    rootPath = resolved.rootPath;
+  } catch (err) {
+    if (err instanceof RepoSourceError && err.code === 'PAT_REQUIRED') {
+      return new Response(JSON.stringify({ error: err.message, code: err.code }), { status: 401 });
+    }
+    return new Response(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }), { status: 400 });
   }
 
   const endpoint =
@@ -74,7 +103,7 @@ export async function POST(req: Request) {
 
   runPipeline(
     {
-      rootPath: guard.resolved,
+      rootPath,
       session: { id: cfg.provider, model: cfg.model, apiKey, endpoint },
       kind: cfg.kind,
       focus: cfg.focus,

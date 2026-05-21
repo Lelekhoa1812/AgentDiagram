@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { readUiPreference, writeUiPreference } from '@/lib/state/uiPreferences';
+import type { RepoSourceConfig, RepoSourceType } from '@/lib/agent/repoTypes';
 
 interface ScanResult {
   resolved: string;
@@ -24,16 +25,6 @@ interface BrowseEntry {
   name: string;
   path: string;
   type: 'dir' | 'file';
-}
-
-export type RepoSourceType = 'local' | 'github';
-export type RepoAuthMode = 'none' | 'pat';
-
-export interface RepoSourceConfig {
-  sourceType: RepoSourceType;
-  repoPath: string;
-  repoUrl?: string;
-  authMode: RepoAuthMode;
 }
 
 interface RepoInputProps {
@@ -64,6 +55,25 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
 
   const browserRef = useRef<HTMLDivElement | null>(null);
 
+  const composeSourceConfig = useCallback(
+    (overrides: Partial<RepoSourceConfig> = {}): RepoSourceConfig => ({
+      sourceType: overrides.sourceType ?? sourceType,
+      repoPath: overrides.repoPath ?? path,
+      repoUrl: (overrides.sourceType ?? sourceType) === 'github' ? overrides.repoUrl ?? repoUrl : undefined,
+      authMode:
+        overrides.authMode ?? ((overrides.sourceType ?? sourceType) === 'github' && (overrides.pat ?? pat.trim()) ? 'pat' : 'none'),
+      pat: (overrides.sourceType ?? sourceType) === 'github' ? overrides.pat ?? (pat.trim() || undefined) : undefined,
+    }),
+    [path, pat, repoUrl, sourceType],
+  );
+
+  const emitConfigChange = useCallback(
+    (nextPath = path, nextIgnored = ignoredFolders, overrides: Partial<RepoSourceConfig> = {}) => {
+      onConfigChange?.(nextPath, nextIgnored, composeSourceConfig(overrides));
+    },
+    [composeSourceConfig, ignoredFolders, onConfigChange, path],
+  );
+
   useEffect(() => {
     const savedSourceType = readUiPreference('repoSourceType') ?? 'local';
     const savedPath = readUiPreference('repoPath') ?? '';
@@ -78,19 +88,19 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
 
     if (savedPath) {
       setPath(savedPath);
-      onConfigChange?.(savedPath, savedIgnored, {
+      emitConfigChange(savedPath, savedIgnored, {
         sourceType: savedSourceType,
         repoPath: savedPath,
         repoUrl: savedRepoUrl,
         authMode: 'none',
       });
-    } else {
+    } else if (savedSourceType === 'local') {
       fetch('/api/repo/scan')
         .then((r) => r.json())
         .then((d: { defaultPath?: string }) => {
           if (d.defaultPath) {
             setPath(d.defaultPath);
-            onConfigChange?.(d.defaultPath, savedIgnored, {
+            emitConfigChange(d.defaultPath, savedIgnored, {
               sourceType: savedSourceType,
               repoPath: d.defaultPath,
               repoUrl: savedRepoUrl,
@@ -99,13 +109,14 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
           }
         })
         .catch(() => {});
+    } else {
+      setPath('');
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [emitConfigChange]);
 
   const loadEntries = useCallback(
     async (parent = '') => {
-      if (!path) return;
+      if (!path || !hasLocalCheckout) return;
       setLoadingEntries(true);
       setBrowseError(null);
       try {
@@ -134,18 +145,18 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
         setLoadingEntries(false);
       }
     },
-    [path],
+    [hasLocalCheckout, path],
   );
 
   // Auto-load the root listing whenever the path changes so the picker is never empty.
   useEffect(() => {
-    if (!path) {
+    if (!path || !hasLocalCheckout) {
       setEntries([]);
       setBrowserParent('');
       return;
     }
     void loadEntries('');
-  }, [path, loadEntries]);
+  }, [hasLocalCheckout, loadEntries, path]);
 
   // Close the kebab menu on outside click.
   useEffect(() => {
@@ -167,27 +178,26 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
       setHasLocalCheckout(Boolean(value.trim()));
     }
     setResult(null);
-    onConfigChange?.(value, ignoredFolders, {
+    emitConfigChange(value, ignoredFolders, {
       sourceType,
       repoPath: value,
       repoUrl,
-      authMode: pat.trim() ? 'pat' : 'none',
     });
   };
 
   const onSourceTypeChange = (value: RepoSourceType) => {
     setSourceType(value);
     writeUiPreference('repoSourceType', value);
+    setResult(null);
     if (value === 'local') {
       setHasLocalCheckout(Boolean(path.trim()));
     } else {
       setHasLocalCheckout(false);
     }
-    onConfigChange?.(path, ignoredFolders, {
+    emitConfigChange(path, ignoredFolders, {
       sourceType: value,
       repoPath: path,
       repoUrl,
-      authMode: pat.trim() ? 'pat' : 'none',
     });
   };
 
@@ -198,11 +208,10 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
     setIgnoredFolders(cleaned);
     writeUiPreference('repoIgnoredFolders', cleaned);
     setResult(null);
-    onConfigChange?.(path, cleaned, {
+    emitConfigChange(path, cleaned, {
       sourceType,
       repoPath: path,
       repoUrl,
-      authMode: pat.trim() ? 'pat' : 'none',
     });
   };
 
@@ -247,10 +256,32 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
     setScanning(true);
     setError(null);
     try {
+      // Root Cause vs Logic: GitHub mode was previously funneled through the local-path body,
+      // so the scan endpoint never saw a cloneable URL. We now submit the selected source shape
+      // directly and let the server resolve or clone before scanning.
+      const source =
+        sourceType === 'github'
+          ? {
+              sourceType,
+              repoPath: path,
+              repoUrl: repoUrl.trim(),
+              authMode: pat.trim() ? 'pat' : 'none',
+              pat: pat.trim() || undefined,
+            }
+          : {
+              sourceType,
+              repoPath: path,
+              repoUrl: repoUrl.trim() || undefined,
+              authMode: 'none' as const,
+            };
       const res = await fetch('/api/repo/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path, ignoredFolders }),
+        body: JSON.stringify(
+          sourceType === 'github'
+            ? { source, ignoredFolders }
+            : { path, source, ignoredFolders },
+        ),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -260,11 +291,14 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
       }
       setResult(data);
       setHasLocalCheckout(true);
+      setPath(data.resolved);
+      writeUiPreference('repoPath', data.resolved);
       onScan(data.resolved, data, ignoredFolders, {
         sourceType,
         repoPath: data.resolved,
         repoUrl: repoUrl.trim(),
-        authMode: pat.trim() ? 'pat' : 'none',
+        authMode: sourceType === 'github' && pat.trim() ? 'pat' : 'none',
+        pat: sourceType === 'github' ? pat.trim() || undefined : undefined,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -304,11 +338,10 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
                 setRepoUrl(value);
                 writeUiPreference('repoUrl', value);
                 setResult(null);
-                onConfigChange?.(path, ignoredFolders, {
+                emitConfigChange(path, ignoredFolders, {
                   sourceType,
                   repoPath: path,
                   repoUrl: value,
-                  authMode: pat.trim() ? 'pat' : 'none',
                 });
               }}
               placeholder="https://github.com/org/repo or .../repo.git"
@@ -324,11 +357,12 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
               onChange={(e) => {
                 const value = e.target.value;
                 setPat(value);
-                onConfigChange?.(path, ignoredFolders, {
+                setResult(null);
+                emitConfigChange(path, ignoredFolders, {
                   sourceType,
                   repoPath: path,
                   repoUrl,
-                  authMode: value.trim() ? 'pat' : 'none',
+                  pat: value.trim() || undefined,
                 });
               }}
               placeholder="ghp_…"
@@ -341,12 +375,15 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
       )}
 
       <div>
-        <div className="mb-1 text-[10px] uppercase tracking-widest text-ink-400">Absolute path</div>
+        <div className="mb-1 text-[10px] uppercase tracking-widest text-ink-400">
+          {sourceType === 'github' ? 'Resolved checkout path' : 'Absolute path'}
+        </div>
         <div className="flex gap-2">
           <input
             value={path}
             onChange={(e) => onPathChange(e.target.value)}
-            placeholder="/Users/you/projects/your-repo"
+            readOnly={sourceType === 'github'}
+            placeholder={sourceType === 'github' ? 'Will populate after clone completes' : '/Users/you/projects/your-repo'}
             className="min-w-0 flex-1 rounded-md border border-ink-700 bg-ink-900 px-2 py-1.5 font-mono text-[11px]"
           />
           <button
@@ -360,7 +397,13 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
           </button>
         </div>
         <div className="mt-1 text-[10px] text-ink-400">
-          Default is the parent of <code>AgentDiagram/</code> — i.e. the project you cloned this into.
+          {sourceType === 'github' ? (
+            'This checkout path is created automatically after clone and then used for browsing and scanning.'
+          ) : (
+            <>
+              Default is the parent of <code>AgentDiagram/</code> - i.e. the project you cloned this into.
+            </>
+          )}
         </div>
       </div>
 
@@ -523,10 +566,10 @@ export function RepoInput({ onScan, onConfigChange }: RepoInputProps) {
       <button
         type="button"
         onClick={onPreview}
-        disabled={scanning || !path}
+        disabled={scanning || (sourceType === 'github' ? !repoUrl.trim() : !path.trim())}
         className="rounded-md border border-ink-700 bg-ink-800 px-3 py-1.5 hover:bg-ink-700 disabled:opacity-50"
       >
-        {scanning ? 'Scanning…' : 'Preview repo'}
+        {scanning ? 'Scanning…' : sourceType === 'github' ? 'Clone & scan' : 'Preview repo'}
       </button>
 
       {error && <div className="rounded border border-red-500/50 bg-red-500/10 p-2 text-red-200">{error}</div>}
