@@ -29,6 +29,8 @@ export interface UiPreferences {
   isInspectorVisible?: boolean;
   editorTab?: PersistedEditorTab;
   repoPath?: string;
+  repoSourceType?: 'local' | 'github';
+  repoUrl?: string;
   repoIgnoredFolders?: string[];
   dslText?: string;
   quickMode?: boolean;
@@ -88,6 +90,10 @@ function sanitizePreferences(value: unknown): UiPreferences {
     preferences.editorTab = value.editorTab as PersistedEditorTab;
   }
   if (typeof value.repoPath === 'string') preferences.repoPath = value.repoPath;
+  if (value.repoSourceType === 'local' || value.repoSourceType === 'github') {
+    preferences.repoSourceType = value.repoSourceType;
+  }
+  if (typeof value.repoUrl === 'string') preferences.repoUrl = value.repoUrl;
   if (Array.isArray(value.repoIgnoredFolders)) {
     preferences.repoIgnoredFolders = value.repoIgnoredFolders.filter((item): item is string => typeof item === 'string');
   }
