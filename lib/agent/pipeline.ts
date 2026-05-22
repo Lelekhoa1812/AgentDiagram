@@ -12,10 +12,8 @@
  *  10. Validate + repair
  */
 
-import pLimit from 'p-limit';
-import { AGENT_FILE_ALLOWLIST, readRepoFile } from './repoScanner';
+import { AGENT_FILE_ALLOWLIST } from './repoScanner';
 import { classifyRelevance, type DiagramKind } from './classifier';
-import { summarizeFile } from './summarizer';
 import { generateInstructionGuide } from './customPrompt';
 import { generatePlan } from './planner';
 import { planToDsl } from './dslCompiler';
@@ -27,6 +25,7 @@ import { extractImportGraph, topClusters } from './importGraph';
 import { readDocPriors } from './docReader';
 import { buildRepoContext } from './repoContext';
 import { scanResolvedRepoSource, type ResolvedRepoSource } from './repoSource';
+import { analyzeRelevantFiles, quickAnalysisDigest } from './analysisRunner';
 
 export interface PipelineInput {
   repoSource: ResolvedRepoSource;
@@ -110,7 +109,7 @@ export async function runPipeline(
       stage: 'classify',
       status: 'done',
       message: input.maxMode
-        ? `MAX mode: selected all ${relevant.length} relevant files for deep analysis`
+        ? `MAX mode: selected all ${relevant.length} relevant files for tiered analysis`
         : `Selected ${relevant.length} files for deep analysis`,
       counters: { selected: relevant.length },
     });
@@ -136,44 +135,42 @@ export async function runPipeline(
       },
     });
 
-    // 5 + 6. Summarize relevant files in parallel — skipped in Quick Mode.
-    let summaries: Array<{ path: string; summary: Awaited<ReturnType<typeof summarizeFile>> }>;
+    // 5 + 6. Summarize relevant files in adaptive parallel tiers — skipped in Quick Mode.
+    let analysis = quickAnalysisDigest({
+      repoMap,
+      relevant,
+      kind: input.kind,
+      importGraph,
+      repoContext,
+    });
     if (input.quickMode) {
       send({
         type: 'stage',
         stage: 'summarize',
         status: 'done',
         message: 'Quick Mode: skipped per-file summarization — planning from structural digest only',
-        counters: { done: 0, total: relevant.length },
+        counters: {
+          tier: analysis.budget.tier,
+          done: 0,
+          total: relevant.length,
+          rollups: analysis.digest.moduleRollups.length,
+        },
       });
-      summaries = [];
     } else {
-      send({ type: 'stage', stage: 'summarize', status: 'start', message: 'Summarizing modules…' });
-      const limit = pLimit(4);
-      let done = 0;
-      summaries = await Promise.all(
-        relevant.map((r) =>
-          limit(async () => {
-            if (input.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-            const text = await readRepoFile(repoMap.root, r.file.path, 180_000);
-            const summary = await summarizeFile(input.session, r.file.path, text, {
-              signal: input.signal,
-              onRetry: onRetry('summarize'),
-            });
-            done++;
-            send({
-              type: 'stage',
-              stage: 'summarize',
-              status: 'progress',
-              percent: Math.round((done / relevant.length) * 100),
-              counters: { done, total: relevant.length },
-            });
-            return { path: r.file.path, summary };
-          }),
-        ),
-      );
-      send({ type: 'stage', stage: 'summarize', status: 'done', message: `Summarized ${summaries.length} files` });
+      analysis = await analyzeRelevantFiles({
+        repoMap,
+        relevant,
+        kind: input.kind,
+        focus: input.focus,
+        importGraph,
+        repoContext,
+        session: input.session,
+        signal: input.signal,
+        send,
+        onRetry,
+      });
     }
+    const summaries = analysis.summaries.map((item) => ({ path: item.path, summary: item.summary }));
 
     // 7. Subsystem catalog (heuristic now)
     send({ type: 'stage', stage: 'subsystem', status: 'start', message: 'Discovering subsystems…' });
@@ -207,6 +204,7 @@ export async function runPipeline(
         imports: importGraph,
         docs,
         repoContext,
+        analysisDigest: analysis.digest,
         kind: input.kind,
         focus: input.focus,
         quickMode: input.quickMode,

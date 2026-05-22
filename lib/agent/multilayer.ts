@@ -15,9 +15,8 @@
  */
 
 import pLimit from 'p-limit';
-import { AGENT_FILE_ALLOWLIST, readRepoFile } from './repoScanner';
+import { AGENT_FILE_ALLOWLIST } from './repoScanner';
 import { classifyRelevance } from './classifier';
-import { summarizeFile, type FileSummary } from './summarizer';
 import { generatePlan, identifyLayers, type LayerCatalog } from './planner';
 import { planToDsl } from './dslCompiler';
 import { tryRepair } from './repair';
@@ -30,6 +29,8 @@ import { readDocPriors } from './docReader';
 import { buildRepoContext, selectLayerContextSummaries } from './repoContext';
 import { scanResolvedRepoSource, type ResolvedRepoSource } from './repoSource';
 import type { LayerDiagram, MultiLayerOutput } from '../state/store';
+import { analyzeRelevantFiles, quickAnalysisDigest } from './analysisRunner';
+import { focusAnalysisDigest } from './analysisBudget';
 
 export interface MultiLayerInput {
   repoSource: ResolvedRepoSource;
@@ -203,7 +204,7 @@ export async function runMultiLayerPipeline(
       type: 'stage',
       stage: 'classify',
       status: 'done',
-      message: input.maxMode ? `MAX mode: selected all ${relevant.length} relevant files` : `${relevant.length} files selected`,
+      message: input.maxMode ? `MAX mode: selected all ${relevant.length} relevant files for tiered analysis` : `${relevant.length} files selected`,
       counters: { selected: relevant.length },
     });
 
@@ -222,44 +223,42 @@ export async function runMultiLayerPipeline(
       counters: { docs: docs.length, externals: importGraph.externals.size, clusters: repoContext.folderClusters.length },
     });
 
-    // 5. Summarize — skipped in Quick Mode.
-    let summaries: Array<{ path: string; summary: FileSummary }>;
+    // 5. Summarize with adaptive tiering — skipped in Quick Mode.
+    let analysis = quickAnalysisDigest({
+      repoMap,
+      relevant,
+      kind: 'architecture',
+      importGraph,
+      repoContext,
+    });
     if (input.quickMode) {
       send({
         type: 'stage',
         stage: 'summarize',
         status: 'done',
         message: 'Quick Mode: skipped per-file summarization — layers will be inferred from structural digest only',
-        counters: { done: 0, total: relevant.length },
+        counters: {
+          tier: analysis.budget.tier,
+          done: 0,
+          total: relevant.length,
+          rollups: analysis.digest.moduleRollups.length,
+        },
       });
-      summaries = [];
     } else {
-      send({ type: 'stage', stage: 'summarize', status: 'start' });
-      const sumLimit = pLimit(4);
-      let done = 0;
-      summaries = await Promise.all(
-        relevant.map((r) =>
-          sumLimit(async () => {
-            if (input.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-            const text = await readRepoFile(repoMap.root, r.file.path, 180_000);
-            const summary = await summarizeFile(input.session, r.file.path, text, {
-              signal: input.signal,
-              onRetry: onRetry('summarize'),
-            });
-            done++;
-            send({
-              type: 'stage',
-              stage: 'summarize',
-              status: 'progress',
-              percent: Math.round((done / relevant.length) * 100),
-              counters: { done, total: relevant.length },
-            });
-            return { path: r.file.path, summary };
-          }),
-        ),
-      );
-      send({ type: 'stage', stage: 'summarize', status: 'done', message: `Summarized ${summaries.length} files` });
+      analysis = await analyzeRelevantFiles({
+        repoMap,
+        relevant,
+        kind: 'architecture',
+        focus: input.focus,
+        importGraph,
+        repoContext,
+        session: input.session,
+        signal: input.signal,
+        send,
+        onRetry,
+      });
     }
+    const summaries = analysis.summaries.map((item) => ({ path: item.path, summary: item.summary }));
 
     // 6. Identify layers
     send({ type: 'stage', stage: 'layers', status: 'start', message: 'Identifying architectural layers…' });
@@ -271,6 +270,7 @@ export async function runMultiLayerPipeline(
         imports: importGraph,
         docs,
         repoContext,
+        analysisDigest: analysis.digest,
         kind: 'architecture',
         focus: input.focus,
         quickMode: input.quickMode,
@@ -316,6 +316,7 @@ export async function runMultiLayerPipeline(
                 imports: importGraph,
                 docs,
                 repoContext,
+                analysisDigest: focusAnalysisDigest(analysis.digest, layer.member_files),
                 kind: 'architecture',
                 focus: `Layer "${layer.name}" - ${layer.description}. Show internal structure plus one-hop boundary nodes (dashed). Boundary deps: ${layer.boundary_deps.join(', ') || 'none'}.`,
                 layerFocus: layer.name,

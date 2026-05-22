@@ -7,6 +7,7 @@ import type { DiagramKind } from './classifier';
 import type { ImportGraph } from './importGraph';
 import type { DocPrior } from './docReader';
 import type { RepoContextDigest } from './repoContext';
+import type { AnalysisDigest } from './analysisBudget';
 import { COLOR_NAMES } from '../ir/types';
 import { knownIconNames } from '../icons/registry';
 
@@ -113,6 +114,7 @@ export interface PlanInput {
   imports: ImportGraph;
   docs: DocPrior[];
   repoContext?: RepoContextDigest;
+  analysisDigest?: AnalysisDigest;
   kind: DiagramKind;
   focus: string;
   /** Optional: restrict planning to a single named layer */
@@ -144,15 +146,17 @@ function compactExternals(graph: ImportGraph, topN = 24): string {
     .join(', ');
 }
 
-function compactSummaries(summaries: PlanInput['summaries']): string {
-  return summaries
+function compactSummaries(summaries: PlanInput['summaries'], maxItems = summaries.length): string {
+  const clipped = summaries.slice(0, maxItems);
+  const omitted = summaries.length > clipped.length ? `\n- ... ${summaries.length - clipped.length} additional file summaries omitted; use the analysis digest/module rollups above.` : '';
+  return clipped
     .map((s) => {
       const ext = s.summary.external_deps.slice(0, 6).join(', ');
       const side = s.summary.side_effects.slice(0, 4).join('; ');
       const surface = s.summary.surface.slice(0, 6).join(', ');
       return `- ${s.path} [${s.summary.layer}/${s.summary.category}] ${s.summary.role}\n    surface: ${surface}\n    externals: ${ext}\n    side-effects: ${side}`;
     })
-    .join('\n');
+    .join('\n') + omitted;
 }
 
 function compactDocs(docs: DocPrior[]): string {
@@ -216,16 +220,46 @@ function compactRepoContext(ctx: RepoContextDigest | undefined): string {
   ].join('\n');
 }
 
-export async function generatePlan(
-  session: ProviderSession,
-  input: PlanInput,
-  opts: { signal?: AbortSignal; onRetry?: RetryListener } = {},
-): Promise<DiagramPlan> {
-  const userMsg = [
+export function compactAnalysisDigest(digest: AnalysisDigest | undefined): string {
+  if (!digest) return '(not available)';
+  const rollups = digest.moduleRollups
+    .slice(0, 36)
+    .map(
+      (module) =>
+        `- ${module.module}: ${module.fileCount} files; deep ${module.deepFiles}, signatures ${module.signatureFiles}; reps: ${module.representativeFiles
+          .slice(0, 5)
+          .join(', ') || 'none'}; layers: ${module.layers.join(', ') || 'other'}; surface: ${module.surface
+          .slice(0, 8)
+          .join(', ') || 'none'}; externals: ${module.externalDeps.slice(0, 6).join(', ') || 'none'}`,
+    )
+    .join('\n');
+  return [
+    `${digest.label}: relevant=${digest.totalRelevantFiles}, analyzed=${digest.analyzedFiles}, deep=${digest.deepFiles}, signatures=${digest.signatureFiles}, structural=${digest.structuralFiles}, bypassed=${digest.bypassedFiles}`,
+    `Notes: ${digest.notes.join(' ')}`,
+    '',
+    `Global externals: ${digest.global.externals.slice(0, 24).join(', ') || 'none'}`,
+    `Central files: ${digest.global.centralFiles.slice(0, 18).join('; ') || 'none'}`,
+    `Cross-folder edges: ${digest.global.crossFolderEdges.slice(0, 24).join('; ') || 'none'}`,
+    '',
+    'Module rollups:',
+    rollups || '(none)',
+  ].join('\n');
+}
+
+function plannerSummaryLimit(input: PlanInput): number {
+  if (!input.analysisDigest) return input.summaries.length;
+  return input.analysisDigest.tier <= 2 ? Math.min(input.summaries.length, 420) : Math.min(input.summaries.length, 120);
+}
+
+export function buildPlanUserMessage(input: PlanInput): string {
+  return [
     `Diagram type: ${input.kind}`,
     input.layerFocus ? `Layer focus: ${input.layerFocus} — only include components in this layer plus their immediate boundaries.` : '',
     input.quickMode
       ? `Mode: QUICK — per-file summaries are intentionally unavailable. Ground the diagram in the deterministic repo context, import graph, routes, exports, env vars, and docs below. Prefer folder clusters as group boundaries; use representative files within each cluster as nodes.`
+      : '',
+    input.analysisDigest
+      ? `Analysis tier: ${input.analysisDigest.label}. Prefer the compact analysis digest and module rollups over enumerating individual files when the repo is large.`
       : '',
     `Focus: ${input.focus || '(none — give a general architecture view)'}`,
     `Stack: ${input.repoMap.likelyStack.join(', ') || 'unknown'}`,
@@ -236,18 +270,29 @@ export async function generatePlan(
     `## Deterministic repo context`,
     compactRepoContext(input.repoContext),
     '',
+    `## Progressive analysis digest`,
+    compactAnalysisDigest(input.analysisDigest),
+    '',
     `## Documentation priors`,
     input.docs.length ? compactDocs(input.docs) : '(no documentation found)',
     '',
     input.quickMode
       ? `## File summaries\n(skipped — Quick Mode)`
-      : `## File summaries (top ${input.summaries.length})\n${compactSummaries(input.summaries)}`,
+      : `## File summaries (showing ${plannerSummaryLimit(input)} of ${input.summaries.length})\n${compactSummaries(input.summaries, plannerSummaryLimit(input))}`,
     '',
     `## Import graph (sample)`,
     compactImports(input.imports),
   ]
     .filter(Boolean)
     .join('\n');
+}
+
+export async function generatePlan(
+  session: ProviderSession,
+  input: PlanInput,
+  opts: { signal?: AbortSignal; onRetry?: RetryListener } = {},
+): Promise<DiagramPlan> {
+  const userMsg = buildPlanUserMessage(input);
 
   const messages = [
     {
@@ -357,6 +402,7 @@ export async function identifyLayers(
   input: PlanInput,
   opts: { signal?: AbortSignal; onRetry?: RetryListener } = {},
 ): Promise<LayerCatalog> {
+  const layerSummaryLimit = input.analysisDigest?.tier && input.analysisDigest.tier >= 3 ? 160 : input.summaries.length;
   const userMsg = [
     `Stack: ${input.repoMap.likelyStack.join(', ') || 'unknown'}`,
     `Top externals: ${compactExternals(input.imports, 30)}`,
@@ -367,10 +413,13 @@ export async function identifyLayers(
     `## Deterministic repo context`,
     compactRepoContext(input.repoContext),
     '',
+    `## Progressive analysis digest`,
+    compactAnalysisDigest(input.analysisDigest),
+    '',
     `## Documentation`,
     input.docs.length ? compactDocs(input.docs) : '(none)',
     '',
-    input.quickMode ? `## File summaries\n(skipped — Quick Mode)` : `## File summaries\n${compactSummaries(input.summaries)}`,
+    input.quickMode ? `## File summaries\n(skipped — Quick Mode)` : `## File summaries\n${compactSummaries(input.summaries, layerSummaryLimit)}`,
   ]
     .filter(Boolean)
     .join('\n');

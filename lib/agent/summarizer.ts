@@ -149,13 +149,19 @@ export async function summarizeFile(
   session: ProviderSession,
   filePath: string,
   content: string,
-  opts: { signal?: AbortSignal; onRetry?: RetryListener } = {},
+  opts: {
+    signal?: AbortSignal;
+    onRetry?: RetryListener;
+    chunkTokens?: number;
+    analysisMode?: 'deep' | 'compressed';
+    dependencyContext?: string;
+  } = {},
 ): Promise<FileSummary> {
-  const key = `summary-${sha1(`${session.id}|${session.model}|v4|${filePath}|${content}`)}`;
+  const key = `summary-${sha1(`${session.id}|${session.model}|v5|${opts.analysisMode ?? 'deep'}|${opts.dependencyContext ?? ''}|${filePath}|${content}`)}`;
   const cached = await readCache<FileSummary>(key);
   if (cached) return cached;
 
-  const chunks = chunkFile(filePath, content, 2200);
+  const chunks = chunkFile(filePath, content, opts.chunkTokens ?? 2200);
   const summary =
     chunks.length === 1
       ? await summarizeText(session, filePath, content, opts)
@@ -169,7 +175,12 @@ async function summarizeChunks(
   session: ProviderSession,
   filePath: string,
   chunks: ReturnType<typeof chunkFile>,
-  opts: { signal?: AbortSignal; onRetry?: RetryListener },
+  opts: {
+    signal?: AbortSignal;
+    onRetry?: RetryListener;
+    analysisMode?: 'deep' | 'compressed';
+    dependencyContext?: string;
+  },
 ): Promise<FileSummary[]> {
   const summaries: FileSummary[] = [];
   for (const chunk of chunks) {
@@ -189,8 +200,20 @@ async function summarizeText(
   session: ProviderSession,
   filePath: string,
   content: string,
-  opts: { signal?: AbortSignal; onRetry?: RetryListener },
+  opts: {
+    signal?: AbortSignal;
+    onRetry?: RetryListener;
+    analysisMode?: 'deep' | 'compressed';
+    dependencyContext?: string;
+  },
 ): Promise<FileSummary> {
+  const compressedGuidance =
+    opts.analysisMode === 'compressed'
+      ? 'Compress repetitive boilerplate, generated wrappers, and standard CRUD into brief architectural notes; keep only high-signal surfaces and side effects. '
+      : '';
+  const dependencyContext = opts.dependencyContext
+    ? `\n\nGlobal dependency context for this file:\n${opts.dependencyContext}`
+    : '';
   const messages = [
     {
       role: 'system' as const,
@@ -201,11 +224,12 @@ async function summarizeText(
         'Note notable side effects (db writes, HTTP calls, queue publishes, env-var reads). ' +
         `Respect these hard caps: exports <= ${LIMITS.exports}, imports <= ${LIMITS.imports}, surface <= ${LIMITS.surface}, external_deps <= ${LIMITS.external_deps}, side_effects <= ${LIMITS.side_effects}. ` +
         'If there are more items, keep only the highest-signal architectural items. ' +
+        compressedGuidance +
         'Output strictly conforms to the JSON schema. No prose, no markdown fences.',
     },
     {
       role: 'user' as const,
-      content: `File path: ${filePath}\n\n----- BEGIN FILE -----\n${content}\n----- END FILE -----`,
+      content: `File path: ${filePath}${dependencyContext}\n\n----- BEGIN FILE -----\n${content}\n----- END FILE -----`,
     },
   ];
 
