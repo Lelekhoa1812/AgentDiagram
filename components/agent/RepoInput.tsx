@@ -474,6 +474,12 @@ export function RepoInput({ onScan, onConfigChange, maxMode, onMaxModeChange }: 
             </>
           )}
         </div>
+        {sourceType === 'local' && (
+          <div className="mt-1 text-[10px] text-ink-400">
+            Tip: end a folder name with <code>~</code> to list sibling directories from the same parent, like{' '}
+            <code>Back~</code> or <code>Backend~</code>.
+          </div>
+        )}
       </div>
 
       <div className="space-y-2 rounded-md border border-ink-800 bg-ink-950/70 p-2">

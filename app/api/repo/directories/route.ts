@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { defaultRepoPath, guardPath } from '@/lib/security/pathGuard';
+import { defaultRepoPath, resolveBrowsePath } from '@/lib/security/pathGuard';
 import { normalizeIgnoredFolders } from '@/lib/agent/repoScanner';
 import { isHiddenByDefault } from '@/lib/agent/ignoreDefaults';
 
@@ -34,13 +34,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 
-  const guard = guardPath(parsed.data.rootPath ?? defaultRepoPath());
-  if (!guard.ok) {
-    return NextResponse.json({ error: guard.reason, resolved: guard.resolved }, { status: 400 });
+  const browse = resolveBrowsePath(parsed.data.rootPath ?? defaultRepoPath());
+  if (!browse.ok) {
+    return NextResponse.json({ error: browse.reason, resolved: browse.resolved }, { status: 400 });
   }
 
   const relParent = parsed.data.parent ?? '';
-  const absParent = childPath(guard.resolved, relParent);
+  const absParent = childPath(browse.browseRoot, relParent);
   if (!absParent) {
     return NextResponse.json({ error: 'Invalid folder path' }, { status: 400 });
   }
@@ -52,6 +52,13 @@ export async function POST(req: Request) {
       .filter((dirent) => {
         const isDir = dirent.isDirectory();
         if (!isDir && !dirent.isFile()) return false;
+        // Root Cause vs Logic: prefix searches need to stay folder-only so a trailing `~`
+        // behaves like "show me sibling directories starting with this stem" instead of
+        // mixing in files that happen to share the same prefix.
+        if (browse.prefix && !relParent) {
+          if (!isDir) return false;
+          if (!dirent.name.startsWith(browse.prefix)) return false;
+        }
         if (isHiddenByDefault(dirent.name, isDir)) return false;
         // Skip the AgentDiagram app folder itself so users never accidentally
         // pipe our own source back into the agent when scanning a parent dir.
@@ -61,7 +68,7 @@ export async function POST(req: Request) {
       })
       .map((dirent) => {
         const abs = path.resolve(absParent, dirent.name);
-        const rel = path.relative(guard.resolved, abs).replace(/\\/g, '/');
+        const rel = path.relative(browse.browseRoot, abs).replace(/\\/g, '/');
         return {
           name: dirent.name,
           path: rel,
@@ -74,7 +81,9 @@ export async function POST(req: Request) {
       });
 
     return NextResponse.json({
-      root: guard.resolved,
+      root: browse.browseRoot,
+      resolved: browse.resolved,
+      prefix: browse.prefix,
       parent: normalizeIgnoredFolders([relParent])[0] ?? '',
       entries,
       // Kept for older clients that still read `directories`; new UI uses `entries`.
