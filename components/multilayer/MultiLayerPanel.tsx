@@ -15,7 +15,10 @@ export function MultiLayerPanel() {
   const focus = useDiagramStore((s) => s.focusPrompt);
   const quickMode = useDiagramStore((s) => s.quickMode);
   const maxMode = useDiagramStore((s) => s.maxMode);
+  const instructionMode = useDiagramStore((s) => s.instructionMode);
   const setMaxMode = useDiagramStore((s) => s.setMaxMode);
+  const setInstructionMode = useDiagramStore((s) => s.setInstructionMode);
+  const setInstructionMarkdown = useDiagramStore((s) => s.setInstructionMarkdown);
   const setMode = useDiagramStore((s) => s.setMode);
   const setDsl = useDiagramStore((s) => s.setDsl);
   const addGeneratedProject = useDiagramStore((s) => s.addGeneratedProject);
@@ -47,6 +50,7 @@ export function MultiLayerPanel() {
     setCounters({});
     setRetryNotice(null);
     setTerminalState(null);
+    setInstructionMarkdown('');
     setMultiLayer(null);
     let sawResult = false;
     let sawFailure = false;
@@ -68,6 +72,7 @@ export function MultiLayerPanel() {
             ignoredFolders,
             quickMode,
             maxMode,
+            instructionMode,
             source: repoSource,
           }),
         signal: ac.signal,
@@ -119,13 +124,15 @@ export function MultiLayerPanel() {
         pushLog({ stage: ev.stage, level: 'error', message: ev.message });
       } else if (ev.type === 'result-multilayer') {
         sawResult = true;
+        const instructionMarkdown = ev.instructionMarkdown ?? '';
+        setInstructionMarkdown(instructionMarkdown);
         const out = ev.output as MultiLayerOutput;
         setMultiLayer(out);
         clearOverrides();
         setActiveLayer('overview');
         setDsl(out.overview.dsl);
         const projectName = rootPath.split('/').filter(Boolean).pop() || 'diagram';
-        addGeneratedProject(projectName, out.overview.dsl, out);
+        addGeneratedProject(projectName, out.overview.dsl, out, instructionMarkdown);
         setMode('editor');
       } else if (ev.type === 'done') {
         setAgentStage(null);
@@ -142,6 +149,8 @@ export function MultiLayerPanel() {
         <RepoInput
           maxMode={maxMode}
           onMaxModeChange={setMaxMode}
+          instructionMode={instructionMode}
+          onInstructionModeChange={setInstructionMode}
           onConfigChange={(path, ignored, source) => {
             setRootPath(path);
             setIgnoredFolders(ignored);
@@ -183,6 +192,7 @@ export function MultiLayerPanel() {
                 {provider.provider === 'foundry' ? provider.customModel ?? '?' : provider.model}
                 {quickMode ? <> · <span className="text-accent">Quick Mode</span></> : null}
                 {maxMode ? <> · <span className="text-coral">MAX</span></> : null}
+                {instructionMode ? <> · <span className="text-accent">Document Mode</span></> : null}
               </>
             ) : (
               'Configure provider + preview repo to enable multi-layer analysis'
@@ -214,6 +224,7 @@ export function MultiLayerPanel() {
             { id: 'layers', label: 'Identifying layers' },
             { id: 'overview', label: 'Compiling overview' },
             { id: 'sub-plans', label: 'Generating layer diagrams' },
+            ...(instructionMode ? [{ id: 'instruction', label: 'Writing Document Mode guide' }] : []),
           ]}
         />
       )}

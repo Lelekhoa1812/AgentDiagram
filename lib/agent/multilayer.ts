@@ -15,7 +15,7 @@
  */
 
 import pLimit from 'p-limit';
-import { AGENT_FILE_ALLOWLIST, scanRepo, readRepoFile } from './repoScanner';
+import { AGENT_FILE_ALLOWLIST, readRepoFile } from './repoScanner';
 import { classifyRelevance } from './classifier';
 import { summarizeFile, type FileSummary } from './summarizer';
 import { generatePlan, identifyLayers, type LayerCatalog } from './planner';
@@ -23,14 +23,16 @@ import { planToDsl } from './dslCompiler';
 import { tryRepair } from './repair';
 import { compile } from '../dsl/compiler';
 import { validateWithRetry, type ProviderSession } from './providers';
+import { generateInstructionGuide } from './customPrompt';
 import type { SseEvent } from '../util/stream';
 import { extractImportGraph } from './importGraph';
 import { readDocPriors } from './docReader';
 import { buildRepoContext, selectLayerContextSummaries } from './repoContext';
+import { scanResolvedRepoSource, type ResolvedRepoSource } from './repoSource';
 import type { LayerDiagram, MultiLayerOutput } from '../state/store';
 
 export interface MultiLayerInput {
-  rootPath: string;
+  repoSource: ResolvedRepoSource;
   session: ProviderSession;
   focus: string;
   topK?: number;
@@ -39,6 +41,7 @@ export interface MultiLayerInput {
   quickMode?: boolean;
   /** MAX mode removes the default relevance cap so the layered planner can consider every file. */
   maxMode?: boolean;
+  instructionMode?: boolean;
   signal?: AbortSignal;
 }
 
@@ -178,7 +181,7 @@ export async function runMultiLayerPipeline(
 
     // 2. Scan
     send({ type: 'stage', stage: 'scan', status: 'start', message: 'Scanning repository…' });
-    const repoMap = await scanRepo(input.rootPath, {
+    const repoMap = await scanResolvedRepoSource(input.repoSource, {
       allowlist: AGENT_FILE_ALLOWLIST,
       ignoredFolders: input.ignoredFolders,
     });
@@ -354,7 +357,30 @@ export async function runMultiLayerPipeline(
       generatedAt: Date.now(),
     };
 
-    send({ type: 'result-multilayer', output: result });
+    let instructionMarkdown: string | undefined;
+    if (input.instructionMode) {
+      send({ type: 'stage', stage: 'instruction', status: 'start', message: 'Writing Instruction Mode guide…' });
+      const instructionContext = [
+        `Repository stack: ${repoMap.likelyStack.join(', ') || 'unknown'}`,
+        `Overview diagram: ${result.overview.name} — ${result.overview.description}`,
+        `Layer summaries: ${result.layers.slice(0, 8).map((layer) => `${layer.name} — ${layer.description}`).join('; ') || 'none'}`,
+        'The user selected a multi-layer repository diagram that should lead from overview to per-layer implementations.',
+      ].join('\n');
+      instructionMarkdown = await generateInstructionGuide(
+        input.session,
+        {
+          prompt: 'Repository analysis for a multi-layer diagram.',
+          intentSummary: input.focus || 'No specific focus provided.',
+          answers: [],
+          diagramStyle: 'multi-layer',
+          diagramContext: instructionContext,
+        },
+        { signal: input.signal, onRetry: onRetry('instruction') },
+      );
+      send({ type: 'stage', stage: 'instruction', status: 'done', message: 'Instruction guide ready' });
+    }
+
+    send({ type: 'result-multilayer', output: result, instructionMarkdown });
     send({ type: 'done' });
     return result;
   } catch (err) {

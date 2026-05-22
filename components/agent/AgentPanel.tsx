@@ -22,7 +22,10 @@ export function AgentPanel() {
   const focus = useDiagramStore((s) => s.focusPrompt);
   const quickMode = useDiagramStore((s) => s.quickMode);
   const maxMode = useDiagramStore((s) => s.maxMode);
+  const instructionMode = useDiagramStore((s) => s.instructionMode);
   const setMaxMode = useDiagramStore((s) => s.setMaxMode);
+  const setInstructionMode = useDiagramStore((s) => s.setInstructionMode);
+  const setInstructionMarkdown = useDiagramStore((s) => s.setInstructionMarkdown);
   const setMode = useDiagramStore((s) => s.setMode);
   const setDsl = useDiagramStore((s) => s.setDsl);
   const addGeneratedProject = useDiagramStore((s) => s.addGeneratedProject);
@@ -51,6 +54,7 @@ export function AgentPanel() {
     setCounters({});
     setRetryNotice(null);
     setTerminalState(null);
+    setInstructionMarkdown('');
     let sawResult = false;
     let sawFailure = false;
 
@@ -72,6 +76,7 @@ export function AgentPanel() {
           ignoredFolders,
           quickMode,
           maxMode,
+          instructionMode,
           source: repoSource,
         }),
         signal: ac.signal,
@@ -126,9 +131,11 @@ export function AgentPanel() {
         pushLog({ stage: ev.stage, level: 'error', message: ev.message });
       } else if (ev.type === 'result') {
         sawResult = true;
+        const instructionMarkdown = ev.instructionMarkdown ?? '';
+        setInstructionMarkdown(instructionMarkdown);
         setDsl(ev.dsl);
         const projectName = rootPath.split('/').filter(Boolean).pop() || 'diagram';
-        addGeneratedProject(projectName, ev.dsl);
+        addGeneratedProject(projectName, ev.dsl, undefined, instructionMarkdown);
         setMode('editor');
       } else if (ev.type === 'done') {
         setAgentStage(null);
@@ -147,6 +154,8 @@ export function AgentPanel() {
         <RepoInput
           maxMode={maxMode}
           onMaxModeChange={setMaxMode}
+          instructionMode={instructionMode}
+          onInstructionModeChange={setInstructionMode}
           onConfigChange={(path, ignored, source) => {
             setRootPath(path);
             setIgnoredFolders(ignored);
@@ -177,6 +186,7 @@ export function AgentPanel() {
                 </span>
                 {quickMode ? <> · <span className="text-accent">Quick Mode</span></> : null}
                 {maxMode ? <> · <span className="text-coral">MAX</span></> : null}
+                {instructionMode ? <> · <span className="text-accent">Document Mode</span></> : null}
               </>
             ) : (
               'Configure provider + preview repo to enable analysis'
@@ -199,6 +209,18 @@ export function AgentPanel() {
           onCancel={onCancel}
           onDismiss={() => setTerminalState(null)}
           terminalState={terminalState}
+          stages={[
+            { id: 'validate', label: 'Validating credentials' },
+            { id: 'scan', label: 'Scanning repository' },
+            { id: 'classify', label: 'Selecting relevant files' },
+            { id: 'context', label: 'Reading docs + import graph' },
+            { id: 'summarize', label: 'Summarizing modules' },
+            { id: 'subsystem', label: 'Discovering subsystems' },
+            { id: 'plan', label: 'Generating diagram plan' },
+            { id: 'compile', label: 'Compiling DSL' },
+            { id: 'validate-dsl', label: 'Validating syntax' },
+            ...(instructionMode ? [{ id: 'instruction', label: 'Writing Document Mode guide' }] : []),
+          ]}
         />
       )}
     </>

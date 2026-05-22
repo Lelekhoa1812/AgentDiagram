@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { AGENT_FILE_ALLOWLIST, scanRepo } from '@/lib/agent/repoScanner';
+import { AGENT_FILE_ALLOWLIST } from '@/lib/agent/repoScanner';
 import { defaultRepoPath } from '@/lib/security/pathGuard';
-import { RepoSourceError, resolveRepoSource } from '@/lib/agent/repoSource';
+import { RepoSourceError, resolveRepoSource, scanResolvedRepoSource } from '@/lib/agent/repoSource';
 import { optionalUrl } from '@/lib/agent/requestValidation';
 
 export const runtime = 'nodejs';
@@ -49,7 +49,7 @@ export async function POST(req: Request) {
         : undefined,
     });
 
-    const map = await scanRepo(resolved.rootPath, {
+    const map = await scanResolvedRepoSource(resolved, {
       allowlist: AGENT_FILE_ALLOWLIST,
       ignoredFolders: parsed.data.ignoredFolders,
     });

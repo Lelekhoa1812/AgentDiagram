@@ -296,6 +296,7 @@ export async function generateInstructionGuide(
     intentSummary?: string;
     answers: CustomAnswer[];
     diagramStyle: 'single' | 'multi-layer';
+    diagramContext?: string;
   },
   opts: { signal?: AbortSignal; onRetry?: RetryListener } = {},
 ): Promise<string> {
@@ -309,7 +310,7 @@ export async function generateInstructionGuide(
     formatAnswers(input.answers),
     '',
     `## Diagram output context`,
-    `The user selected ${input.diagramStyle === 'multi-layer' ? 'a multi-layer diagram' : 'a single diagram'}.`,
+    input.diagramContext?.trim() || `The user selected ${input.diagramStyle === 'multi-layer' ? 'a multi-layer diagram' : 'a single diagram'}.`,
     '',
     `Produce the Instruction Mode Markdown guide now.`,
   ]

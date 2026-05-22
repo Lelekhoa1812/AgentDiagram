@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const childProcessMock = vi.hoisted(() => ({
@@ -13,7 +13,8 @@ vi.mock('node:child_process', () => ({
   default: { execFile: childProcessMock.execFile },
 }));
 
-import { normalizeGitHubRepoUrl, RepoSourceError, resolveRepoSource } from '../repoSource';
+import { normalizeGitHubRepoUrl, RepoSourceError, resolveRepoSource, scanResolvedRepoSource } from '../repoSource';
+import { AGENT_FILE_ALLOWLIST } from '../repoScanner';
 import * as childProcess from 'node:child_process';
 
 const mockedExecFile = vi.mocked(childProcess.execFile);
@@ -57,6 +58,12 @@ async function withTempCwd(fn: () => Promise<void>): Promise<void> {
     process.chdir(previous);
     await rm(cwd, { recursive: true, force: true });
   }
+}
+
+async function write(root: string, rel: string, content: string): Promise<void> {
+  const abs = join(root, rel);
+  await mkdir(dirname(abs), { recursive: true });
+  await writeFile(abs, content);
 }
 
 beforeEach(() => {
@@ -189,5 +196,82 @@ describe('repoSource', () => {
       expect(resolved.sourceType).toBe('github');
       expect(sawPat).toBe(true);
     });
+  });
+
+  it('scans sibling modules when a local path ends with a trailing ~', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentdiagram-repo-prefix-'));
+    try {
+      await write(root, 'Backend.Api/app/api/users/route.ts', 'export const runtime = "nodejs";\n');
+      await write(root, 'Backend.GraphQL/components/UserCard.tsx', 'export const UserCard = () => null;\n');
+      await write(root, 'Backend.GraphQL/db/schema.prisma', 'model User { id String @id }\n');
+      await write(root, 'Frontend/src/app.tsx', 'export const App = () => null;\n');
+
+      const resolved = await resolveRepoSource({
+        allowSensitive: true,
+        source: {
+          sourceType: 'local',
+          repoPath: join(root, 'Backend~'),
+          authMode: 'none',
+        },
+      });
+
+      expect(resolved.sourceType).toBe('local');
+      expect(resolved.browseRoot).toBe(root);
+      expect(resolved.browsePrefix).toBe('Backend');
+
+      const repo = await scanResolvedRepoSource(resolved, { allowlist: AGENT_FILE_ALLOWLIST });
+      const paths = repo.files.map((file) => file.path).sort();
+
+      expect(repo.root).toBe(root);
+      expect(paths).toEqual(
+        expect.arrayContaining([
+          'Backend.Api/app/api/users/route.ts',
+          'Backend.GraphQL/components/UserCard.tsx',
+          'Backend.GraphQL/db/schema.prisma',
+        ]),
+      );
+      expect(paths.some((path) => path.startsWith('Frontend/'))).toBe(false);
+      expect(repo.apiRoutes.map((file) => file.path)).toEqual(['Backend.Api/app/api/users/route.ts']);
+      expect(repo.components.map((file) => file.path)).toEqual(['Backend.GraphQL/components/UserCard.tsx']);
+      expect(repo.schemas.map((file) => file.path)).toEqual(['Backend.GraphQL/db/schema.prisma']);
+      expect(repo.fileCount).toBe(3);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves nested ignores inside prefix scans without dropping the whole module', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentdiagram-repo-prefix-ignore-'));
+    try {
+      await write(root, 'Backend.Api/app/api/users/route.ts', 'export const runtime = "nodejs";\n');
+      await write(root, 'Backend.GraphQL/components/UserCard.tsx', 'export const UserCard = () => null;\n');
+      await write(root, 'Backend.GraphQL/generated/skip.ts', 'export const skip = true;\n');
+
+      const resolved = await resolveRepoSource({
+        allowSensitive: true,
+        source: {
+          sourceType: 'local',
+          repoPath: join(root, 'Backend~'),
+          authMode: 'none',
+        },
+      });
+
+      const repo = await scanResolvedRepoSource(resolved, {
+        allowlist: AGENT_FILE_ALLOWLIST,
+        ignoredFolders: ['Backend.GraphQL/generated'],
+      });
+      const paths = repo.files.map((file) => file.path).sort();
+
+      expect(paths).toEqual(
+        expect.arrayContaining([
+          'Backend.Api/app/api/users/route.ts',
+          'Backend.GraphQL/components/UserCard.tsx',
+        ]),
+      );
+      expect(paths).not.toEqual(expect.arrayContaining(['Backend.GraphQL/generated/skip.ts']));
+      expect(repo.fileCount).toBe(2);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

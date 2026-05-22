@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { BookOpenText } from 'lucide-react';
 import { readUiPreference, writeUiPreference } from '@/lib/state/uiPreferences';
 import type { RepoSourceConfig, RepoSourceType } from '@/lib/agent/repoTypes';
 
@@ -32,6 +33,8 @@ interface RepoInputProps {
   onConfigChange?: (path: string, ignoredFolders: string[], source: RepoSourceConfig) => void;
   maxMode: boolean;
   onMaxModeChange: (next: boolean) => void;
+  instructionMode: boolean;
+  onInstructionModeChange: (next: boolean) => void;
 }
 
 // Motivation vs Logic: the browser is the user's main lever to keep noisy folders/files out of
@@ -39,7 +42,7 @@ interface RepoInputProps {
 // modal. Each row exposes a kebab menu with Cancel/Ignore so the action is explicit and
 // reversible — clicking Ignore appends to the existing `ignoredFolders` list which the analyze
 // API already plumbs straight into the scanner.
-export function RepoInput({ onScan, onConfigChange, maxMode, onMaxModeChange }: RepoInputProps) {
+export function RepoInput({ onScan, onConfigChange, maxMode, onMaxModeChange, instructionMode, onInstructionModeChange }: RepoInputProps) {
   const [sourceType, setSourceType] = useState<RepoSourceType>('local');
   const [path, setPath] = useState('');
   const [localPath, setLocalPath] = useState('');
@@ -349,8 +352,19 @@ export function RepoInput({ onScan, onConfigChange, maxMode, onMaxModeChange }: 
       }
       setResult(data);
       setHasLocalCheckout(true);
-      setPath(data.resolved);
-      writeUiPreference('repoPath', data.resolved);
+      // Root Cause vs Logic: prefix-search paths like `Backend~` were being normalized to the
+      // stem path after preview, which erased the sibling-scope hint the analyzer needs later.
+      // We keep the user-entered alias for local prefix searches, while still surfacing the
+      // resolved scan result in the preview summary.
+      const preserveLocalPrefix = sourceType === 'local' && path.trim().endsWith('~');
+      const nextPath = preserveLocalPrefix ? path : data.resolved;
+      setPath(nextPath);
+      if (sourceType === 'local') {
+        setLocalPath(nextPath);
+        writeUiPreference('repoLocalPath', nextPath);
+      }
+      writeUiPreference('repoPath', nextPath);
+      const previewResult = preserveLocalPrefix ? { ...data, resolved: nextPath } : data;
       setPreviewStatus(
         sourceType === 'github'
           ? {
@@ -362,7 +376,12 @@ export function RepoInput({ onScan, onConfigChange, maxMode, onMaxModeChange }: 
               message: 'Repository preview completed successfully.',
           },
       );
-      onScan(data.resolved, data, ignoredFolders, composeSourceConfig({ sourceType, repoPath: data.resolved, repoUrl, pat }));
+      onScan(
+        nextPath,
+        previewResult,
+        ignoredFolders,
+        composeSourceConfig({ sourceType, repoPath: nextPath, repoUrl, pat }),
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setError(message);
@@ -680,6 +699,24 @@ export function RepoInput({ onScan, onConfigChange, maxMode, onMaxModeChange }: 
             aria-label="Enable MAX mode"
           />
           <span className="font-semibold uppercase tracking-wider">MAX mode</span>
+        </label>
+        <label
+          className={`flex cursor-pointer items-center gap-2 rounded-md border px-3 py-1.5 text-[11px] transition-colors ${
+            instructionMode
+              ? 'border-accent/60 bg-accent/10 text-accent'
+              : 'border-ink-700 bg-ink-800 text-ink-300 hover:bg-ink-700'
+          }`}
+          title="Document Mode generates a Markdown guide alongside the diagram."
+        >
+          <input
+            type="checkbox"
+            checked={instructionMode}
+            onChange={(e) => onInstructionModeChange(e.target.checked)}
+            className="h-4 w-4 rounded border-ink-600 bg-ink-800 accent-[rgb(var(--accent))]"
+            aria-label="Enable Document Mode"
+          />
+          <BookOpenText size={14} />
+          <span className="font-semibold uppercase tracking-wider">Document Mode</span>
         </label>
         <button
           type="button"

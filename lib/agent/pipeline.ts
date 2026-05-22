@@ -13,9 +13,10 @@
  */
 
 import pLimit from 'p-limit';
-import { AGENT_FILE_ALLOWLIST, scanRepo, readRepoFile } from './repoScanner';
+import { AGENT_FILE_ALLOWLIST, readRepoFile } from './repoScanner';
 import { classifyRelevance, type DiagramKind } from './classifier';
 import { summarizeFile } from './summarizer';
+import { generateInstructionGuide } from './customPrompt';
 import { generatePlan } from './planner';
 import { planToDsl } from './dslCompiler';
 import { tryRepair } from './repair';
@@ -25,9 +26,10 @@ import type { SseEvent } from '../util/stream';
 import { extractImportGraph, topClusters } from './importGraph';
 import { readDocPriors } from './docReader';
 import { buildRepoContext } from './repoContext';
+import { scanResolvedRepoSource, type ResolvedRepoSource } from './repoSource';
 
 export interface PipelineInput {
-  rootPath: string;
+  repoSource: ResolvedRepoSource;
   session: ProviderSession;
   kind: DiagramKind;
   focus: string;
@@ -41,6 +43,7 @@ export interface PipelineInput {
    */
   quickMode?: boolean;
   maxMode?: boolean;
+  instructionMode?: boolean;
   signal?: AbortSignal;
 }
 
@@ -86,7 +89,7 @@ export async function runPipeline(
 
     // 2. Scan
     send({ type: 'stage', stage: 'scan', status: 'start', message: 'Scanning repository…' });
-    const repoMap = await scanRepo(input.rootPath, {
+    const repoMap = await scanResolvedRepoSource(input.repoSource, {
       allowlist: AGENT_FILE_ALLOWLIST,
       ignoredFolders: input.ignoredFolders,
     });
@@ -255,7 +258,33 @@ export async function runPipeline(
     }
     send({ type: 'stage', stage: 'validate-dsl', status: 'done', message: 'Validation complete' });
 
-    send({ type: 'result', dsl });
+    let instructionMarkdown: string | undefined;
+    if (input.instructionMode) {
+      send({ type: 'stage', stage: 'instruction', status: 'start', message: 'Writing Instruction Mode guide…' });
+      const instructionContext = [
+        `Repository stack: ${repoMap.likelyStack.join(', ') || 'unknown'}`,
+        `Generated diagram title: ${plan.title}`,
+        `Top-level groups: ${plan.groups.slice(0, 8).map((group) => `${group.name} (${group.children.length} items)`).join(', ') || 'none'}`,
+        `Key nodes: ${plan.nodes.slice(0, 16).map((node) => node.name).join(', ') || 'none'}`,
+        `Primary edges: ${plan.edges.slice(0, 16).map((edge) => `${edge.source} ${edge.kind} ${edge.target}${edge.label ? `: ${edge.label}` : ''}`).join('; ') || 'none'}`,
+        `Uncertainties: ${plan.uncertainties.join('; ') || 'none'}`,
+        `Omitted: ${plan.omitted.join('; ') || 'none'}`,
+      ].join('\n');
+      instructionMarkdown = await generateInstructionGuide(
+        input.session,
+        {
+          prompt: `Repository analysis for a ${input.kind} diagram.`,
+          intentSummary: input.focus || 'No specific focus provided.',
+          answers: [],
+          diagramStyle: 'single',
+          diagramContext: instructionContext,
+        },
+        { signal: input.signal, onRetry: onRetry('instruction') },
+      );
+      send({ type: 'stage', stage: 'instruction', status: 'done', message: 'Instruction guide ready' });
+    }
+
+    send({ type: 'result', dsl, instructionMarkdown });
     send({ type: 'done' });
     return { dsl };
   } catch (err) {

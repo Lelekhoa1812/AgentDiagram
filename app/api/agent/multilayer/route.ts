@@ -4,7 +4,7 @@ import { makeSseStream } from '@/lib/util/stream';
 import { methodNotAllowedResponse } from '@/lib/util/http';
 import { defaultRepoPath } from '@/lib/security/pathGuard';
 import { PROVIDER_ENV } from '@/lib/agent/providers';
-import { RepoSourceError, resolveRepoSource } from '@/lib/agent/repoSource';
+import { RepoSourceError, resolveRepoSource, type ResolvedRepoSource } from '@/lib/agent/repoSource';
 import { optionalUrl } from '@/lib/agent/requestValidation';
 
 export const runtime = 'nodejs';
@@ -22,6 +22,7 @@ const Body = z.object({
   ignoredFolders: z.array(z.string()).max(100).optional(),
   quickMode: z.boolean().optional().default(false),
   maxMode: z.boolean().optional().default(false),
+  instructionMode: z.boolean().optional().default(false),
   source: z
     .object({
       sourceType: z.enum(['local', 'github']).optional(),
@@ -66,9 +67,9 @@ export async function POST(req: Request) {
     );
   }
 
-  let rootPath: string;
+  let repoSource: ResolvedRepoSource;
   try {
-    const resolved = await resolveRepoSource({
+    repoSource = await resolveRepoSource({
       path: cfg.rootPath ?? defaultRepoPath(),
       allowSensitive: cfg.allowSensitive,
       source: cfg.source
@@ -81,7 +82,6 @@ export async function POST(req: Request) {
           }
         : undefined,
     });
-    rootPath = resolved.rootPath;
   } catch (err) {
     if (err instanceof RepoSourceError && err.code === 'PAT_REQUIRED') {
       return new Response(JSON.stringify({ error: err.message, code: err.code }), { status: 401 });
@@ -102,13 +102,14 @@ export async function POST(req: Request) {
 
   runMultiLayerPipeline(
     {
-      rootPath,
+      repoSource,
       session: { id: cfg.provider, model: cfg.model, apiKey, endpoint },
       focus: cfg.focus,
       topK: cfg.topK,
       ignoredFolders: cfg.ignoredFolders,
       quickMode: cfg.quickMode,
       maxMode: cfg.maxMode,
+      instructionMode: cfg.instructionMode,
       signal: ac.signal,
     },
     send,

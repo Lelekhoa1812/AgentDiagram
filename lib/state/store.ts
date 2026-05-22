@@ -90,6 +90,9 @@ interface State {
   // MAX Mode: remove the default relevance cap so analysis can consider every scanned file.
   maxMode: boolean;
 
+  // Instruction Mode: generate a Markdown implementation guide alongside the diagram.
+  instructionMode: boolean;
+
   // Project tabs — user-generated projects saved to localStorage
   generatedProjects: StoredProject[];
   activeProjectId: string | null;
@@ -117,6 +120,7 @@ interface State {
   setActiveLayer: (name: string) => void;
   setQuickMode: (enabled: boolean) => void;
   setMaxMode: (enabled: boolean) => void;
+  setInstructionMode: (enabled: boolean) => void;
   addGeneratedProject: (name: string, dsl: string, multiLayer?: MultiLayerOutput, instructionMarkdown?: string) => void;
   openProject: (project: { id: string; dsl: string; multiLayer?: MultiLayerOutput | null; instructionMarkdown?: string }) => void;
   removeGeneratedProject: (id: string) => void;
@@ -149,6 +153,7 @@ export const useDiagramStore = create<State>()(
       activeLayer: 'overview',
       quickMode: false,
       maxMode: false,
+      instructionMode: false,
       generatedProjects: [],
       activeProjectId: null,
       setMode: (mode) => {
@@ -221,6 +226,7 @@ export const useDiagramStore = create<State>()(
           ...(restoredDsl !== undefined ? { dslText: restoredDsl } : {}),
           ...(preferences.quickMode !== undefined ? { quickMode: preferences.quickMode } : {}),
           ...(preferences.maxMode !== undefined ? { maxMode: preferences.maxMode } : {}),
+          ...(preferences.instructionMode !== undefined ? { instructionMode: preferences.instructionMode } : {}),
           ...(preferences.provider
             ? {
                 provider: {
@@ -255,6 +261,10 @@ export const useDiagramStore = create<State>()(
       setMaxMode: (enabled) => {
         writeUiPreference('maxMode', enabled);
         set({ maxMode: enabled });
+      },
+      setInstructionMode: (enabled) => {
+        writeUiPreference('instructionMode', enabled);
+        set({ instructionMode: enabled });
       },
       addGeneratedProject: (name, dsl, multiLayer?, instructionMarkdown?) => {
         const project = addStoredProject(name, dsl, multiLayer, instructionMarkdown);

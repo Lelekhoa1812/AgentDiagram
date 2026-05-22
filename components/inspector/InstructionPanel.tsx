@@ -75,7 +75,7 @@ export function InstructionPanel() {
           </article>
         ) : (
           <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-ink-700 bg-ink-850/50 p-6 text-center text-xs leading-6 text-ink-400">
-            Enable Instruction Mode in Custom App, generate a diagram, and the AI mentor guide will appear here.
+            Enable Instruction Mode in any diagram mode, generate a diagram, and the AI mentor guide will appear here.
           </div>
         )}
       </div>

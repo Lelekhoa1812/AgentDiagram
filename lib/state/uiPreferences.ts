@@ -37,6 +37,7 @@ export interface UiPreferences {
   instructionMarkdown?: string;
   quickMode?: boolean;
   maxMode?: boolean;
+  instructionMode?: boolean;
   isInspectorPropertiesVisible?: boolean;
   isInstructionVisible?: boolean;
 }
@@ -110,6 +111,7 @@ function sanitizePreferences(value: unknown): UiPreferences {
   }
   if (typeof value.quickMode === 'boolean') preferences.quickMode = value.quickMode;
   if (typeof value.maxMode === 'boolean') preferences.maxMode = value.maxMode;
+  if (typeof value.instructionMode === 'boolean') preferences.instructionMode = value.instructionMode;
 
   const provider = sanitizeProvider(value.provider);
   if (provider) preferences.provider = provider;

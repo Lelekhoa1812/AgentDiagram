@@ -54,6 +54,7 @@ describe('project tab loading', () => {
       generatedProjects: [],
       overrides: { nodes: {}, groups: {}, edges: {} },
       maxMode: false,
+      instructionMode: false,
     });
   });
 
@@ -111,5 +112,13 @@ describe('project tab loading', () => {
     useDiagramStore.getState().hydrateUiPreferences();
 
     expect(useDiagramStore.getState().maxMode).toBe(true);
+  });
+
+  it('hydrates instruction mode from saved ui preferences', () => {
+    writeUiPreference('instructionMode', true);
+
+    useDiagramStore.getState().hydrateUiPreferences();
+
+    expect(useDiagramStore.getState().instructionMode).toBe(true);
   });
 });
