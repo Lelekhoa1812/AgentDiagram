@@ -38,6 +38,41 @@ export async function svgToPngBlob(source: SVGSVGElement, opts: PngExportOptions
   }
 }
 
+export async function svgMarkupToPngBlob(svgMarkup: string, opts: PngExportOptions = {}): Promise<Blob> {
+  const scale = opts.scale ?? 2;
+  const parser = new DOMParser();
+  const parsed = parser.parseFromString(svgMarkup, 'image/svg+xml');
+  const source = parsed.documentElement as unknown as SVGSVGElement;
+  const blob = new Blob([svgMarkup], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  try {
+    const img = new Image();
+    img.decoding = 'sync';
+    img.src = url;
+    await img.decode();
+
+    const viewBoxAttr = source.getAttribute('viewBox') ?? '';
+    const parts = viewBoxAttr.split(' ').map(Number);
+    const vbWidth = parts[2] ?? source.clientWidth;
+    const vbHeight = parts[3] ?? source.clientHeight;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(vbWidth * scale);
+    canvas.height = Math.ceil(vbHeight * scale);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Failed to get 2D canvas context');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+    const pngBlob: Blob | null = await new Promise((resolve) => canvas.toBlob((b) => resolve(b), 'image/png'));
+    if (!pngBlob) throw new Error('canvas.toBlob returned null');
+    return pngBlob;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 export async function downloadPng(source: SVGSVGElement, filename = 'diagram.png', opts?: PngExportOptions): Promise<void> {
   const blob = await svgToPngBlob(source, opts);
   const url = URL.createObjectURL(blob);

@@ -1,14 +1,26 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { BookOpenText, SlidersHorizontal } from 'lucide-react';
+import { BookOpenText, Download, SlidersHorizontal } from 'lucide-react';
 import { readUiPreferences, writeUiPreference } from '@/lib/state/uiPreferences';
 import { InspectorPanel } from './InspectorPanel';
 import { InstructionPanel } from './InstructionPanel';
+import { ExportDialog } from './ExportDialog';
+import { useDiagramStore } from '@/lib/state/store';
+import type { DiagramCanvasHandle } from '@/components/diagram/DiagramCanvas';
+import type { RefObject } from 'react';
 
-export function InspectorWorkspacePanel() {
+interface InspectorWorkspacePanelProps {
+  diagramRef: RefObject<DiagramCanvasHandle>;
+}
+
+export function InspectorWorkspacePanel({ diagramRef }: InspectorWorkspacePanelProps) {
   const [isPropertiesVisible, setIsPropertiesVisible] = useState(true);
   const [isInstructionVisible, setIsInstructionVisible] = useState(false);
+  const [isExportOpen, setIsExportOpen] = useState(false);
+  const dslText = useDiagramStore((s) => s.dslText);
+  const instructionMarkdown = useDiagramStore((s) => s.instructionMarkdown);
+  const theme = useDiagramStore((s) => s.theme);
 
   useEffect(() => {
     const preferences = readUiPreferences();
@@ -41,7 +53,7 @@ export function InspectorWorkspacePanel() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex min-h-11 items-center justify-between gap-2 border-b border-ink-700 bg-ink-950/60 px-3">
-        <div className="text-[10px] uppercase tracking-[0.18em] text-ink-400">Properties Workspace</div>
+        <div className="text-[10px] uppercase tracking-[0.18em] text-ink-400">Workspace</div>
         <div className="flex items-center gap-2">
           <button
             aria-label={isPropertiesVisible ? 'Hide Inspector properties' : 'Show Inspector properties'}
@@ -67,9 +79,18 @@ export function InspectorWorkspacePanel() {
             }`}
             onClick={toggleInstruction}
             type="button"
+            >
+              <BookOpenText size={13} />
+              Instruction
+            </button>
+          <button
+            aria-label="Export diagram, code, and instructions"
+            className="surface-transition inline-flex h-7 items-center gap-1.5 rounded-md border border-accent/50 bg-accent/15 px-2 text-[11px] text-accent hover:-translate-y-0.5 hover:bg-accent/25"
+            onClick={() => setIsExportOpen(true)}
+            type="button"
           >
-            <BookOpenText size={13} />
-            Instruction
+            <Download size={13} />
+            Export
           </button>
         </div>
       </div>
@@ -91,6 +112,15 @@ export function InspectorWorkspacePanel() {
           </div>
         )}
       </div>
+
+      <ExportDialog
+        diagramRef={diagramRef}
+        dslText={dslText}
+        instructionMarkdown={instructionMarkdown}
+        onClose={() => setIsExportOpen(false)}
+        open={isExportOpen}
+        theme={theme}
+      />
     </div>
   );
 }

@@ -25,6 +25,8 @@ export default function Page() {
   const canvasRef = useRef<DiagramCanvasHandle>(null);
   const [isEditorVisible, setIsEditorVisible] = useState(true);
   const [isInspectorVisible, setIsInspectorVisible] = useState(true);
+  const [isCompactShell, setIsCompactShell] = useState(false);
+  const [compactFocus, setCompactFocus] = useState<'editor' | 'workspace'>('editor');
 
   useEffect(() => {
     hydrateUiPreferences();
@@ -41,6 +43,14 @@ export default function Page() {
   useEffect(() => {
     if (!readUiPreferences().dslText) setDsl(flowExample as unknown as string);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(max-width: 1535px)');
+    const update = () => setIsCompactShell(mediaQuery.matches);
+    update();
+    mediaQuery.addEventListener('change', update);
+    return () => mediaQuery.removeEventListener('change', update);
   }, []);
 
   useEffect(() => {
@@ -69,32 +79,59 @@ export default function Page() {
   }, []);
 
   const onToggleEditor = useCallback(() => {
+    if (isCompactShell) {
+      if (isEditorVisible && isInspectorVisible && compactFocus === 'editor') {
+        setIsEditorVisible(false);
+        writeUiPreference('isEditorVisible', false);
+        return;
+      }
+      setIsEditorVisible(true);
+      writeUiPreference('isEditorVisible', true);
+      setCompactFocus('editor');
+      return;
+    }
     setIsEditorVisible((value) => {
       const next = !value;
       writeUiPreference('isEditorVisible', next);
       return next;
     });
-  }, []);
+  }, [compactFocus, isCompactShell, isEditorVisible, isInspectorVisible]);
 
   const onToggleInspector = useCallback(() => {
+    if (isCompactShell) {
+      if (isEditorVisible && isInspectorVisible && compactFocus === 'workspace') {
+        setIsInspectorVisible(false);
+        writeUiPreference('isInspectorVisible', false);
+        return;
+      }
+      setIsInspectorVisible(true);
+      writeUiPreference('isInspectorVisible', true);
+      setCompactFocus('workspace');
+      return;
+    }
     setIsInspectorVisible((value) => {
       const next = !value;
       writeUiPreference('isInspectorVisible', next);
       return next;
     });
-  }, []);
+  }, [compactFocus, isCompactShell, isEditorVisible, isInspectorVisible]);
 
-  // Motivation vs Logic: side panels are optional workspace tools, so the shell derives grid columns from visibility state instead of leaving collapsed panels mounted with inert width.
+  const showEditorPanel =
+    isEditorVisible && (!isCompactShell || !isInspectorVisible || compactFocus === 'editor');
+  const showInspectorPanel =
+    isInspectorVisible && (!isCompactShell || !isEditorVisible || compactFocus === 'workspace');
+
+  // Motivation vs Logic: once the viewport drops under the shared side-panel breakpoint, the shell keeps only one ancillary pane visible so the canvas stays dominant instead of squeezing three regions into unreadable slivers.
   const editorGridColumns = useMemo(
     () =>
       [
-        isEditorVisible ? 'minmax(320px, 420px)' : null,
+        showEditorPanel ? 'minmax(320px, 420px)' : null,
         'minmax(0, 1fr)',
-        isInspectorVisible ? 'minmax(340px, 460px)' : null,
+        showInspectorPanel ? 'minmax(340px, 460px)' : null,
       ]
         .filter(Boolean)
         .join(' '),
-    [isEditorVisible, isInspectorVisible],
+    [showEditorPanel, showInspectorPanel],
   );
 
   // Motivation vs Logic: the shell owns product-level theming and fixed workspace regions so editor, canvas, and inspector read as one enterprise workbench while the canvas remains layout-contained.
@@ -105,15 +142,15 @@ export default function Page() {
         onExportSvg={onExportSvg}
         onResetLayout={onResetLayout}
         onFitView={onFitView}
-        isEditorVisible={isEditorVisible}
-        isInspectorVisible={isInspectorVisible}
+        isEditorVisible={showEditorPanel}
+        isInspectorVisible={showInspectorPanel}
         onToggleEditor={onToggleEditor}
         onToggleInspector={onToggleInspector}
       />
 
       {mode === 'editor' ? (
         <main className="grid min-h-0 flex-1 bg-ink-950" style={{ gridTemplateColumns: editorGridColumns, gridTemplateRows: 'minmax(0, 1fr)' }}>
-          {isEditorVisible && (
+          {showEditorPanel && (
             <section className="flex min-w-0 min-h-0 overflow-hidden flex-col border-r border-ink-700/80 bg-ink-900">
               <div className="flex min-h-12 items-center justify-between border-b border-ink-700/80 bg-ink-850/80 px-3">
                 <ExampleLoader />
@@ -129,9 +166,9 @@ export default function Page() {
               <DiagramCanvas ref={canvasRef} />
             </div>
           </section>
-          {isInspectorVisible && (
+          {showInspectorPanel && (
             <aside className="min-w-0 border-l border-ink-700/80 bg-ink-900">
-              <InspectorWorkspacePanel />
+              <InspectorWorkspacePanel diagramRef={canvasRef} />
             </aside>
           )}
         </main>
