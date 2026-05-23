@@ -143,5 +143,9 @@ export function writeUiPreference<K extends keyof UiPreferences>(key: K, value: 
     preferences[key] = value;
   }
 
-  window.localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify(preferences));
+  try {
+    window.localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify(preferences));
+  } catch {
+    // QuotaExceededError or similar — swallow so callers (Monaco onChange, setDsl) keep working.
+  }
 }

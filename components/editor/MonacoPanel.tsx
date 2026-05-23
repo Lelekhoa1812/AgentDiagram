@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect, useRef } from 'react';
 import Editor, { type OnMount } from '@monaco-editor/react';
+import type * as Monaco from 'monaco-editor';
 import { useDiagramStore } from '@/lib/state/store';
 import { readUiPreference, writeUiPreference, type PersistedEditorTab } from '@/lib/state/uiPreferences';
 import { registerDslLanguage } from './dslLanguage';
@@ -17,6 +18,7 @@ export function MonacoPanel() {
   const [tab, setTab] = useState<Tab>('dsl');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const monacoRef = useRef<any>(null);
+  const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
 
   // Root Cause vs Logic: the IR tab was eagerly stringifying the entire compiled diagram on every DSL change, even while the DSL tab was active. Large generated diagrams could spend most of the render budget serializing JSON that the user wasn't looking at yet, which made the editor feel frozen. Only materialize the IR payload when the IR tab is actually selected.
   const irText = useMemo(
@@ -42,10 +44,24 @@ export function MonacoPanel() {
 
   const onMount: OnMount = (editor, monaco) => {
     monacoRef.current = monaco;
+    editorRef.current = editor as Monaco.editor.IStandaloneCodeEditor;
     registerDslLanguage(monaco);
     monaco.editor.setTheme(theme === 'light' ? 'agentdiagram-light' : 'agentdiagram-dark');
-    void editor;
   };
+
+  // When the DSL is changed externally (AI Fix, example loader, project switch) and
+  // the DSL tab is active, push the new value into Monaco without resetting undo history.
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || tab !== 'dsl') return;
+    const model = editor.getModel();
+    if (!model || model.getValue() === dsl) return;
+    model.pushEditOperations(
+      [],
+      [{ range: model.getFullModelRange(), text: dsl, forceMoveMarkers: true }],
+      () => null,
+    );
+  }, [dsl, tab]);
 
   useEffect(() => {
     const monaco = monacoRef.current;

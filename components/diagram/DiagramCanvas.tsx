@@ -54,8 +54,18 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
   const svgRef = useRef<SVGSVGElement>(null);
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
   const drag = useRef<DragState | null>(null);
+  const [isLayingOut, setIsLayingOut] = useState(false);
 
-  const diagram = useMemo(() => compile(dsl, dsl), [dsl]);
+  const diagram = useMemo(() => {
+    try {
+      return compile(dsl, dsl);
+    } catch (err) {
+      // Compile threw unexpectedly — surface as a single error diagnostic so the
+      // error banner appears instead of crashing the component tree.
+      const msg = err instanceof Error ? err.message : String(err);
+      return compile(`// render-error: ${msg}`, `// render-error: ${msg}`);
+    }
+  }, [dsl]);
   useEffect(() => setDiagram(diagram), [diagram, setDiagram]);
 
   const layoutRef = useRef<LayoutResult | null>(null);
@@ -82,17 +92,22 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
           setScene(null);
           setLayoutResult(null);
           setRenderErrors(compileErrors);
+          setIsLayingOut(false);
         }
         return;
       }
 
       try {
+        if (!cancelled) setIsLayingOut(true);
+        // ELK now runs in a real Web Worker (see lib/layout/elk.ts) so it never
+        // blocks the main thread. The timeout promise will actually fire if the
+        // worker takes too long, because the main thread remains free.
         const timeoutPromise = new Promise<never>((_, reject) =>
           setTimeout(
             () =>
               reject(
                 new Error(
-                  `Layout timed out after ${LAYOUT_TIMEOUT_MS / 1000}s — the DSL may contain invalid or circular structure`,
+                  `Layout timed out after ${LAYOUT_TIMEOUT_MS / 1000}s — the diagram may be too large or complex to render automatically. Try splitting it into smaller diagrams or use AI Fix to simplify.`,
                 ),
               ),
             LAYOUT_TIMEOUT_MS,
@@ -113,6 +128,8 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
           // eslint-disable-next-line no-console
           console.warn('Layout failed:', err);
         }
+      } finally {
+        if (!cancelled) setIsLayingOut(false);
       }
     })();
     return () => {
@@ -359,6 +376,14 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
           errors={renderErrors}
           onDismiss={() => setRenderErrorsDismissed(true)}
         />
+      )}
+      {isLayingOut && (
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+          <div className="flex items-center gap-2 rounded-lg border border-ink-700/60 bg-ink-900/80 px-3 py-2 text-[11px] text-ink-400 backdrop-blur-sm">
+            <span className="h-3 w-3 animate-spin rounded-full border border-ink-600 border-t-accent" />
+            Computing layout…
+          </div>
+        </div>
       )}
       {scene ? (
         /* Root Cause vs Logic: the SVG used to contribute its full intrinsic width to the CSS grid, so fitView centered against a thousands-pixel wrapper and pushed the diagram out of view. Keeping it absolutely positioned makes the viewport size authoritative while preserving the full viewBox for export. */

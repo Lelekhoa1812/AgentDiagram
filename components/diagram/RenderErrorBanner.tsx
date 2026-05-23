@@ -105,7 +105,12 @@ export function RenderErrorBanner({ errors, onDismiss }: Props) {
 
   return (
     // slate-950 / slate-900 are hardcoded — ink-* flips to near-white in light theme
-    <div className="absolute inset-x-3 top-3 z-20 rounded-xl border border-red-500/50 bg-slate-950/95 shadow-xl backdrop-blur-sm">
+    // onPointerDown stops propagation so the canvas wrapper's setPointerCapture doesn't
+    // redirect the click event away from the buttons inside this overlay.
+    <div
+      className="absolute inset-x-3 top-3 z-20 rounded-xl border border-red-500/50 bg-slate-950/95 shadow-xl backdrop-blur-sm"
+      onPointerDown={(e) => e.stopPropagation()}
+    >
       <div className="flex items-start gap-3 px-3 py-2.5">
         <AlertTriangle size={14} className="mt-0.5 flex-shrink-0 text-red-400" />
 

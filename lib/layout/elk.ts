@@ -6,9 +6,31 @@
  * LayoutResult with absolute positions for every node, group, and edge.
  */
 
-import ELK from 'elkjs/lib/elk.bundled.js';
+import ELKApi from 'elkjs/lib/elk-api.js';
+import type { ELK as ELKType } from 'elkjs/lib/elk-api.js';
 import type { Diagram, Point } from '../ir/types';
 import { nodeSize, groupTitleSize, edgeLabelSize } from './measure';
+
+// Singleton — created once per browser session.
+// In the browser we spin up a real Web Worker (elk-worker.min.js served from /public)
+// so the layout algorithm never blocks the main thread and the 15-second timeout
+// in DiagramCanvas actually fires. The bundled fallback is kept for SSR / test environments
+// where Worker is unavailable.
+let _elk: ELKType | null = null;
+function getElk(): ELKType {
+  if (_elk) return _elk;
+  if (typeof window !== 'undefined' && typeof Worker !== 'undefined') {
+    _elk = new ELKApi({
+      workerUrl: '/elk-worker.min.js',
+      workerFactory: (url) => new Worker(url as string),
+    }) as unknown as ELKType;
+  } else {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const ELKBundled = require('elkjs/lib/elk.bundled.js').default as typeof ELKApi;
+    _elk = new ELKBundled() as unknown as ELKType;
+  }
+  return _elk;
+}
 
 export interface LayoutRect {
   x: number;
@@ -158,7 +180,7 @@ export async function layout(diagram: Diagram, opts: LayoutOptions = {}): Promis
     },
   };
 
-  const elk = new ELK();
+  const elk = getElk();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const laid = (await elk.layout(elkGraph as any)) as ElkLayoutNode;
 
