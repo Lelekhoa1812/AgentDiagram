@@ -13,6 +13,9 @@ AgentDiagram DSL syntax:
              Source => Target          (thick / primary path)
 - Edge labels: Source > Target: label text
 - Names CAN contain spaces, pipes (|), and ampersands (& or "and").
+- Names MUST NOT contain "/" (slash), "," (comma), "{", or "}". Replace path separators like "api/v1/users" with spaces or hyphens: "api v1 users".
+- Attribute blocks [color: X, icon: Y] must be preceded by exactly one space after the name and never appear inside or after a "{...}" block.
+- "--" is the dashed-edge operator, NOT a comment or description. Use "// text" for all inline comments — never "--".
 - Edge operators must be whitespace-surrounded so names can include "|" etc.
 - Valid colors: ${COLOR_NAMES.join(', ')}.
 - Output ONLY DSL. No code fences. No prose outside // comments.

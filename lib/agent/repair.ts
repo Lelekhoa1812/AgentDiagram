@@ -1,7 +1,13 @@
 import { compile } from '../dsl/compiler';
 import { chatWithRetry, type ProviderSession, type RetryListener } from './providers';
 
-const REPAIR_SYSTEM = `You are a DSL repairer. Given an invalid AgentDiagram DSL with diagnostics, return ONLY a corrected DSL — no fences, no prose. Preserve the original structure and intent. Do not add or remove nodes/groups except as needed to fix syntax errors.`;
+const REPAIR_SYSTEM = `You are a DSL repairer. Given an invalid AgentDiagram DSL with diagnostics, return ONLY a corrected DSL — no fences, no prose. Preserve the original structure and intent. Do not add or remove nodes/groups except as needed to fix syntax errors.
+
+FORBIDDEN in names and labels:
+- Never use "/" (slash) or "," (comma) — replace path separators (e.g. "api/v1/users") with spaces or hyphens ("api v1 users").
+- Never use "{" or "}" inside a name — they are group-block delimiters.
+- "--" is the dashed-edge operator, NOT a comment or annotation. Use "// text" for all comments; never "--" for descriptions.
+- Attribute blocks [color: X, icon: Y] must follow the name with exactly one space, never appended after a "{...}" group block.`;
 
 export async function tryRepair(
   session: ProviderSession,

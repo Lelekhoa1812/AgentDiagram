@@ -16,6 +16,9 @@ import { buildScene, type SceneResult } from '@/lib/render/svgScene';
 import type { LayoutResult } from '@/lib/layout/elk';
 import type { Point } from '@/lib/ir/types';
 import { edgeLaneOffsets, routeEdgePath } from '@/lib/render/edgePath';
+import { RenderErrorBanner } from './RenderErrorBanner';
+
+const LAYOUT_TIMEOUT_MS = 15_000;
 
 export interface DiagramCanvasHandle {
   getSvg: () => SVGSVGElement | null;
@@ -57,20 +60,56 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
 
   const layoutRef = useRef<LayoutResult | null>(null);
   const [scene, setScene] = useState<SceneResult | null>(null);
+  const [renderErrors, setRenderErrors] = useState<string[]>([]);
+  const [renderErrorsDismissed, setRenderErrorsDismissed] = useState(false);
+
+  // Reset dismissed state whenever the DSL changes so fresh errors surface again.
+  useEffect(() => {
+    setRenderErrorsDismissed(false);
+  }, [diagram]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      // Bail out early if the compiler already found hard errors — running ELK
+      // on a structurally broken diagram can hang the main thread indefinitely.
+      const compileErrors = diagram.diagnostics
+        .filter((d) => d.severity === 'error')
+        .map((d) => `Line ${d.line}:${d.column} — ${d.message}`);
+
+      if (compileErrors.length > 0) {
+        if (!cancelled) {
+          setScene(null);
+          setLayoutResult(null);
+          setRenderErrors(compileErrors);
+        }
+        return;
+      }
+
       try {
-        const result = await runLayout(diagram, strategy);
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(
+            () =>
+              reject(
+                new Error(
+                  `Layout timed out after ${LAYOUT_TIMEOUT_MS / 1000}s — the DSL may contain invalid or circular structure`,
+                ),
+              ),
+            LAYOUT_TIMEOUT_MS,
+          ),
+        );
+        const result = await Promise.race([runLayout(diagram, strategy), timeoutPromise]);
         if (cancelled) return;
         layoutRef.current = result;
         setLayoutResult(result);
         setScene(buildScene(diagram, result, { selectedId: selection.id, overrides, theme }));
+        setRenderErrors([]);
       } catch (err) {
         if (!cancelled) {
           setScene(null);
           setLayoutResult(null);
+          const errMsg = err instanceof Error ? err.message : String(err);
+          setRenderErrors([errMsg]);
           // eslint-disable-next-line no-console
           console.warn('Layout failed:', err);
         }
@@ -315,6 +354,12 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
     >
+      {renderErrors.length > 0 && !renderErrorsDismissed && (
+        <RenderErrorBanner
+          errors={renderErrors}
+          onDismiss={() => setRenderErrorsDismissed(true)}
+        />
+      )}
       {scene ? (
         /* Root Cause vs Logic: the SVG used to contribute its full intrinsic width to the CSS grid, so fitView centered against a thousands-pixel wrapper and pushed the diagram out of view. Keeping it absolutely positioned makes the viewport size authoritative while preserving the full viewBox for export. */
         <svg

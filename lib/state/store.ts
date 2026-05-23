@@ -15,6 +15,7 @@ import {
   readStoredProjects,
   removeStoredProject,
   writeStoredProjects,
+  updateStoredProject,
   renameStoredProject,
   readActiveProjectId,
   writeActiveProjectId,
@@ -166,7 +167,18 @@ export const useDiagramStore = create<State>()(
       },
       setDsl: (text) => {
         writeUiPreference('dslText', text);
-        set({ dslText: text });
+        set((state) => {
+          if (state.activeProjectId) {
+            updateStoredProject(state.activeProjectId, text);
+            return {
+              dslText: text,
+              generatedProjects: state.generatedProjects.map((p) =>
+                p.id === state.activeProjectId ? { ...p, dsl: text } : p,
+              ),
+            };
+          }
+          return { dslText: text };
+        });
       },
       setDiagram: (diagram) => set({ diagram }),
       setLayoutResult: (result) => set({ layoutResult: result }),
