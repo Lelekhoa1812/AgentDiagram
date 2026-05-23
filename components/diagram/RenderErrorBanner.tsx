@@ -4,11 +4,8 @@ import { useState } from 'react';
 import { flushSync } from 'react-dom';
 import { AlertTriangle, RotateCw, Wand2, X } from 'lucide-react';
 import { useDiagramStore } from '@/lib/state/store';
-import { DSL_GRAMMAR_SUMMARY } from '@/lib/agent/promptBuilder';
 import { compile } from '@/lib/dsl/compiler';
 import { readAgentStream, readErrorMessage } from '../agent/streamEvents';
-
-const MAX_FIX_ATTEMPTS = 3;
 
 interface Props {
   errors: string[];
@@ -25,23 +22,10 @@ export function RenderErrorBanner({ errors, onDismiss }: Props) {
   const setDsl = useDiagramStore((s) => s.setDsl);
   const [fixing, setFixing] = useState(false);
   const [fixStage, setFixStage] = useState('');
-  const [fixAttempt, setFixAttempt] = useState(0);
   const [fixError, setFixError] = useState<string | null>(null);
 
   const currentModel =
     provider.provider === 'foundry' ? (provider.customModel ?? provider.model) : provider.model;
-
-  const buildChangeDescription = (currentErrors: string[]) =>
-    [
-      'Fix DSL syntax and format errors so the diagram renders correctly.',
-      'Do NOT add or remove nodes, groups, or edges — only correct syntax/format issues.',
-      '',
-      'DSL syntax reference:',
-      DSL_GRAMMAR_SUMMARY.trim(),
-      '',
-      'Errors to fix:',
-      ...currentErrors.map((e, i) => `${i + 1}. ${e}`),
-    ].join('\n');
 
   const onAiFix = async () => {
     if (!dsl.trim() || fixing) return;
@@ -52,93 +36,62 @@ export function RenderErrorBanner({ errors, onDismiss }: Props) {
     flushSync(() => {
       setFixing(true);
       setFixError(null);
-      setFixStage('Initialising…');
-      setFixAttempt(1);
+      setFixStage('Connecting to AI…');
     });
 
-    let currentDsl = dsl;
-    let currentErrors = [...errors];
-
     try {
-      for (let attempt = 1; attempt <= MAX_FIX_ATTEMPTS; attempt++) {
-        flushSync(() => {
-          setFixAttempt(attempt);
-          setFixStage('Connecting to AI…');
-        });
+      // Use the repair endpoint — it patches only the broken lines rather than
+      // regenerating a full plan, so all comments, ordering, and structure are preserved.
+      const res = await fetch('/api/agent/repair', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: provider.provider,
+          model: currentModel,
+          apiKey: provider.apiKey || undefined,
+          endpoint: provider.endpoint || undefined,
+          dsl,
+        }),
+      });
 
-        const res = await fetch('/api/agent/fix', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            provider: provider.provider,
-            model: currentModel,
-            apiKey: provider.apiKey || undefined,
-            endpoint: provider.endpoint || undefined,
-            dsl: currentDsl,
-            changeDescription: buildChangeDescription(currentErrors),
-            answers: [],
-          }),
-        });
-
-        if (!res.ok || !res.body) {
-          const msg = await readErrorMessage(res);
-          flushSync(() => setFixError(msg));
-          return;
-        }
-
-        let resultDsl: string | null = null;
-        let streamErr: string | null = null;
-
-        await readAgentStream(res.body, (ev) => {
-          if (ev.type === 'stage' && ev.status === 'start') {
-            setFixStage(ev.message ?? ev.stage);
-          } else if (ev.type === 'result') {
-            resultDsl = ev.dsl;
-          } else if (ev.type === 'error') {
-            streamErr = ev.message;
-          }
-        });
-
-        if (streamErr) {
-          flushSync(() => setFixError(streamErr!));
-          return;
-        }
-        if (!resultDsl) {
-          flushSync(() => setFixError('AI did not return a fixed diagram.'));
-          return;
-        }
-
-        // Compile the result to check whether errors remain.
-        const diagram = compile(resultDsl);
-        const remainingErrors = diagram.diagnostics
-          .filter((d) => d.severity === 'error')
-          .map((d) => `Line ${d.line}:${d.column} — ${d.message}`);
-
-        if (remainingErrors.length === 0) {
-          setDsl(resultDsl);
-          return;
-        }
-
-        currentDsl = resultDsl;
-        currentErrors = remainingErrors;
-
-        if (attempt < MAX_FIX_ATTEMPTS) {
-          flushSync(() =>
-            setFixStage(
-              `${remainingErrors.length} error(s) remain — retrying (${attempt + 1}/${MAX_FIX_ATTEMPTS})…`,
-            ),
-          );
-          await new Promise<void>((r) => setTimeout(r, 800));
-        }
+      if (!res.ok || !res.body) {
+        const msg = await readErrorMessage(res);
+        flushSync(() => setFixError(msg));
+        return;
       }
 
-      // All attempts exhausted — apply best result and surface remaining count.
-      setDsl(currentDsl);
-      flushSync(() =>
-        setFixError(
-          `${currentErrors.length} error(s) persist after ${MAX_FIX_ATTEMPTS} fix attempt(s).`,
-        ),
-      );
+      let resultDsl: string | null = null;
+      let streamErr: string | null = null;
+
+      await readAgentStream(res.body, (ev) => {
+        if (ev.type === 'stage' && ev.status === 'start') {
+          setFixStage(ev.message ?? ev.stage);
+        } else if (ev.type === 'result') {
+          resultDsl = ev.dsl;
+        } else if (ev.type === 'error') {
+          streamErr = ev.message;
+        }
+      });
+
+      if (streamErr) {
+        flushSync(() => setFixError(streamErr!));
+        return;
+      }
+      if (!resultDsl) {
+        flushSync(() => setFixError('AI did not return a fixed diagram.'));
+        return;
+      }
+
+      // Apply the repaired DSL regardless; surface any residual errors so the
+      // user can see them in the banner rather than losing all progress.
+      const diagram = compile(resultDsl);
+      const remaining = diagram.diagnostics.filter((d) => d.severity === 'error').length;
+      setDsl(resultDsl);
+      if (remaining > 0) {
+        flushSync(() =>
+          setFixError(`${remaining} error(s) persist after repair — check the Diagnostics tab.`),
+        );
+      }
     } catch (err) {
       if (!(err instanceof DOMException && err.name === 'AbortError')) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -191,11 +144,6 @@ export function RenderErrorBanner({ errors, onDismiss }: Props) {
                 <div className="flex-1 truncate text-[10px] text-slate-300">
                   {fixStage || 'Working…'}
                 </div>
-                {fixAttempt > 1 && (
-                  <div className="flex-shrink-0 text-[9px] text-slate-500">
-                    Attempt {fixAttempt}/{MAX_FIX_ATTEMPTS}
-                  </div>
-                )}
               </div>
             </div>
           )}
