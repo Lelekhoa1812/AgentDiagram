@@ -15,12 +15,16 @@ interface Props {
   onDismiss: () => void;
 }
 
+// NOTE: All colours here are hardcoded Tailwind slate/red values (not ink-*).
+// ink-* remaps in light theme — ink-950 becomes near-white — making the banner
+// invisible. Using slate-* guarantees contrast in both dark and light themes.
+
 export function RenderErrorBanner({ errors, onDismiss }: Props) {
   const provider = useDiagramStore((s) => s.provider);
   const dsl = useDiagramStore((s) => s.dslText);
   const setDsl = useDiagramStore((s) => s.setDsl);
   const [fixing, setFixing] = useState(false);
-  const [fixStage, setFixStage] = useState<string>('');
+  const [fixStage, setFixStage] = useState('');
   const [fixAttempt, setFixAttempt] = useState(0);
   const [fixError, setFixError] = useState<string | null>(null);
 
@@ -42,9 +46,9 @@ export function RenderErrorBanner({ errors, onDismiss }: Props) {
   const onAiFix = async () => {
     if (!dsl.trim() || fixing) return;
 
-    // flushSync forces React to paint the loading state immediately before
-    // any async work starts — without this, React 18 automatic batching
-    // collapses setFixing(true) and setFixing(false) into one paint.
+    // flushSync forces React to paint the loading state before any async work.
+    // Without this, React 18 automatic batching merges setFixing(true) and
+    // setFixing(false) into a single paint so the animation never appears.
     flushSync(() => {
       setFixing(true);
       setFixError(null);
@@ -99,7 +103,6 @@ export function RenderErrorBanner({ errors, onDismiss }: Props) {
           flushSync(() => setFixError(streamErr!));
           return;
         }
-
         if (!resultDsl) {
           flushSync(() => setFixError('AI did not return a fixed diagram.'));
           return;
@@ -148,47 +151,48 @@ export function RenderErrorBanner({ errors, onDismiss }: Props) {
   };
 
   return (
-    <div className="absolute inset-x-3 top-3 z-20 rounded-xl border border-red-500/40 bg-ink-950/95 shadow-lg backdrop-blur-sm">
+    // slate-950 / slate-900 are hardcoded — ink-* flips to near-white in light theme
+    <div className="absolute inset-x-3 top-3 z-20 rounded-xl border border-red-500/50 bg-slate-950/95 shadow-xl backdrop-blur-sm">
       <div className="flex items-start gap-3 px-3 py-2.5">
         <AlertTriangle size={14} className="mt-0.5 flex-shrink-0 text-red-400" />
 
         <div className="min-w-0 flex-1">
-          <div className="text-[11px] font-medium text-red-300">
+          <div className="text-[11px] font-semibold text-red-400">
             Diagram rendering error — DSL syntax/format issue detected
           </div>
 
-          {/* Full, untruncated error messages */}
+          {/* Full error messages — no truncation */}
           <div className="mt-1 space-y-0.5">
             {errors.map((e, i) => (
-              <div key={i} className="break-all font-mono text-[10px] text-ink-400">
+              <div key={i} className="break-all font-mono text-[10px] text-slate-400">
                 {e}
               </div>
             ))}
           </div>
 
-          {/* Live fix progress — always visible while fixing */}
+          {/* Live fix progress — always dark regardless of app theme */}
           {fixing && (
-            <div className="mt-2 rounded-md border border-ink-700/50 bg-ink-900/60 px-2.5 py-1.5">
+            <div className="mt-2 rounded-md border border-slate-700/60 bg-slate-900/80 px-2.5 py-1.5">
               <div className="flex items-center gap-2">
                 <div className="flex gap-0.5">
                   <span
-                    className="h-1.5 w-1.5 animate-bounce rounded-full bg-accent"
+                    className="h-1.5 w-1.5 animate-bounce rounded-full bg-blue-400"
                     style={{ animationDelay: '0ms' }}
                   />
                   <span
-                    className="h-1.5 w-1.5 animate-bounce rounded-full bg-accent"
+                    className="h-1.5 w-1.5 animate-bounce rounded-full bg-blue-400"
                     style={{ animationDelay: '150ms' }}
                   />
                   <span
-                    className="h-1.5 w-1.5 animate-bounce rounded-full bg-accent"
+                    className="h-1.5 w-1.5 animate-bounce rounded-full bg-blue-400"
                     style={{ animationDelay: '300ms' }}
                   />
                 </div>
-                <div className="flex-1 truncate text-[10px] text-ink-300">
+                <div className="flex-1 truncate text-[10px] text-slate-300">
                   {fixStage || 'Working…'}
                 </div>
                 {fixAttempt > 1 && (
-                  <div className="flex-shrink-0 text-[9px] text-ink-500">
+                  <div className="flex-shrink-0 text-[9px] text-slate-500">
                     Attempt {fixAttempt}/{MAX_FIX_ATTEMPTS}
                   </div>
                 )}
@@ -196,9 +200,9 @@ export function RenderErrorBanner({ errors, onDismiss }: Props) {
             </div>
           )}
 
-          {/* Prominent error feedback */}
+          {/* Error feedback box */}
           {fixError && !fixing && (
-            <div className="mt-2 rounded-md border border-red-500/30 bg-red-500/10 px-2.5 py-1.5 text-[11px] text-red-300">
+            <div className="mt-2 rounded-md border border-red-500/40 bg-red-950/60 px-2.5 py-1.5 text-[11px] text-red-300">
               {fixError}
             </div>
           )}
@@ -209,7 +213,7 @@ export function RenderErrorBanner({ errors, onDismiss }: Props) {
             type="button"
             onClick={onAiFix}
             disabled={fixing || !dsl.trim()}
-            className="flex items-center gap-1.5 rounded-md border border-accent/50 bg-accent/20 px-2.5 py-1.5 text-[11px] text-accent transition-colors hover:bg-accent/30 disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded-md border border-blue-500/50 bg-blue-500/20 px-2.5 py-1.5 text-[11px] text-blue-300 transition-colors hover:bg-blue-500/30 disabled:opacity-50"
           >
             {fixing ? (
               <>
@@ -227,7 +231,7 @@ export function RenderErrorBanner({ errors, onDismiss }: Props) {
             type="button"
             onClick={onDismiss}
             disabled={fixing}
-            className="rounded-md border border-ink-700 bg-ink-800 p-1.5 text-ink-400 transition-colors hover:bg-ink-700 disabled:opacity-40"
+            className="rounded-md border border-slate-700 bg-slate-800 p-1.5 text-slate-400 transition-colors hover:bg-slate-700 disabled:opacity-40"
           >
             <X size={11} />
           </button>
