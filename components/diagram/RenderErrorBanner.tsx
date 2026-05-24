@@ -2,9 +2,10 @@
 
 import { useState } from 'react';
 import { flushSync } from 'react-dom';
-import { AlertTriangle, RotateCw, Wand2, X } from 'lucide-react';
+import { AlertTriangle, Layers, RotateCw, Wand2, X } from 'lucide-react';
 import { useDiagramStore } from '@/lib/state/store';
 import { compile } from '@/lib/dsl/compiler';
+import { splitDiagramIntoLayers } from '@/lib/agent/splitLayer';
 import { readAgentStream, readErrorMessage } from '../agent/streamEvents';
 
 interface Props {
@@ -16,13 +17,35 @@ interface Props {
 // ink-* remaps in light theme — ink-950 becomes near-white — making the banner
 // invisible. Using slate-* guarantees contrast in both dark and light themes.
 
+// Errors that indicate ELK complexity / layout failure — NOT plain DSL syntax errors.
+// The "Split Layer" button is shown only for these.
+function isComplexityError(errors: string[]): boolean {
+  return errors.some(
+    (e) =>
+      e.includes('complexity too high') ||
+      e.includes('ELK layout cannot') ||
+      e.includes('ELK layout failed') ||
+      e.includes('Layout timed out') ||
+      e.includes('too complex'),
+  );
+}
+
 export function RenderErrorBanner({ errors, onDismiss }: Props) {
   const provider = useDiagramStore((s) => s.provider);
   const dsl = useDiagramStore((s) => s.dslText);
   const setDsl = useDiagramStore((s) => s.setDsl);
+  const diagram = useDiagramStore((s) => s.diagram);
+  const activeLayer = useDiagramStore((s) => s.activeLayer);
+  const addSubLayers = useDiagramStore((s) => s.addSubLayers);
+  const removeLayer = useDiagramStore((s) => s.removeLayer);
+  const setActiveLayer = useDiagramStore((s) => s.setActiveLayer);
+  const clearOverrides = useDiagramStore((s) => s.clearOverrides);
   const [fixing, setFixing] = useState(false);
   const [fixStage, setFixStage] = useState('');
   const [fixError, setFixError] = useState<string | null>(null);
+  const [splitting, setSplitting] = useState(false);
+
+  const showSplitLayer = isComplexityError(errors);
 
   const currentModel =
     provider.provider === 'foundry' ? (provider.customModel ?? provider.model) : provider.model;
@@ -103,6 +126,41 @@ export function RenderErrorBanner({ errors, onDismiss }: Props) {
     }
   };
 
+  const onSplitLayer = () => {
+    if (!diagram || splitting || fixing) return;
+
+    setSplitting(true);
+    try {
+      // Derive a meaningful base name: use the active layer name unless it's
+      // 'overview', in which case fall back to the diagram title or 'Layer'.
+      const baseName =
+        activeLayer && activeLayer !== 'overview'
+          ? activeLayer
+          : diagram.meta.title?.trim() || 'Layer';
+
+      const subLayers = splitDiagramIntoLayers(diagram, baseName);
+      if (subLayers.length === 0) return;
+
+      addSubLayers(subLayers);
+
+      // Remove the original (error-bearing) layer so it doesn't persist in the
+      // tab bar. Only applies to named layers — the overview is never removed.
+      if (activeLayer && activeLayer !== 'overview') {
+        removeLayer(activeLayer);
+      }
+
+      // Navigate to the first sub-layer so the user sees the result immediately
+      const first = subLayers[0];
+      if (!first) return;
+      clearOverrides();
+      setActiveLayer(first.name);
+      setDsl(first.dsl);
+      onDismiss();
+    } finally {
+      setSplitting(false);
+    }
+  };
+
   return (
     // slate-950 / slate-900 are hardcoded — ink-* flips to near-white in light theme
     // onPointerDown stops propagation so the canvas wrapper's setPointerCapture doesn't
@@ -162,10 +220,32 @@ export function RenderErrorBanner({ errors, onDismiss }: Props) {
         </div>
 
         <div className="flex flex-shrink-0 items-center gap-2">
+          {/* Split Layer — only shown for complexity / ELK errors, not plain syntax errors */}
+          {showSplitLayer && (
+            <button
+              type="button"
+              onClick={onSplitLayer}
+              disabled={splitting || fixing || !diagram}
+              className="flex items-center gap-1.5 rounded-md border border-amber-500/50 bg-amber-500/20 px-2.5 py-1.5 text-[11px] text-amber-300 transition-colors hover:bg-amber-500/30 disabled:opacity-50"
+              title="Split this diagram into smaller sub-layers within the complexity limit"
+            >
+              {splitting ? (
+                <>
+                  <RotateCw size={11} className="animate-spin" />
+                  Splitting…
+                </>
+              ) : (
+                <>
+                  <Layers size={11} />
+                  Split Layer
+                </>
+              )}
+            </button>
+          )}
           <button
             type="button"
             onClick={onAiFix}
-            disabled={fixing || !dsl.trim()}
+            disabled={fixing || splitting || !dsl.trim()}
             className="flex items-center gap-1.5 rounded-md border border-blue-500/50 bg-blue-500/20 px-2.5 py-1.5 text-[11px] text-blue-300 transition-colors hover:bg-blue-500/30 disabled:opacity-50"
           >
             {fixing ? (
@@ -183,7 +263,7 @@ export function RenderErrorBanner({ errors, onDismiss }: Props) {
           <button
             type="button"
             onClick={onDismiss}
-            disabled={fixing}
+            disabled={fixing || splitting}
             className="rounded-md border border-slate-700 bg-slate-800 p-1.5 text-slate-400 transition-colors hover:bg-slate-700 disabled:opacity-40"
           >
             <X size={11} />

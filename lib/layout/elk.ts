@@ -153,8 +153,11 @@ export async function layout(diagram: Diagram, opts: LayoutOptions = {}): Promis
   // and throws "Invalid array length" above ~200–260. BRANDES_KOEPF handles
   // moderate complexity well; SIMPLE is a safe fallback for very dense diagrams.
   const complexity = diagram.groups.length * diagram.edges.length;
+  // Switch away from NETWORK_SIMPLEX early — anything in the 100–200 band
+  // (diagrams near the ELK_COMPLEXITY_LIMIT guard) gets BRANDES_KOEPF which is
+  // more stable in compound graphs. Below 100 NETWORK_SIMPLEX gives best quality.
   const nodePlacementStrategy =
-    complexity > 400 ? 'SIMPLE' : complexity > 150 ? 'BRANDES_KOEPF' : 'NETWORK_SIMPLEX';
+    complexity > 100 ? 'BRANDES_KOEPF' : 'NETWORK_SIMPLEX';
 
   // Build a quick lookup for groups so we can recurse children → ELK nodes.
   const groupsById = new Map(diagram.groups.map((g) => [g.id, g]));

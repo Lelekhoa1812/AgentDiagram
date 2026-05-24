@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useDiagramStore } from '@/lib/state/store';
+import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
 import flowExample from '../../examples/flow.txt';
 import tinyExample from '../../examples/tiny-flow.txt';
 import sequenceExample from '../../examples/sequence.txt';
@@ -32,6 +33,8 @@ export function ExampleLoader() {
   const [editingName, setEditingName] = useState('');
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
+  // id of the project whose deletion is pending confirmation
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   const loadProject = (project: { id: string; dsl: string; multiLayer?: typeof generatedProjects[number]['multiLayer'] }) => {
     // Root Cause vs Logic: project tabs previously copied only the DSL, so reopening a generated multi-layer project
@@ -81,6 +84,8 @@ export function ExampleLoader() {
     setDraggingId(null);
     setDragOverId(null);
   };
+
+  const pendingDeleteProject = generatedProjects.find((p) => p.id === pendingDeleteId);
 
   return (
     <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
@@ -135,9 +140,9 @@ export function ExampleLoader() {
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  removeGeneratedProject(proj.id);
+                  setPendingDeleteId(proj.id);
                 }}
-                className="mr-1 flex h-4 w-4 items-center justify-center rounded-sm text-ink-500 opacity-0 transition-opacity hover:bg-ink-700 hover:text-ink-200 group-hover:opacity-100"
+                className="mr-1 flex h-4 w-4 items-center justify-center rounded-sm text-ink-500 opacity-0 transition-opacity hover:bg-ink-700 hover:text-red-300 group-hover:opacity-100"
                 type="button"
                 title="Remove project"
               >
@@ -169,6 +174,18 @@ export function ExampleLoader() {
           );
         })}
       </div>
+
+      <ConfirmDialog
+        open={pendingDeleteId !== null}
+        title="Delete project"
+        message={`Delete "${pendingDeleteProject?.name ?? ''}" permanently? This cannot be undone.`}
+        confirmLabel="Delete project"
+        onConfirm={() => {
+          if (pendingDeleteId) removeGeneratedProject(pendingDeleteId);
+          setPendingDeleteId(null);
+        }}
+        onCancel={() => setPendingDeleteId(null)}
+      />
     </div>
   );
 }

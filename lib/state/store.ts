@@ -11,6 +11,7 @@ import { readUiPreferences, writeUiPreference } from './uiPreferences';
 import {
   type StoredProject,
   type MultiLayerOutput,
+  type LayerDiagram,
   addStoredProject,
   readStoredProjects,
   removeStoredProject,
@@ -122,6 +123,8 @@ interface State {
   setQuickMode: (enabled: boolean) => void;
   setMaxMode: (enabled: boolean) => void;
   setInstructionMode: (enabled: boolean) => void;
+  addSubLayers: (subLayers: LayerDiagram[]) => void;
+  removeLayer: (name: string) => void;
   addGeneratedProject: (name: string, dsl: string, multiLayer?: MultiLayerOutput, instructionMarkdown?: string) => void;
   openProject: (project: { id: string; dsl: string; multiLayer?: MultiLayerOutput | null; instructionMarkdown?: string }) => void;
   removeGeneratedProject: (id: string) => void;
@@ -266,6 +269,71 @@ export const useDiagramStore = create<State>()(
         writeUiPreference('activeLayer', name);
         set({ activeLayer: name });
       },
+      addSubLayers: (subLayers) =>
+        set((state) => {
+          const now = Date.now();
+          // Merge into existing multiLayer or bootstrap a new one whose overview
+          // is the current DSL text.
+          const updatedMultiLayer: MultiLayerOutput = state.multiLayer
+            ? {
+                ...state.multiLayer,
+                layers: [...state.multiLayer.layers, ...subLayers],
+              }
+            : {
+                overview: {
+                  name: 'Overview',
+                  description: 'Full diagram before splitting',
+                  dsl: state.dslText,
+                },
+                layers: subLayers,
+                generatedAt: now,
+              };
+
+          // Persist to localStorage if there is an active project tab
+          let generatedProjects = state.generatedProjects;
+          if (state.activeProjectId) {
+            generatedProjects = state.generatedProjects.map((p) =>
+              p.id === state.activeProjectId ? { ...p, multiLayer: updatedMultiLayer } : p,
+            );
+            writeStoredProjects(generatedProjects);
+          }
+
+          return { multiLayer: updatedMultiLayer, generatedProjects };
+        }),
+      removeLayer: (name) =>
+        set((state) => {
+          if (!state.multiLayer) return {};
+          const wasActive = state.activeLayer === name;
+          const updatedLayers = state.multiLayer.layers.filter((l) => l.name !== name);
+          const updatedMultiLayer: MultiLayerOutput = {
+            ...state.multiLayer,
+            layers: updatedLayers,
+          };
+
+          // When the removed layer was active, fall back to the overview
+          const newDslText = wasActive ? state.multiLayer.overview.dsl : state.dslText;
+          if (wasActive) {
+            writeUiPreference('activeLayer', 'overview');
+            writeUiPreference('dslText', newDslText);
+          }
+
+          // Persist to localStorage if there is an active project tab
+          let generatedProjects = state.generatedProjects;
+          if (state.activeProjectId) {
+            generatedProjects = state.generatedProjects.map((p) =>
+              p.id === state.activeProjectId
+                ? { ...p, multiLayer: updatedMultiLayer, ...(wasActive ? { dsl: newDslText } : {}) }
+                : p,
+            );
+            writeStoredProjects(generatedProjects);
+          }
+
+          return {
+            multiLayer: updatedMultiLayer,
+            generatedProjects,
+            ...(wasActive ? { activeLayer: 'overview', dslText: newDslText } : {}),
+          };
+        }),
       setQuickMode: (enabled) => {
         writeUiPreference('quickMode', enabled);
         set({ quickMode: enabled });

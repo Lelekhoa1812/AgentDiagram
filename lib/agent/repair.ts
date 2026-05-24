@@ -13,7 +13,7 @@ COMPLEXITY ERRORS — if the diagnostic mentions "too many edges", "Invalid arra
 - The diagram has too many cross-group edges for the layout engine. Do NOT just fix syntax — you MUST reduce complexity.
 - Remove low-value or purely informational edges (observability links, redundant dashed lines, edges that duplicate group membership).
 - Consolidate multiple parallel edges between the same pair of nodes into a single labeled edge.
-- Target: keep total edge count below 60, OR keep (groups × edges) below 400. Preserve the most important data-flow and dependency edges.
+- Target: keep (groups × edges) below 200. For a 6-group diagram that means fewer than 34 edges; for a 5-group diagram fewer than 40. Preserve the most important data-flow and dependency edges.
 - Keep all nodes and groups intact; only remove edges.`;
 
 // ELK cannot safely layout diagrams with more than this many edges.
@@ -22,7 +22,7 @@ const REPAIR_EDGE_LIMIT = 80;
 
 // ELK crashes on compound graphs where (groups × edges) exceeds this threshold.
 // Must stay in sync with ELK_COMPLEXITY_LIMIT in DiagramCanvas.tsx.
-const REPAIR_COMPLEXITY_LIMIT = 400;
+const REPAIR_COMPLEXITY_LIMIT = 200;
 
 export async function tryRepair(
   session: ProviderSession,
@@ -54,8 +54,8 @@ export async function tryRepair(
     if (complexity > REPAIR_COMPLEXITY_LIMIT) {
       problems.push(
         `- render error: diagram complexity too high (${diagram.groups.length} groups × ${diagram.edges.length} edges = ${complexity}) — ` +
-          `ELK layout cannot safely process this. Consolidate parallel edges between the same node pairs and remove ` +
-          `low-value cross-group connections until (groups × edges) < ${REPAIR_COMPLEXITY_LIMIT}.`,
+          `ELK layout cannot safely render this; the canvas shows an error banner instead. ` +
+          `Consolidate parallel edges and remove low-value cross-group connections until (groups × edges) < ${REPAIR_COMPLEXITY_LIMIT}.`,
       );
     }
 

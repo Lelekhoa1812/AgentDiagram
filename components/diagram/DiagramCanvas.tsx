@@ -18,7 +18,9 @@ import type { Point } from '@/lib/ir/types';
 import { edgeLaneOffsets, routeEdgePath } from '@/lib/render/edgePath';
 import { RenderErrorBanner } from './RenderErrorBanner';
 
-const LAYOUT_TIMEOUT_MS = 5_000;
+// Fail fast: if ELK hasn't responded in 2.5 s the diagram is too heavy and we
+// show the error banner. The worker runs off the main thread so no UI freeze.
+const LAYOUT_TIMEOUT_MS = 2_500;
 
 // ELK's network-simplex algorithm throws "Invalid array length" when the edge
 // count inside a compound graph exceeds its internal matrix capacity. The limit
@@ -27,11 +29,12 @@ const ELK_EDGE_LIMIT = 80;
 
 // ELK's network-simplex crashes on compound graphs with many cross-group edges
 // even when the raw edge count is below ELK_EDGE_LIMIT. The product of group
-// count × edge count is a proxy for cross-hierarchy edge density. For complexity
-// 150–400 elk.ts automatically switches to BRANDES_KOEPF (more stable); above
-// 400 it uses SIMPLE. We guard at 400 to prevent browser hangs on extreme inputs.
+// count × edge count is a proxy for cross-hierarchy edge density; empirically
+// diagrams with 7 groups × 37 edges (= 259) reliably crash the worker.
+// We guard conservatively at 200 — above this we bail out immediately and show
+// the error banner so the user can AI-Fix rather than crashing the browser.
 // Must stay in sync with REPAIR_COMPLEXITY_LIMIT in lib/agent/repair.ts.
-const ELK_COMPLEXITY_LIMIT = 400;
+const ELK_COMPLEXITY_LIMIT = 200;
 
 export interface DiagramCanvasHandle {
   getSvg: () => SVGSVGElement | null;
@@ -153,7 +156,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
             () =>
               reject(
                 new Error(
-                  `Layout timed out after ${LAYOUT_TIMEOUT_MS / 1000}s — the diagram may be too large or complex to render automatically. Try splitting it into smaller diagrams or use AI Fix to simplify.`,
+                  `Layout timed out after ${LAYOUT_TIMEOUT_MS / 1000}s — diagram is too complex to render. Use AI Fix to simplify.`,
                 ),
               ),
             LAYOUT_TIMEOUT_MS,
@@ -174,23 +177,24 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
         setScene(buildScene(diagram, result, { selectedId: selection.id, overrides, theme }));
         setRenderErrors([]);
       } catch (err) {
-        if (!cancelled) {
-          setScene(null);
-          setLayoutResult(null);
-          let errMsg = err instanceof Error ? err.message : String(err);
-          // ELK's network-simplex algorithm throws "Invalid array length" when
-          // the compound graph is too complex (too many nodes/cross-group edges).
-          if (errMsg.includes('Invalid array length')) {
-            errMsg =
-              `ELK layout failed: diagram is too complex (too many nodes or cross-group edges). ` +
-              `Try removing redundant edges, splitting into smaller sub-diagrams, or use AI Fix to simplify.`;
-          }
-          setRenderErrors([errMsg]);
-          // eslint-disable-next-line no-console
-          console.warn('Layout failed:', err);
+        // Always surface the error — even if the effect was cancelled a new
+        // effect will overwrite state momentarily, but this ensures the banner
+        // appears rather than leaving the canvas blank and frozen.
+        setScene(null);
+        setLayoutResult(null);
+        let errMsg = err instanceof Error ? err.message : String(err);
+        // ELK's network-simplex algorithm throws "Invalid array length" when
+        // the compound graph is too complex (too many nodes/cross-group edges).
+        if (errMsg.includes('Invalid array length') || errMsg.includes('worker crashed')) {
+          errMsg =
+            `ELK layout failed: diagram is too complex (too many cross-group edges). ` +
+            `Use AI Fix to simplify.`;
         }
+        if (!cancelled) setRenderErrors([errMsg]);
+        // eslint-disable-next-line no-console
+        console.warn('Layout failed:', err);
       } finally {
-        if (!cancelled) setIsLayingOut(false);
+        setIsLayingOut(false);
       }
     })();
     return () => {
