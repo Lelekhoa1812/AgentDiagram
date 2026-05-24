@@ -9,16 +9,20 @@ FORBIDDEN in names and labels:
 - "--" is the dashed-edge operator, NOT a comment or annotation. Use "// text" for all comments; never "--" for descriptions.
 - Attribute blocks [color: X, icon: Y] must follow the name with exactly one space, never appended after a "{...}" group block.
 
-COMPLEXITY ERRORS — if the diagnostic mentions "too many edges", "Invalid array length", "ELK layout failed", or "cannot safely process":
-- The diagram has too many edges for the layout engine. Do NOT just fix syntax — you MUST reduce complexity.
+COMPLEXITY ERRORS — if the diagnostic mentions "too many edges", "Invalid array length", "ELK layout failed", "cannot safely process", or "complexity too high":
+- The diagram has too many cross-group edges for the layout engine. Do NOT just fix syntax — you MUST reduce complexity.
 - Remove low-value or purely informational edges (observability links, redundant dashed lines, edges that duplicate group membership).
 - Consolidate multiple parallel edges between the same pair of nodes into a single labeled edge.
-- Target: bring total edge count below 60. Preserve the most important data-flow and dependency edges.
+- Target: keep total edge count below 60, OR keep (groups × edges) below 400. Preserve the most important data-flow and dependency edges.
 - Keep all nodes and groups intact; only remove edges.`;
 
 // ELK cannot safely layout diagrams with more than this many edges.
 // Must stay in sync with ELK_EDGE_LIMIT in DiagramCanvas.tsx.
 const REPAIR_EDGE_LIMIT = 80;
+
+// ELK crashes on compound graphs where (groups × edges) exceeds this threshold.
+// Must stay in sync with ELK_COMPLEXITY_LIMIT in DiagramCanvas.tsx.
+const REPAIR_COMPLEXITY_LIMIT = 400;
 
 export async function tryRepair(
   session: ProviderSession,
@@ -44,6 +48,17 @@ export async function tryRepair(
       );
     }
 
+    // Cross-group edge density crashes ELK's network-simplex even when the raw
+    // edge count looks acceptable. groups × edges is a reliable proxy for this.
+    const complexity = diagram.groups.length * diagram.edges.length;
+    if (complexity > REPAIR_COMPLEXITY_LIMIT) {
+      problems.push(
+        `- render error: diagram complexity too high (${diagram.groups.length} groups × ${diagram.edges.length} edges = ${complexity}) — ` +
+          `ELK layout cannot safely process this. Consolidate parallel edges between the same node pairs and remove ` +
+          `low-value cross-group connections until (groups × edges) < ${REPAIR_COMPLEXITY_LIMIT}.`,
+      );
+    }
+
     if (problems.length === 0) return { dsl: current, attempts: i, errors: 0 };
 
     const messages = [
@@ -61,10 +76,15 @@ export async function tryRepair(
   }
   const final = compile(current);
   const finalEdgeTooMany = final.edges.length > REPAIR_EDGE_LIMIT ? 1 : 0;
+  const finalComplexity = final.groups.length * final.edges.length;
+  const finalComplexityTooHigh = finalComplexity > REPAIR_COMPLEXITY_LIMIT ? 1 : 0;
   return {
     dsl: current,
     attempts: maxAttempts,
-    errors: final.diagnostics.filter((d) => d.severity === 'error').length + finalEdgeTooMany,
+    errors:
+      final.diagnostics.filter((d) => d.severity === 'error').length +
+      finalEdgeTooMany +
+      finalComplexityTooHigh,
   };
 }
 

@@ -148,6 +148,14 @@ const DEFAULT_OPTS: Required<LayoutOptions> = {
 export async function layout(diagram: Diagram, opts: LayoutOptions = {}): Promise<LayoutResult> {
   const o = { ...DEFAULT_OPTS, ...opts };
 
+  // Compute graph complexity (groups × edges) to choose a safe node-placement
+  // strategy. ELK's NETWORK_SIMPLEX has quadratic memory usage on compound graphs
+  // and throws "Invalid array length" above ~200–260. BRANDES_KOEPF handles
+  // moderate complexity well; SIMPLE is a safe fallback for very dense diagrams.
+  const complexity = diagram.groups.length * diagram.edges.length;
+  const nodePlacementStrategy =
+    complexity > 400 ? 'SIMPLE' : complexity > 150 ? 'BRANDES_KOEPF' : 'NETWORK_SIMPLEX';
+
   // Build a quick lookup for groups so we can recurse children → ELK nodes.
   const groupsById = new Map(diagram.groups.map((g) => [g.id, g]));
   const nodesById = new Map(diagram.nodes.map((n) => [n.id, n]));
@@ -213,7 +221,9 @@ export async function layout(diagram: Diagram, opts: LayoutOptions = {}): Promis
       'elk.padding': `[top=24,left=24,bottom=24,right=24]`,
       'elk.layered.crossingMinimization.semiInteractive': 'true',
       'elk.layered.mergeEdges': 'true',
-      'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
+      'elk.layered.nodePlacement.strategy': nodePlacementStrategy,
+      // DEPTH_FIRST cycle-breaking is more stable on complex diagrams with back-edges.
+      'elk.layered.cycleBreaking.strategy': 'DEPTH_FIRST',
     },
   };
 

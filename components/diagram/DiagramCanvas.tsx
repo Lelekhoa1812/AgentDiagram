@@ -27,9 +27,11 @@ const ELK_EDGE_LIMIT = 80;
 
 // ELK's network-simplex crashes on compound graphs with many cross-group edges
 // even when the raw edge count is below ELK_EDGE_LIMIT. The product of group
-// count × edge count is a proxy for cross-hierarchy edge density; empirically
-// diagrams with 7 groups × 37 edges (= 259) reliably crash the worker.
-const ELK_COMPLEXITY_LIMIT = 200;
+// count × edge count is a proxy for cross-hierarchy edge density. For complexity
+// 150–400 elk.ts automatically switches to BRANDES_KOEPF (more stable); above
+// 400 it uses SIMPLE. We guard at 400 to prevent browser hangs on extreme inputs.
+// Must stay in sync with REPAIR_COMPLEXITY_LIMIT in lib/agent/repair.ts.
+const ELK_COMPLEXITY_LIMIT = 400;
 
 export interface DiagramCanvasHandle {
   getSvg: () => SVGSVGElement | null;
