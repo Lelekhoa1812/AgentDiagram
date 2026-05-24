@@ -16,25 +16,18 @@ import { buildScene, type SceneResult } from '@/lib/render/svgScene';
 import type { LayoutResult } from '@/lib/layout/elk';
 import type { Point } from '@/lib/ir/types';
 import { edgeLaneOffsets, routeEdgePath } from '@/lib/render/edgePath';
+import { routeAllEdgesAsync, type RoutedEdgePath } from '@/lib/render/edgeRouter';
+import { getCachedLayout, cacheLayoutResult } from '@/lib/cache/indexdbCache';
+import { diagramHash } from '@/lib/layout/layoutCache';
 import { RenderErrorBanner } from './RenderErrorBanner';
-
-// Fail fast: if ELK hasn't responded in 2.5 s the diagram is too heavy and we
-// show the error banner. The worker runs off the main thread so no UI freeze.
-const LAYOUT_TIMEOUT_MS = 2_500;
-
-// ELK's network-simplex algorithm throws "Invalid array length" when the edge
-// count inside a compound graph exceeds its internal matrix capacity. The limit
-// below is conservative so that we bail out gracefully before the worker dies.
-const ELK_EDGE_LIMIT = 80;
-
-// ELK's network-simplex crashes on compound graphs with many cross-group edges
-// even when the raw edge count is below ELK_EDGE_LIMIT. The product of group
-// count × edge count is a proxy for cross-hierarchy edge density; empirically
-// diagrams with 7 groups × 37 edges (= 259) reliably crash the worker.
-// We guard conservatively at 200 — above this we bail out immediately and show
-// the error banner so the user can AI-Fix rather than crashing the browser.
-// Must stay in sync with REPAIR_COMPLEXITY_LIMIT in lib/agent/repair.ts.
-const ELK_COMPLEXITY_LIMIT = 200;
+import {
+  LAYOUT_TIMEOUT_MS,
+  ELK_EDGE_LIMIT,
+  ELK_COMPLEXITY_LIMIT,
+  diagramComplexity,
+  getEffectiveThresholds,
+  getDetectedDevice,
+} from '@/lib/layout/constants';
 
 export interface DiagramCanvasHandle {
   getSvg: () => SVGSVGElement | null;
@@ -69,8 +62,23 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
   const wrapperRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
+  // Always-current viewport ref — read inside buildScene calls without adding
+  // viewport to effect deps (which would rebuild the scene on every pan/zoom frame).
+  const viewportRef = useRef(viewport);
+  useEffect(() => { viewportRef.current = viewport; }, [viewport]);
   const drag = useRef<DragState | null>(null);
   const [isLayingOut, setIsLayingOut] = useState(false);
+  // Elapsed-time counter shown in the "Computing layout…" spinner.
+  // Increments every 500 ms while layout is running so the user knows progress.
+  const [layoutElapsedMs, setLayoutElapsedMs] = useState(0);
+  // Pre-routed edges from the worker (async). Initially null, populated after layout.
+  const [preRoutedEdges, setPreRoutedEdges] = useState<Map<string, RoutedEdgePath> | null>(null);
+  useEffect(() => {
+    if (!isLayingOut) { setLayoutElapsedMs(0); return; }
+    const start = Date.now();
+    const id = setInterval(() => setLayoutElapsedMs(Date.now() - start), 500);
+    return () => clearInterval(id);
+  }, [isLayingOut]);
 
   const diagram = useMemo(() => {
     try {
@@ -113,15 +121,20 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
         return;
       }
 
+      // Get adaptive thresholds based on device capacity
+      const effectiveThresholds = getEffectiveThresholds();
+      const device = getDetectedDevice();
+
       // Guard against the "Invalid array length" RangeError that ELK's
-      // network-simplex algorithm throws on graphs with too many edges.
+      // network-simplex algorithm throws on graphs with too many raw edges.
       // Bail out before the worker even starts so the page stays responsive.
-      if (diagram.edges.length > ELK_EDGE_LIMIT) {
+      if (diagram.edges.length > effectiveThresholds.edgeLimit) {
         if (!cancelled) {
           setScene(null);
           setLayoutResult(null);
           setRenderErrors([
-            `Diagram has ${diagram.edges.length} edges — ELK layout cannot safely process more than ${ELK_EDGE_LIMIT}. ` +
+            `Diagram has ${diagram.edges.length} edges — ELK layout cannot safely process more than ${effectiveThresholds.edgeLimit} ` +
+              `on this ${device.isLowEnd ? 'low-end' : device.isHighEnd ? 'high-end' : 'mid-range'} device. ` +
               `Remove redundant or cross-group edges, split the diagram into smaller sub-diagrams, or use AI Fix to simplify.`,
           ]);
           setIsLayingOut(false);
@@ -129,17 +142,19 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
         return;
       }
 
-      // Guard against cross-group edge density that crashes ELK's network-simplex
-      // even when raw edge count looks acceptable. The product of group count ×
-      // edge count is a reliable proxy: 7 groups × 37 edges = 259 > 200 → crash.
-      const elkComplexity = diagram.groups.length * diagram.edges.length;
-      if (elkComplexity > ELK_COMPLEXITY_LIMIT) {
+      // Guard against cross-group edge density that stresses ELK's network-simplex
+      // even when the raw edge count looks acceptable.
+      // The metric cross-group edges × (1 + nesting depth) is a much more accurate
+      // proxy than the old groups × edges formula — intra-group edges no longer count.
+      const { score: elkComplexity, crossGroupEdges, maxDepth } = diagramComplexity(diagram);
+      if (elkComplexity > effectiveThresholds.complexityLimit) {
         if (!cancelled) {
           setScene(null);
           setLayoutResult(null);
           setRenderErrors([
-            `Diagram complexity too high (${diagram.groups.length} groups × ${diagram.edges.length} edges = ${elkComplexity}) — ` +
-              `ELK layout cannot safely process this. Remove redundant cross-group edges or use AI Fix to simplify.`,
+            `Diagram complexity too high (${crossGroupEdges} cross-group edges × nesting depth ${maxDepth + 1} = ${elkComplexity}) — ` +
+              `ELK layout cannot safely process this on this ${device.isLowEnd ? 'low-end' : device.isHighEnd ? 'high-end' : 'mid-range'} device. ` +
+              `Remove redundant cross-group edges or use AI Fix to simplify.`,
           ]);
           setIsLayingOut(false);
         }
@@ -148,34 +163,115 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
 
       try {
         if (!cancelled) setIsLayingOut(true);
-        // ELK now runs in a real Web Worker (see lib/layout/elk.ts) so it never
-        // blocks the main thread. The timeout promise will actually fire if the
-        // worker takes too long, because the main thread remains free.
-        const timeoutPromise = new Promise<never>((_, reject) =>
+
+        // Hard timeout to prevent browser hang on extremely heavy diagrams.
+        // This is a safety net beyond LAYOUT_TIMEOUT_MS — if the entire process
+        // (layout + routing + scene building) takes too long, fail fast.
+        const totalTimeoutMs = Math.max(30_000, effectiveThresholds.layoutTimeoutMs * 4);
+        const totalTimeoutPromise = new Promise<never>((_, reject) =>
           setTimeout(
             () =>
               reject(
                 new Error(
-                  `Layout timed out after ${LAYOUT_TIMEOUT_MS / 1000}s — diagram is too complex to render. Use AI Fix to simplify.`,
+                  `Rendering timed out after ${totalTimeoutMs / 1000}s — diagram is too heavy for this device. ` +
+                    `Try simplifying with fewer nodes/edges, or use AI Fix to reduce complexity.`,
                 ),
               ),
-            LAYOUT_TIMEOUT_MS,
+            totalTimeoutMs,
           ),
         );
-        const result = await Promise.race([runLayout(diagram, strategy), timeoutPromise]);
+
+        // Wrap the entire render process in the timeout
+        await Promise.race([
+          (async () => {
+            // Try to load from IndexDB cache before running layout
+            const cacheKey = diagramHash(diagram, { direction: 'DOWN' });
+            const cached = await getCachedLayout(cacheKey);
+            let result: LayoutResult;
+
+        if (cached) {
+          console.debug('[Cache] Layout cache hit for diagram');
+          result = cached.layoutResult;
+          // Pre-populate routed edges from cache if available
+          if (cached.routedEdges) {
+            setPreRoutedEdges(new Map(cached.routedEdges.map((r) => [r.edgeId, r])));
+          }
+        } else {
+          // ELK now runs in a real Web Worker (see lib/layout/elk.ts) so it never
+          // blocks the main thread. The timeout promise will actually fire if the
+          // worker takes too long, because the main thread remains free.
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(
+              () =>
+                reject(
+                  new Error(
+                    `Layout timed out after ${LAYOUT_TIMEOUT_MS / 1000}s — diagram is too complex to render. Use AI Fix to simplify.`,
+                  ),
+                ),
+              LAYOUT_TIMEOUT_MS,
+            ),
+          );
+          result = await Promise.race([runLayout(diagram, strategy), timeoutPromise]);
+        }
+
         if (cancelled) return;
         layoutRef.current = result;
         setLayoutResult(result);
-        // Clear the loading spinner BEFORE the synchronous buildScene call so
-        // that the browser can paint and process any queued user events (e.g.
-        // nav-tab clicks) in between. Without this yield, buildScene holds the
-        // main thread for the full routing pass, keeping the UI frozen even
-        // after ELK finishes.
-        if (!cancelled) setIsLayingOut(false);
+
+        // Cache the layout result for faster reloads (if not already from cache)
+        if (!cached) {
+          const cacheKey = diagramHash(diagram, { direction: 'DOWN' });
+          cacheLayoutResult(cacheKey, result, undefined, 'default-project', 'default-layer', dsl).catch(
+            (err) => console.warn('[Cache] Failed to save to IndexDB:', err),
+          );
+        }
+
+        // Start edge routing in the worker asynchronously.
+        // Keep the spinner visible until routing completes so the user sees "Computing layout…"
+        // during the edge refinement phase, preventing the jarring "disconnected arrows" moment.
+        const edgeOffsets = edgeLaneOffsets(diagram.edges);
+        routeAllEdgesAsync(diagram.edges, result, overrides, edgeOffsets)
+          .then((routed) => {
+            if (!cancelled) {
+              setPreRoutedEdges(routed);
+              console.debug('[Route] Edge routing worker completed for', routed.size, 'edges');
+              // Also cache the routed edges for next reload
+              const cacheKey = diagramHash(diagram, { direction: 'DOWN' });
+              const routedArray = Array.from(routed.entries()).map(([edgeId, path]) => ({
+                edgeId,
+                ...path,
+              }));
+              cacheLayoutResult(cacheKey, result, routedArray, 'default-project', 'default-layer', dsl).catch(
+                (err) => console.warn('[Cache] Failed to update routed edges in IndexDB:', err),
+              );
+              // Hide spinner now that routing is done
+              setIsLayingOut(false);
+            }
+          })
+          .catch((err) => {
+            console.warn('[Route] Worker routing failed, falling back to sync routing:', err);
+            // Keep preRoutedEdges as null so buildScene will use sync routing
+            if (!cancelled) setIsLayingOut(false);
+          });
+
+        // Render the scene immediately with initial fast routes so the layout is visible fast.
+        // The edge routing worker refines edges asynchronously; when routed edges arrive,
+        // the useEffect on line 277 rebuilds the scene with optimized routing.
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
         if (cancelled) return;
-        setScene(buildScene(diagram, result, { selectedId: selection.id, overrides, theme }));
-        setRenderErrors([]);
+        setScene(buildScene(diagram, result, {
+          selectedId: selection.id,
+          overrides,
+          theme,
+          viewport: wrapperRef.current
+            ? { ...viewportRef.current, containerW: wrapperRef.current.clientWidth, containerH: wrapperRef.current.clientHeight }
+            : undefined,
+          preRoutedEdges: preRoutedEdges ?? undefined,
+            }));
+            setRenderErrors([]);
+          })(),
+          totalTimeoutPromise,
+        ]);
       } catch (err) {
         // Always surface the error — even if the effect was cancelled a new
         // effect will overwrite state momentarily, but this ensures the banner
@@ -206,9 +302,17 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
   useEffect(() => {
     if (!layoutRef.current) return;
     setScene(
-      buildScene(diagram, layoutRef.current, { selectedId: selection.id, overrides, theme }),
+      buildScene(diagram, layoutRef.current, {
+        selectedId: selection.id,
+        overrides,
+        theme,
+        viewport: wrapperRef.current
+          ? { ...viewportRef.current, containerW: wrapperRef.current.clientWidth, containerH: wrapperRef.current.clientHeight }
+          : undefined,
+        preRoutedEdges: preRoutedEdges ?? undefined,
+      }),
     );
-  }, [overrides, selection, diagram, theme]);
+  }, [overrides, selection, diagram, theme, preRoutedEdges]);
 
   const fitView = useCallback(() => {
     if (!scene || !wrapperRef.current) return;
@@ -451,7 +555,9 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
           <div className="flex items-center gap-2 rounded-lg border border-ink-700/60 bg-ink-900/80 px-3 py-2 text-[11px] text-ink-400 backdrop-blur-sm">
             <span className="h-3 w-3 animate-spin rounded-full border border-ink-600 border-t-accent" />
-            Computing layout…
+            {layoutElapsedMs >= 1_000
+              ? `Computing layout… (${Math.round(layoutElapsedMs / 1_000)}s)`
+              : 'Computing layout…'}
           </div>
         </div>
       )}

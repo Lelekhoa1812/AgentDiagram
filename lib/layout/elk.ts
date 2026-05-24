@@ -4,12 +4,18 @@
  * Builds an ELK graph from a Diagram, runs `elk.layered` with hierarchical
  * compound support and orthogonal edge routing, and produces a
  * LayoutResult with absolute positions for every node, group, and edge.
+ *
+ * Strategy escalation: if ELK crashes or the initial algorithm fails, the
+ * layout function automatically retries with progressively more conservative
+ * options before propagating the error to the caller.
  */
 
 import ELKApi from 'elkjs/lib/elk-api.js';
 import type { ELK as ELKType } from 'elkjs/lib/elk-api.js';
 import type { Diagram, Point } from '../ir/types';
 import { nodeSize, groupTitleSize, edgeLabelSize } from './measure';
+import { diagramComplexity } from './constants';
+import { bundleEdges } from './bundleEdges';
 
 // Singleton — created once per browser session, reset whenever the worker crashes.
 // In the browser we spin up a real Web Worker (elk-worker.min.js served from /public)
@@ -145,19 +151,48 @@ const DEFAULT_OPTS: Required<LayoutOptions> = {
   groupPadding: 28,
 };
 
+// ── Strategy escalation ────────────────────────────────────────────────────────
+/**
+ * ELK node-placement strategies in escalation order (most accurate → most stable).
+ * Each entry is tried in sequence; on worker crash the next is attempted.
+ */
+const ESCALATION_STRATEGIES = [
+  // NETWORK_SIMPLEX: best visual quality, but quadratic memory on compound graphs —
+  // crashes with "Invalid array length" above ~200 cross-group edges.
+  { nodePlacement: 'NETWORK_SIMPLEX', hierarchyHandling: 'INCLUDE_CHILDREN', label: 'NETWORK_SIMPLEX' },
+  // BRANDES_KOEPF: more stable on compound graphs with moderate cross-group edges.
+  { nodePlacement: 'BRANDES_KOEPF',  hierarchyHandling: 'INCLUDE_CHILDREN', label: 'BRANDES_KOEPF' },
+  // SIMPLE: minimal memory usage — lays out each layer greedily. Rarely fails.
+  { nodePlacement: 'SIMPLE',         hierarchyHandling: 'INCLUDE_CHILDREN', label: 'SIMPLE' },
+  // Flat fallback: each compound node laid out independently. Cross-group edge
+  // routing may be incomplete but nodes will still be positioned correctly.
+  { nodePlacement: 'BRANDES_KOEPF',  hierarchyHandling: 'SEPARATE_CHILDREN', label: 'flat BRANDES_KOEPF' },
+] as const;
+
+/**
+ * Attempts a single ELK layout pass. Throws if the worker crashes or rejects.
+ * Each call gets a fresh `crashPromise` so that a previous worker's onerror
+ * does not bleed into the next attempt.
+ */
+async function tryElkLayout(elkGraph: ElkNode): Promise<ElkLayoutNode> {
+  const elk = getElk();
+  const crashPromise = new Promise<never>((_, reject) => {
+    _elkPendingReject = reject;
+  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const laid = (await Promise.race([elk.layout(elkGraph as any), crashPromise])) as ElkLayoutNode;
+  _elkPendingReject = null;
+  return laid;
+}
+
 export async function layout(diagram: Diagram, opts: LayoutOptions = {}): Promise<LayoutResult> {
   const o = { ...DEFAULT_OPTS, ...opts };
 
-  // Compute graph complexity (groups × edges) to choose a safe node-placement
-  // strategy. ELK's NETWORK_SIMPLEX has quadratic memory usage on compound graphs
-  // and throws "Invalid array length" above ~200–260. BRANDES_KOEPF handles
-  // moderate complexity well; SIMPLE is a safe fallback for very dense diagrams.
-  const complexity = diagram.groups.length * diagram.edges.length;
-  // Switch away from NETWORK_SIMPLEX early — anything in the 100–200 band
-  // (diagrams near the ELK_COMPLEXITY_LIMIT guard) gets BRANDES_KOEPF which is
-  // more stable in compound graphs. Below 100 NETWORK_SIMPLEX gives best quality.
-  const nodePlacementStrategy =
-    complexity > 100 ? 'BRANDES_KOEPF' : 'NETWORK_SIMPLEX';
+  // Use the accurate cross-group × depth complexity metric to decide where in the
+  // escalation sequence to start. Below score 60 we can try NETWORK_SIMPLEX first;
+  // at or above that we skip straight to BRANDES_KOEPF which is more stable.
+  const { score: complexity } = diagramComplexity(diagram);
+  const startIndex = complexity >= 60 ? 1 : 0; // 0=NETWORK_SIMPLEX, 1=BRANDES_KOEPF
 
   // Build a quick lookup for groups so we can recurse children → ELK nodes.
   const groupsById = new Map(diagram.groups.map((g) => [g.id, g]));
@@ -200,47 +235,85 @@ export async function layout(diagram: Diagram, opts: LayoutOptions = {}): Promis
   }
 
   const rootChildren = buildChildren(diagram.roots);
-  const elkEdges: ElkEdge[] = diagram.edges.map((e) => {
+
+  // ── Edge bundling ─────────────────────────────────────────────────────────
+  // Deduplicate edges by (srcTopAncestor, tgtTopAncestor) before passing to
+  // ELK. This reduces the cross-group edge count — the primary driver of ELK's
+  // NETWORK_SIMPLEX memory usage — without losing any edges in the final render
+  // (bundled siblings get routes via routeEdgePath's automaticRoute fallback).
+  const { elkEdges: bundledEdgeList } = bundleEdges(diagram);
+  const elkEdges: ElkEdge[] = bundledEdgeList.map((e) => {
     const labelSize = e.label ? edgeLabelSize(e.label) : null;
     return {
       id: e.id,
       sources: [e.source],
       targets: [e.target],
-      labels: e.label && labelSize ? [{ text: e.label, width: labelSize.width, height: labelSize.height }] : undefined,
+      labels:
+        e.label && labelSize
+          ? [{ text: e.label, width: labelSize.width, height: labelSize.height }]
+          : undefined,
     };
   });
 
-  const elkGraph: ElkNode = {
+  // Base layout options shared by all strategy attempts.
+  const baseLayoutOptions: Record<string, string> = {
+    'elk.algorithm': 'layered',
+    'elk.direction': o.direction,
+    'elk.spacing.nodeNode': `${o.nodeNodeSpacing}`,
+    'elk.layered.spacing.nodeNodeBetweenLayers': `${o.layerSpacing}`,
+    'elk.edgeRouting': 'ORTHOGONAL',
+    'elk.padding': `[top=24,left=24,bottom=24,right=24]`,
+    'elk.layered.crossingMinimization.semiInteractive': 'true',
+    'elk.layered.mergeEdges': 'true',
+    // DEPTH_FIRST cycle-breaking is more stable on complex diagrams with back-edges.
+    'elk.layered.cycleBreaking.strategy': 'DEPTH_FIRST',
+  };
+
+  const baseGraph: ElkNode = {
     id: 'root',
     children: rootChildren,
     edges: elkEdges,
-    layoutOptions: {
-      'elk.algorithm': 'layered',
-      'elk.direction': o.direction,
-      'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
-      'elk.spacing.nodeNode': `${o.nodeNodeSpacing}`,
-      'elk.layered.spacing.nodeNodeBetweenLayers': `${o.layerSpacing}`,
-      'elk.edgeRouting': 'ORTHOGONAL',
-      'elk.padding': `[top=24,left=24,bottom=24,right=24]`,
-      'elk.layered.crossingMinimization.semiInteractive': 'true',
-      'elk.layered.mergeEdges': 'true',
-      'elk.layered.nodePlacement.strategy': nodePlacementStrategy,
-      // DEPTH_FIRST cycle-breaking is more stable on complex diagrams with back-edges.
-      'elk.layered.cycleBreaking.strategy': 'DEPTH_FIRST',
-    },
+    // layoutOptions filled per-attempt in the escalation loop below
+    layoutOptions: {},
   };
 
-  const elk = getElk();
-  // Wrap the layout call with a crash-rejection promise. If the ELK worker dies
-  // (e.g. "Invalid array length" RangeError inside the worker), the onerror
-  // handler set in getElk() fires _elkPendingReject, which immediately rejects
-  // this promise — otherwise it would hang until the 5s timeout in DiagramCanvas.
-  const crashPromise = new Promise<never>((_, reject) => {
-    _elkPendingReject = reject;
-  });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const laid = (await Promise.race([elk.layout(elkGraph as any), crashPromise])) as ElkLayoutNode;
-  _elkPendingReject = null;
+  // ── Strategy escalation loop ───────────────────────────────────────────────
+  // Try ELK strategies from startIndex onward; escalate on any crash.
+  // After a worker crash getElk() creates a fresh worker on the next call.
+  const strategySlice = ESCALATION_STRATEGIES.slice(startIndex);
+  let laid: ElkLayoutNode | null = null;
+
+  for (let i = 0; i < strategySlice.length; i++) {
+    const strat = strategySlice[i]!;
+    const elkGraph: ElkNode = {
+      ...baseGraph,
+      layoutOptions: {
+        ...baseLayoutOptions,
+        'elk.hierarchyHandling': strat.hierarchyHandling,
+        'elk.layered.nodePlacement.strategy': strat.nodePlacement,
+      },
+    };
+    try {
+      laid = await tryElkLayout(elkGraph);
+      if (i > 0) {
+        // eslint-disable-next-line no-console
+        console.info(`[ELK] Escalated to strategy: ${strat.label} (attempt ${i + 1})`);
+      }
+      break; // success — stop escalating
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.info(
+        `[ELK] Strategy ${strat.label} failed:`,
+        err instanceof Error ? err.message : err,
+      );
+      if (i === strategySlice.length - 1) throw err; // exhausted all strategies
+      // Otherwise loop — getElk() will provide a fresh worker on next tryElkLayout call
+    }
+  }
+
+  // TypeScript narrowing: laid is guaranteed non-null here (we either broke out
+  // of the loop on success or threw on exhaustion above).
+  const laid_ = laid!;
 
   const result: LayoutResult = {
     nodes: new Map(),
@@ -284,13 +357,13 @@ export async function layout(diagram: Diagram, opts: LayoutOptions = {}): Promis
     }
   }
 
-  walk(laid, 0, 0);
+  walk(laid_, 0, 0);
 
   if (!isFinite(minX)) {
     minX = 0;
     minY = 0;
-    maxX = laid.width ?? 800;
-    maxY = laid.height ?? 600;
+    maxX = laid_.width ?? 800;
+    maxY = laid_.height ?? 600;
   }
 
   result.bbox = {

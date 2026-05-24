@@ -4,18 +4,17 @@
  *
  * The split is structural (no AI call): top-level root elements are distributed
  * across partitions round-robin, and only intra-partition edges are kept in each
- * sub-diagram. Cross-partition connections are intentionally dropped to reduce
- * complexity.
+ * sub-diagram. Cross-partition connections that are dropped are recorded as DSL
+ * comments (// cross-ref: …) at the end of each sub-layer so users and the AI
+ * repair agent can understand dependencies across partitions.
  *
- * Must stay in sync with ELK_COMPLEXITY_LIMIT in DiagramCanvas.tsx.
+ * Complexity constants are defined in lib/layout/constants.ts (single source of truth).
  */
 
 import { formatDiagram } from '../dsl/formatter';
 import type { Diagram } from '../ir/types';
 import type { LayerDiagram } from '../state/projectStorage';
-
-// Mirror of DiagramCanvas.tsx's ELK_COMPLEXITY_LIMIT.
-const ELK_COMPLEXITY_LIMIT = 200;
+import { ELK_COMPLEXITY_LIMIT, diagramComplexity } from '../layout/constants';
 
 /**
  * Splits `diagram` into 2–10 sub-layer diagrams.
@@ -43,13 +42,13 @@ export function splitDiagramIntoLayers(
   }
 
   // ── Determine how many partitions we need ──────────────────────────────────
-  // ELK complexity = groups × edges. After a k-way split, each partition
-  // gets ≈ groups/k groups and (in the worst case) all E edges. We therefore
-  // want (groups/k) × E < limit  ⟹  k > groups × E / limit.
-  // Using total group count (including nested) gives the tightest bound.
-  const G = Math.max(diagram.groups.length, roots.length);
-  const E = diagram.edges.length;
-  const needed = Math.ceil((G * E) / ELK_COMPLEXITY_LIMIT);
+  // Use the accurate cross-group × depth complexity metric. After a k-way split,
+  // cross-partition edges are dropped, so the score decreases faster than
+  // proportionally. ceil(score / limit) partitions is a safe conservative estimate.
+  const { score: complexityScore } = diagramComplexity(diagram);
+  // Fall back to a minimum of 2 even if the score is within limit — we're here
+  // precisely because something is wrong and splitting was explicitly requested.
+  const needed = Math.max(2, Math.ceil(complexityScore / ELK_COMPLEXITY_LIMIT));
   // Clamp: at least 2, at most 10, never more partitions than roots
   const k = Math.max(2, Math.min(10, needed, roots.length));
 
@@ -58,6 +57,12 @@ export function splitDiagramIntoLayers(
   roots.forEach((id, i) => { buckets[i % k]!.push(id); });
 
   const nonEmpty = buckets.filter((b) => b.length > 0);
+
+  // ── Build ID → display name lookup (used for cross-ref comments) ─────────
+  const nameById = new Map<string, string>([
+    ...diagram.nodes.map((n): [string, string] => [n.id, n.label ?? n.name]),
+    ...diagram.groups.map((g): [string, string] => [g.id, g.label ?? g.name]),
+  ]);
 
   // ── Build one LayerDiagram per partition ──────────────────────────────────
   return nonEmpty.map((rootIds, idx) => {
@@ -81,10 +86,30 @@ export function splitDiagramIntoLayers(
       diagnostics: [],
     };
 
+    // ── Cross-partition edge annotations ──────────────────────────────────
+    // Dropped edges (those spanning this partition and another) are preserved as
+    // DSL comments. This allows users and the AI repair agent to understand the
+    // full dependency graph without re-examining the original diagram.
+    const crossRefLines: string[] = [];
+    for (const e of diagram.edges) {
+      const srcIn = allIds.has(e.source);
+      const tgtIn = allIds.has(e.target);
+      if (srcIn === tgtIn) continue; // both inside or both outside — skip
+      const srcName = nameById.get(e.source) ?? e.source;
+      const tgtName = nameById.get(e.target) ?? e.target;
+      crossRefLines.push(`// cross-ref: ${srcName} → ${tgtName} (other partition)`);
+    }
+
+    const baseDsl = formatDiagram(subDiagram).trim();
+    const dsl =
+      crossRefLines.length > 0
+        ? `${baseDsl}\n\n// ── Cross-partition references (informational, not rendered) ──\n${crossRefLines.join('\n')}`
+        : baseDsl;
+
     return {
       name: `${baseLayerName} #${idx + 1}`,
       description: `Part ${idx + 1} of ${nonEmpty.length} — split from "${baseLayerName}"`,
-      dsl: formatDiagram(subDiagram).trim(),
+      dsl,
     };
   });
 }

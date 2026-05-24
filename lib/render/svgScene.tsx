@@ -19,7 +19,7 @@ import { paletteFor, themeFor, type RenderThemeMode } from './theme';
 import { getIcon } from '../icons/registry';
 import { ARROW_FWD_ID, ARROW_BWD_ID, ARROW_THICK_ID, MARKER_DEFS } from './markers';
 import { edgeLabelSize, groupTitleSize } from '../layout/measure';
-import { edgeLaneOffsets, routeEdgePath } from './edgePath';
+import { edgeLaneOffsets, routeEdgePath, type RoutedEdgePath } from './edgePath';
 
 export interface SceneOptions {
   selectedId?: string | null;
@@ -30,6 +30,29 @@ export interface SceneOptions {
     edges?: Record<string, { bends: Point[] }>;
   };
   theme?: RenderThemeMode;
+  /**
+   * Current canvas viewport — when provided, `buildScene` skips rendering
+   * nodes, groups, and edges that are entirely outside the visible area.
+   * This reduces the SVG DOM size for large diagrams (100+ nodes) and speeds
+   * up edge routing, which runs once per `buildScene` call.
+   *
+   * Omit (or pass undefined) to disable culling — export paths always omit it
+   * so the full diagram is captured. Culling is also automatically disabled
+   * when `scale < 0.3` because all elements are visible at that zoom level.
+   */
+  viewport?: {
+    x: number;
+    y: number;
+    scale: number;
+    containerW: number;
+    containerH: number;
+  };
+  /**
+   * Pre-routed edge paths from the worker. When provided, edges use these
+   * paths instead of computing them synchronously. Enables responsive UI
+   * while edge routing happens off the main thread.
+   */
+  preRoutedEdges?: Map<string, RoutedEdgePath>;
 }
 
 export interface SceneResult {
@@ -43,6 +66,10 @@ export interface SceneResult {
 
 const ICON_SIZE = 14;
 
+// Extra padding around the visible rect so nodes pop into existence
+// before they touch the viewport edge (in scene-space pixels).
+const CULL_MARGIN_PX = 200;
+
 export function buildScene(
   diagram: Diagram,
   layout: LayoutResult,
@@ -51,6 +78,45 @@ export function buildScene(
   const theme = themeFor(opts.theme);
   const groupsById = new Map(diagram.groups.map((g) => [g.id, g]));
   const edgeOffsets = edgeLaneOffsets(diagram.edges);
+
+  // ── Viewport culling ─────────────────────────────────────────────────────
+  // When the caller provides a viewport, compute the visible rect in scene
+  // coordinates and skip rendering elements outside it. Culling is disabled
+  // when scale < 0.3 because all elements fit on screen at that zoom level.
+  const vp = opts.viewport;
+  const cullActive = vp !== undefined && vp.scale >= 0.3;
+  const visX  = vp ? -vp.x / vp.scale : 0;
+  const visY  = vp ? -vp.y / vp.scale : 0;
+  const visW  = vp ? vp.containerW / vp.scale : Infinity;
+  const visH  = vp ? vp.containerH / vp.scale : Infinity;
+  const margin = vp ? CULL_MARGIN_PX / vp.scale : 0;
+
+  function isRectVisible(rect: LayoutRect): boolean {
+    if (!cullActive) return true;
+    return (
+      rect.x             < visX + visW + margin &&
+      rect.x + rect.width > visX          - margin &&
+      rect.y             < visY + visH + margin &&
+      rect.y + rect.height > visY          - margin
+    );
+  }
+
+  function isEdgeVisible(edgeId: string): boolean {
+    if (!cullActive) return true;
+    const le = layout.edges.get(edgeId);
+    if (!le) return true; // no ELK data — let routeEdgePath decide
+    const pts = [le.start, le.end, ...le.bends];
+    const minX = Math.min(...pts.map((p) => p.x));
+    const maxX = Math.max(...pts.map((p) => p.x));
+    const minY = Math.min(...pts.map((p) => p.y));
+    const maxY = Math.max(...pts.map((p) => p.y));
+    return (
+      minX < visX + visW + margin &&
+      maxX > visX          - margin &&
+      minY < visY + visH + margin &&
+      maxY > visY          - margin
+    );
+  }
 
   function rectFor(id: string): LayoutRect | undefined {
     const ov = opts.overrides?.nodes?.[id] ?? opts.overrides?.groups?.[id];
@@ -79,6 +145,9 @@ export function buildScene(
   function renderGroup(g: IRGroup): React.ReactElement | null {
     const rect = rectFor(g.id);
     if (!rect) return null;
+    // Groups that contain visible children must still render even if the group
+    // header is offscreen, so we skip culling for groups (they act as containers).
+    // Culling is still effective for nodes and edges.
     const color = effectiveColor(g);
     const pal = paletteFor(color, opts.theme);
     const title = (g.label ?? g.name).toUpperCase();
@@ -146,6 +215,7 @@ export function buildScene(
   function renderNode(n: IRNode): React.ReactElement | null {
     const rect = rectFor(n.id);
     if (!rect) return null;
+    if (!isRectVisible(rect)) return null; // viewport culling
     const color = effectiveColor(n);
     const pal = paletteFor(color, opts.theme);
     const icon = getIcon(n.icon);
@@ -194,7 +264,10 @@ export function buildScene(
   }
 
   function renderEdge(edge: IREdge): React.ReactElement | null {
-    const routed = routeEdgePath(edge, layout, opts.overrides, edgeOffsets.get(edge.id) ?? 0);
+    if (!isEdgeVisible(edge.id)) return null; // viewport culling (fast check before routing)
+    // Check for pre-routed paths from worker first, fall back to sync routing
+    const prerouted = opts.preRoutedEdges?.get(edge.id);
+    const routed = prerouted ?? routeEdgePath(edge, layout, opts.overrides, edgeOffsets.get(edge.id) ?? 0);
     if (!routed?.path) return null;
     const isSelected = opts.selectedId === edge.id;
     const fwdMarker = edge.kind === 'thick' ? ARROW_THICK_ID : ARROW_FWD_ID;
