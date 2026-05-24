@@ -212,7 +212,9 @@ export async function generateFixedPlan(
         `5. "Rename X to Y" → use Y everywhere in the plan.\n` +
         `6. "Move X into Y" → update X's parent to Y.\n` +
         `7. Keep stable, short, human-readable names (they appear as diagram labels).\n` +
-        `8. Use 'uncertainties' to document assumptions and 'omitted' for deliberate exclusions per the user's answers.\n\n` +
+        `8. Use 'uncertainties' to document assumptions and 'omitted' for deliberate exclusions per the user's answers.\n` +
+        `CRITICAL — EDGE LIMIT: Total edges in the output plan MUST stay below 60. Exceeding this causes ELK layout to crash with "Invalid array length". ` +
+        `If adding new edges would push the total over 60, remove lower-priority existing edges (observability links, redundant dashed lines) to make room.\n\n` +
         ICON_GUIDANCE + '\n\n' + COLOR_GUIDANCE,
     },
     { role: 'user' as const, content: userMsg },

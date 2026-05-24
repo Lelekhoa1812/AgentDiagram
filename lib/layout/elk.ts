@@ -11,18 +11,55 @@ import type { ELK as ELKType } from 'elkjs/lib/elk-api.js';
 import type { Diagram, Point } from '../ir/types';
 import { nodeSize, groupTitleSize, edgeLabelSize } from './measure';
 
-// Singleton — created once per browser session.
+// Singleton — created once per browser session, reset whenever the worker crashes.
 // In the browser we spin up a real Web Worker (elk-worker.min.js served from /public)
-// so the layout algorithm never blocks the main thread and the 15-second timeout
-// in DiagramCanvas actually fires. The bundled fallback is kept for SSR / test environments
-// where Worker is unavailable.
+// so the layout algorithm never blocks the main thread. The bundled fallback is kept
+// for SSR / test environments where Worker is unavailable.
 let _elk: ELKType | null = null;
+// The raw Worker reference lets us terminate it on crash and add an onerror handler.
+// elk-api.js's PromisedWorker never sets worker.onerror, so a crashing worker leaves
+// pending layout promises hanging forever — we add the handler here to fix that.
+let _elkRawWorker: Worker | null = null;
+// When the worker crashes we call this to immediately reject the in-flight layout promise.
+let _elkPendingReject: ((err: Error) => void) | null = null;
+
+function resetElk() {
+  if (_elkRawWorker) {
+    _elkRawWorker.terminate();
+    _elkRawWorker = null;
+  }
+  if (_elkPendingReject) {
+    _elkPendingReject(new Error('ELK worker crashed (diagram too complex or internal error)'));
+    _elkPendingReject = null;
+  }
+  _elk = null;
+}
+
+/** Terminate the ELK worker and reject any in-flight layout call. Call this on unmount. */
+export function terminateElkWorker() {
+  resetElk();
+}
+
 function getElk(): ELKType {
   if (_elk) return _elk;
   if (typeof window !== 'undefined' && typeof Worker !== 'undefined') {
+    const worker = new Worker('/elk-worker.min.js');
+    _elkRawWorker = worker;
+    // elk-api.js never sets worker.onerror, so we do it here. When the ELK
+    // network-simplex algorithm throws (e.g. "Invalid array length"), the worker
+    // posts a global error that fires this handler — we reject the pending promise
+    // and reset the singleton so the next layout call gets a fresh worker.
+    worker.addEventListener('error', () => {
+      const reject = _elkPendingReject;
+      _elkPendingReject = null;
+      _elkRawWorker = null;
+      _elk = null;
+      reject?.(new Error('ELK worker crashed — diagram is too complex to lay out'));
+      worker.terminate();
+    });
     _elk = new ELKApi({
       workerUrl: '/elk-worker.min.js',
-      workerFactory: (url) => new Worker(url as string),
+      workerFactory: () => worker,
     }) as unknown as ELKType;
   } else {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -181,8 +218,16 @@ export async function layout(diagram: Diagram, opts: LayoutOptions = {}): Promis
   };
 
   const elk = getElk();
+  // Wrap the layout call with a crash-rejection promise. If the ELK worker dies
+  // (e.g. "Invalid array length" RangeError inside the worker), the onerror
+  // handler set in getElk() fires _elkPendingReject, which immediately rejects
+  // this promise — otherwise it would hang until the 5s timeout in DiagramCanvas.
+  const crashPromise = new Promise<never>((_, reject) => {
+    _elkPendingReject = reject;
+  });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const laid = (await elk.layout(elkGraph as any)) as ElkLayoutNode;
+  const laid = (await Promise.race([elk.layout(elkGraph as any), crashPromise])) as ElkLayoutNode;
+  _elkPendingReject = null;
 
   const result: LayoutResult = {
     nodes: new Map(),

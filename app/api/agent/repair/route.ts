@@ -68,7 +68,7 @@ export async function POST(req: Request) {
       }
       send({ type: 'stage', stage: 'validate', status: 'done', message: 'Provider ready' });
 
-      send({ type: 'stage', stage: 'repair', status: 'start', message: 'Patching syntax errors…' });
+      send({ type: 'stage', stage: 'repair', status: 'start', message: 'Analysing and repairing diagram…' });
       const result = await tryRepair(session, cfg.dsl, {
         maxAttempts: 3,
         signal: ac.signal,

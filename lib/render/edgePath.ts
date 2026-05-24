@@ -22,7 +22,11 @@ const TURN_PENALTY = 36;
 const LOCAL_OBSTACLE_MARGIN = 180;
 const ROUTING_OBSTACLE_LIMIT = 12;
 const ROUTING_OBSTACLE_CAP = 24;
-const ROUTING_FAST_ROUTE_THRESHOLD = 120;
+// Above this element count (nodes + groups + edges) the router switches to
+// fast Manhattan paths instead of obstacle-aware A* to keep the main thread
+// responsive. The example "bridge server" diagram has ~80 elements, so 60 is
+// the threshold that catches it while leaving smaller diagrams with A* routing.
+const ROUTING_FAST_ROUTE_THRESHOLD = 60;
 
 interface Bounds {
   minX: number;

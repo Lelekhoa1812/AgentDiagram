@@ -18,7 +18,18 @@ import type { Point } from '@/lib/ir/types';
 import { edgeLaneOffsets, routeEdgePath } from '@/lib/render/edgePath';
 import { RenderErrorBanner } from './RenderErrorBanner';
 
-const LAYOUT_TIMEOUT_MS = 15_000;
+const LAYOUT_TIMEOUT_MS = 5_000;
+
+// ELK's network-simplex algorithm throws "Invalid array length" when the edge
+// count inside a compound graph exceeds its internal matrix capacity. The limit
+// below is conservative so that we bail out gracefully before the worker dies.
+const ELK_EDGE_LIMIT = 80;
+
+// ELK's network-simplex crashes on compound graphs with many cross-group edges
+// even when the raw edge count is below ELK_EDGE_LIMIT. The product of group
+// count × edge count is a proxy for cross-hierarchy edge density; empirically
+// diagrams with 7 groups × 37 edges (= 259) reliably crash the worker.
+const ELK_COMPLEXITY_LIMIT = 200;
 
 export interface DiagramCanvasHandle {
   getSvg: () => SVGSVGElement | null;
@@ -97,6 +108,39 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
         return;
       }
 
+      // Guard against the "Invalid array length" RangeError that ELK's
+      // network-simplex algorithm throws on graphs with too many edges.
+      // Bail out before the worker even starts so the page stays responsive.
+      if (diagram.edges.length > ELK_EDGE_LIMIT) {
+        if (!cancelled) {
+          setScene(null);
+          setLayoutResult(null);
+          setRenderErrors([
+            `Diagram has ${diagram.edges.length} edges — ELK layout cannot safely process more than ${ELK_EDGE_LIMIT}. ` +
+              `Remove redundant or cross-group edges, split the diagram into smaller sub-diagrams, or use AI Fix to simplify.`,
+          ]);
+          setIsLayingOut(false);
+        }
+        return;
+      }
+
+      // Guard against cross-group edge density that crashes ELK's network-simplex
+      // even when raw edge count looks acceptable. The product of group count ×
+      // edge count is a reliable proxy: 7 groups × 37 edges = 259 > 200 → crash.
+      const elkComplexity = diagram.groups.length * diagram.edges.length;
+      if (elkComplexity > ELK_COMPLEXITY_LIMIT) {
+        if (!cancelled) {
+          setScene(null);
+          setLayoutResult(null);
+          setRenderErrors([
+            `Diagram complexity too high (${diagram.groups.length} groups × ${diagram.edges.length} edges = ${elkComplexity}) — ` +
+              `ELK layout cannot safely process this. Remove redundant cross-group edges or use AI Fix to simplify.`,
+          ]);
+          setIsLayingOut(false);
+        }
+        return;
+      }
+
       try {
         if (!cancelled) setIsLayingOut(true);
         // ELK now runs in a real Web Worker (see lib/layout/elk.ts) so it never
@@ -117,13 +161,28 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
         if (cancelled) return;
         layoutRef.current = result;
         setLayoutResult(result);
+        // Clear the loading spinner BEFORE the synchronous buildScene call so
+        // that the browser can paint and process any queued user events (e.g.
+        // nav-tab clicks) in between. Without this yield, buildScene holds the
+        // main thread for the full routing pass, keeping the UI frozen even
+        // after ELK finishes.
+        if (!cancelled) setIsLayingOut(false);
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        if (cancelled) return;
         setScene(buildScene(diagram, result, { selectedId: selection.id, overrides, theme }));
         setRenderErrors([]);
       } catch (err) {
         if (!cancelled) {
           setScene(null);
           setLayoutResult(null);
-          const errMsg = err instanceof Error ? err.message : String(err);
+          let errMsg = err instanceof Error ? err.message : String(err);
+          // ELK's network-simplex algorithm throws "Invalid array length" when
+          // the compound graph is too complex (too many nodes/cross-group edges).
+          if (errMsg.includes('Invalid array length')) {
+            errMsg =
+              `ELK layout failed: diagram is too complex (too many nodes or cross-group edges). ` +
+              `Try removing redundant edges, splitting into smaller sub-diagrams, or use AI Fix to simplify.`;
+          }
           setRenderErrors([errMsg]);
           // eslint-disable-next-line no-console
           console.warn('Layout failed:', err);
@@ -250,6 +309,11 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!wrapperRef.current) return;
+    // Do NOT capture the pointer while layout is running. Capturing here would
+    // redirect all subsequent pointer events (including clicks on nav links
+    // outside the canvas) to this element, making the rest of the UI unclickable
+    // until the user releases the mouse.
+    if (isLayingOut) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     const target = e.target as Element;
     const edgeHandle = target.closest('[data-edge-segment]') as Element | null;

@@ -244,7 +244,9 @@ export async function generatePlanFromPrompt(
         `3. Edges represent the relationship the user described: data flow, dependency, sequence, hierarchy, communication. Use 'fwd' (>) by default, 'bi' for bidirectional, 'thick' for primary paths, 'dashed' for optional / weak / observational links.\n` +
         `4. Stable, short, human-readable names — they will be displayed in the diagram.\n` +
         `5. Honor the user's answers: if they asked for a small overview, keep it small (15-30 nodes). If they asked for deep detail, scale up but stay readable (≤90 nodes).\n` +
-        `6. Use 'uncertainties' to record assumptions you made and 'omitted' for things deliberately left out per the user's answers.\n\n` +
+        `6. Use 'uncertainties' to record assumptions you made and 'omitted' for things deliberately left out per the user's answers.\n` +
+        `CRITICAL — EDGE LIMIT: Total edges MUST stay below 60. Exceeding this causes ELK layout to crash with "Invalid array length". ` +
+        `Show only meaningful relationships; omit redundant, observational, or purely informational connections. List omitted links under 'omitted'.\n\n` +
         ICON_GUIDANCE + '\n\n' + COLOR_GUIDANCE,
     },
     { role: 'user' as const, content: userMsg },

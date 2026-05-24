@@ -309,6 +309,9 @@ export async function generatePlan(
         `6. Keep the diagram readable: 40-90 nodes total. If the repo is very large, prefer groups over individual files; list omitted detail under 'omitted'.\n` +
         `7. If the layerFocus field is set, restrict the plan to that layer plus immediate boundary nodes (one hop out).\n\n` +
         `8. Prefer names and boundaries from the deterministic repo context when it conflicts with vague file summaries.\n` +
+        `CRITICAL — EDGE LIMIT: Total edges MUST stay below 60. Exceeding this causes ELK layout to crash with "Invalid array length". ` +
+        `Prioritise: primary data-flow edges and hard dependencies. Omit: observability/logging links, edges that merely duplicate group membership, and low-value informational connections. ` +
+        `If many components interact with one hub, show only the 3-4 most important connections and note the rest under 'omitted'.\n` +
         (input.quickMode
           ? `9. QUICK MODE: per-file summaries are unavailable. Build the plan from folder clusters (treat each as a candidate group), central files, routes, exports, env vars, cross-folder edges, and the import graph. Keep the diagram skeletal — group-level over file-level when in doubt.\n\n`
           : '\n') +
