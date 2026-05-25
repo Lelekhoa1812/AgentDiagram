@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { useDiagramStore, type MultiLayerOutput } from '../store';
-import { addStoredProject, writeActiveProjectId, writeStoredProjects } from '../projectStorage';
+import {
+  addStoredProject,
+  readStoredProjects,
+  writeActiveProjectId,
+  writeStoredProjects,
+} from '../projectStorage';
 import { writeUiPreference } from '../uiPreferences';
 
 describe('project tab loading', () => {
@@ -104,6 +109,52 @@ describe('project tab loading', () => {
     const state = useDiagramStore.getState();
     expect(state.activeProjectId).toBe(project.id);
     expect(state.dslText).toBe(project.dsl);
+  });
+
+  it('autosaves edits to the active multi-layer DSL tab', () => {
+    const project = addStoredProject('Repo', 'overview dsl', sampleMultiLayer);
+    useDiagramStore.setState({ generatedProjects: [project] });
+    useDiagramStore.getState().openProject({
+      id: project.id,
+      dsl: project.dsl,
+      multiLayer: project.multiLayer,
+    });
+
+    useDiagramStore.getState().setActiveLayer('API');
+    useDiagramStore.getState().setDsl('api dsl edited');
+
+    const state = useDiagramStore.getState();
+    const storedProject = readStoredProjects().find((p) => p.id === project.id);
+    expect(state.dslText).toBe('api dsl edited');
+    expect(state.multiLayer?.layers.find((layer) => layer.name === 'API')?.dsl).toBe(
+      'api dsl edited',
+    );
+    expect(
+      state.generatedProjects[0]?.multiLayer?.layers.find((layer) => layer.name === 'API')?.dsl,
+    ).toBe('api dsl edited');
+    expect(storedProject?.multiLayer?.layers.find((layer) => layer.name === 'API')?.dsl).toBe(
+      'api dsl edited',
+    );
+    expect(storedProject?.dsl).toBe('overview dsl');
+  });
+
+  it('hydrates the saved DSL for the active multi-layer tab', () => {
+    const editedMultiLayer: MultiLayerOutput = {
+      ...sampleMultiLayer,
+      layers: sampleMultiLayer.layers.map((layer) =>
+        layer.name === 'Data' ? { ...layer, dsl: 'data dsl edited' } : layer,
+      ),
+    };
+    const project = addStoredProject('Repo', 'overview dsl', editedMultiLayer);
+    writeActiveProjectId(project.id);
+    writeUiPreference('activeLayer', 'Data');
+    writeUiPreference('dslText', 'stale scratch dsl');
+
+    useDiagramStore.getState().hydrateUiPreferences();
+
+    const state = useDiagramStore.getState();
+    expect(state.activeLayer).toBe('Data');
+    expect(state.dslText).toBe('data dsl edited');
   });
 
   it('hydrates max mode from saved ui preferences', () => {

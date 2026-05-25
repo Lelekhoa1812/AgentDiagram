@@ -16,7 +16,8 @@ import {
   readStoredProjects,
   removeStoredProject,
   writeStoredProjects,
-  updateStoredProject,
+  applyProjectDsl,
+  getMultiLayerDsl,
   renameStoredProject,
   readActiveProjectId,
   writeActiveProjectId,
@@ -105,7 +106,11 @@ interface State {
   setDiagram: (diagram: Diagram | null) => void;
   setLayoutResult: (result: LayoutResult | null) => void;
   setStrategy: (strategy: LayoutStrategy) => void;
-  setOverride: <K extends keyof Overrides>(scope: K, id: string, value: Overrides[K][string]) => void;
+  setOverride: <K extends keyof Overrides>(
+    scope: K,
+    id: string,
+    value: Overrides[K][string],
+  ) => void;
   clearOverrides: () => void;
   setSelection: (sel: Selection) => void;
   setViewport: (v: Viewport) => void;
@@ -125,8 +130,18 @@ interface State {
   setInstructionMode: (enabled: boolean) => void;
   addSubLayers: (subLayers: LayerDiagram[]) => void;
   removeLayer: (name: string) => void;
-  addGeneratedProject: (name: string, dsl: string, multiLayer?: MultiLayerOutput, instructionMarkdown?: string) => void;
-  openProject: (project: { id: string; dsl: string; multiLayer?: MultiLayerOutput | null; instructionMarkdown?: string }) => void;
+  addGeneratedProject: (
+    name: string,
+    dsl: string,
+    multiLayer?: MultiLayerOutput,
+    instructionMarkdown?: string,
+  ) => void;
+  openProject: (project: {
+    id: string;
+    dsl: string;
+    multiLayer?: MultiLayerOutput | null;
+    instructionMarkdown?: string;
+  }) => void;
   removeGeneratedProject: (id: string) => void;
   setActiveProjectId: (id: string | null) => void;
   renameGeneratedProject: (id: string, name: string) => void;
@@ -172,12 +187,21 @@ export const useDiagramStore = create<State>()(
         writeUiPreference('dslText', text);
         set((state) => {
           if (state.activeProjectId) {
-            updateStoredProject(state.activeProjectId, text);
+            let multiLayer = state.multiLayer;
+            let didUpdateProject = false;
+            // Motivation vs Logic: DSL edits are autosaved through one project-shaping path so the root project DSL and any active multi-layer tab stay in sync across tab switches and browser reloads.
+            const generatedProjects = state.generatedProjects.map((project) => {
+              if (project.id !== state.activeProjectId) return project;
+              didUpdateProject = true;
+              const updatedProject = applyProjectDsl(project, text, state.activeLayer);
+              multiLayer = updatedProject.multiLayer ?? null;
+              return updatedProject;
+            });
+            if (didUpdateProject) writeStoredProjects(generatedProjects);
             return {
               dslText: text,
-              generatedProjects: state.generatedProjects.map((p) =>
-                p.id === state.activeProjectId ? { ...p, dsl: text } : p,
-              ),
+              generatedProjects,
+              multiLayer,
             };
           }
           return { dslText: text };
@@ -224,24 +248,39 @@ export const useDiagramStore = create<State>()(
         const activeProjectId = readActiveProjectId();
         const activeProject = generatedProjects.find((p) => p.id === activeProjectId);
         const restoredMultiLayer = activeProject?.multiLayer ?? null;
-        const restoredDsl = activeProject?.dsl ?? preferences.dslText;
-        const restoredInstructionMarkdown = activeProject?.instructionMarkdown ?? preferences.instructionMarkdown ?? '';
+        const preferredActiveLayer = preferences.activeLayer ?? 'overview';
+        const restoredActiveLayer =
+          restoredMultiLayer &&
+          getMultiLayerDsl(restoredMultiLayer, preferredActiveLayer) !== undefined
+            ? preferredActiveLayer
+            : 'overview';
+        const restoredDsl = activeProject
+          ? restoredMultiLayer
+            ? (getMultiLayerDsl(restoredMultiLayer, restoredActiveLayer) ?? activeProject.dsl)
+            : activeProject.dsl
+          : preferences.dslText;
+        const restoredInstructionMarkdown =
+          activeProject?.instructionMarkdown ?? preferences.instructionMarkdown ?? '';
         // Root Cause vs Logic: the active project tab and the editor text were restored from different localStorage keys, so a generated repo tab could show stale scratch text like "/" and render no diagram. Prefer the active project's saved DSL whenever that project still exists.
         set((state) => ({
           generatedProjects,
           activeProjectId,
           multiLayer: restoredMultiLayer,
+          activeLayer: restoredActiveLayer,
           ...(preferences.mode ? { mode: preferences.mode } : {}),
           ...(preferences.theme ? { theme: preferences.theme } : {}),
           ...(preferences.layoutStrategy ? { layoutStrategy: preferences.layoutStrategy } : {}),
           ...(preferences.diagramType ? { diagramType: preferences.diagramType } : {}),
-          ...(preferences.focusPrompt !== undefined ? { focusPrompt: preferences.focusPrompt } : {}),
+          ...(preferences.focusPrompt !== undefined
+            ? { focusPrompt: preferences.focusPrompt }
+            : {}),
           instructionMarkdown: restoredInstructionMarkdown,
-          ...(preferences.activeLayer ? { activeLayer: preferences.activeLayer } : {}),
           ...(restoredDsl !== undefined ? { dslText: restoredDsl } : {}),
           ...(preferences.quickMode !== undefined ? { quickMode: preferences.quickMode } : {}),
           ...(preferences.maxMode !== undefined ? { maxMode: preferences.maxMode } : {}),
-          ...(preferences.instructionMode !== undefined ? { instructionMode: preferences.instructionMode } : {}),
+          ...(preferences.instructionMode !== undefined
+            ? { instructionMode: preferences.instructionMode }
+            : {}),
           ...(preferences.provider
             ? {
                 provider: {
@@ -349,7 +388,8 @@ export const useDiagramStore = create<State>()(
       addGeneratedProject: (name, dsl, multiLayer?, instructionMarkdown?) => {
         const project = addStoredProject(name, dsl, multiLayer, instructionMarkdown);
         writeActiveProjectId(project.id);
-        if (instructionMarkdown !== undefined) writeUiPreference('instructionMarkdown', instructionMarkdown);
+        if (instructionMarkdown !== undefined)
+          writeUiPreference('instructionMarkdown', instructionMarkdown);
         set((state) => ({
           generatedProjects: [project, ...state.generatedProjects],
           activeProjectId: project.id,

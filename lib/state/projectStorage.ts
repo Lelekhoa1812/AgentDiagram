@@ -28,6 +28,52 @@ export interface StoredProject {
   multiLayer?: MultiLayerOutput;
 }
 
+export function getMultiLayerDsl(
+  multiLayer: MultiLayerOutput,
+  activeLayer: string,
+): string | undefined {
+  if (activeLayer === 'overview') return multiLayer.overview.dsl;
+  return multiLayer.layers.find((layer) => layer.name === activeLayer)?.dsl;
+}
+
+export function updateMultiLayerDsl(
+  multiLayer: MultiLayerOutput,
+  activeLayer: string,
+  dsl: string,
+): MultiLayerOutput {
+  if (activeLayer === 'overview') {
+    return {
+      ...multiLayer,
+      overview: { ...multiLayer.overview, dsl },
+    };
+  }
+
+  const hasActiveLayer = multiLayer.layers.some((layer) => layer.name === activeLayer);
+  if (!hasActiveLayer) return multiLayer;
+
+  return {
+    ...multiLayer,
+    layers: multiLayer.layers.map((layer) =>
+      layer.name === activeLayer ? { ...layer, dsl } : layer,
+    ),
+  };
+}
+
+export function applyProjectDsl(
+  project: StoredProject,
+  dsl: string,
+  activeLayer: string,
+): StoredProject {
+  if (!project.multiLayer) return { ...project, dsl };
+
+  const multiLayer = updateMultiLayerDsl(project.multiLayer, activeLayer, dsl);
+  return {
+    ...project,
+    dsl: activeLayer === 'overview' ? dsl : multiLayer.overview.dsl,
+    multiLayer,
+  };
+}
+
 function canUseLocalStorage(): boolean {
   return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
 }
@@ -97,8 +143,10 @@ export function removeStoredProject(id: string): void {
   writeStoredProjects(projects);
 }
 
-export function updateStoredProject(id: string, dsl: string): void {
-  const projects = readStoredProjects().map((p) => (p.id === id ? { ...p, dsl } : p));
+export function updateStoredProject(id: string, dsl: string, activeLayer = 'overview'): void {
+  const projects = readStoredProjects().map((p) =>
+    p.id === id ? applyProjectDsl(p, dsl, activeLayer) : p,
+  );
   writeStoredProjects(projects);
 }
 
