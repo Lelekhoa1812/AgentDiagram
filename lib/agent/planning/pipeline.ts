@@ -287,7 +287,11 @@ export async function runPipeline(
           focus: input.focus,
           planGroups: plan.groups.map((g) => ({ name: g.name, children: g.children })),
         },
-        { signal: input.signal, onRetry: onRetry('instruction') },
+        {
+          signal: input.signal,
+          onRetry: onRetry('instruction'),
+          onProgress: (message) => send({ type: 'log', stage: 'instruction', level: 'info', message }),
+        },
       );
       send({
         type: 'stage',

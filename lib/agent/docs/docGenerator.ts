@@ -54,6 +54,7 @@
  * generate from a simple file read.
  */
 
+import pLimit from 'p-limit';
 import type { ProviderSession, RetryListener } from '../providers';
 import { chatWithRetry } from '../providers';
 import type { FileSummary } from '../analysis/summarizer';
@@ -92,8 +93,25 @@ export interface DocGenInput {
   planGroups?: Array<{ name: string; children: string[] }>;
 }
 
-// Large-repo threshold: above this, use two sequential LLM passes.
+export interface DocGenOptions {
+  signal?: AbortSignal;
+  onRetry?: RetryListener;
+  onProgress?: (message: string) => void;
+}
+
+interface ModuleReferenceBatch {
+  index: number;
+  total: number;
+  label: string;
+  summaries: Array<{ path: string; summary: FileSummary }>;
+}
+
+// Large-repo threshold: above this, split architecture and module reference work.
 const DOC_SPLIT_THRESHOLD = 80;
+const MODULE_REF_BATCH_FILE_LIMIT = 24;
+const MODULE_REF_BATCH_CHAR_LIMIT = 32_000;
+const MODULE_REF_CONCURRENCY = 2;
+const ARCHITECTURE_ANCHOR_CHAR_LIMIT = 6_000;
 
 // =========================================================================
 // System prompts
@@ -352,6 +370,59 @@ function formatFileSummaries(
   return sections.join('\n\n');
 }
 
+function describeSummaryDirs(summaries: Array<{ path: string; summary: FileSummary }>): string {
+  const dirs = [...new Set(summaries.map((item) => (item.path.includes('/') ? item.path.split('/')[0] : '(root)')))];
+  if (dirs.length <= 3) return dirs.join(', ');
+  return `${dirs.slice(0, 3).join(', ')} +${dirs.length - 3} dirs`;
+}
+
+function splitModuleReferenceBatches(
+  summaries: Array<{ path: string; summary: FileSummary }>,
+): ModuleReferenceBatch[] {
+  const batches: Array<Array<{ path: string; summary: FileSummary }>> = [];
+  let current: Array<{ path: string; summary: FileSummary }> = [];
+  let currentChars = 0;
+
+  const flush = () => {
+    if (!current.length) return;
+    batches.push(current);
+    current = [];
+    currentChars = 0;
+  };
+
+  for (const item of summaries) {
+    const itemChars = formatFileSummaries([item]).length;
+    const wouldOverflow =
+      current.length > 0 &&
+      (current.length >= MODULE_REF_BATCH_FILE_LIMIT || currentChars + itemChars > MODULE_REF_BATCH_CHAR_LIMIT);
+    if (wouldOverflow) flush();
+    current.push(item);
+    currentChars += itemChars;
+  }
+  flush();
+
+  return batches.map((batch, i) => ({
+    index: i + 1,
+    total: batches.length,
+    label: describeSummaryDirs(batch),
+    summaries: batch,
+  }));
+}
+
+function compactArchitectureAnchor(markdown: string): string {
+  const headings = markdown
+    .split('\n')
+    .filter((line) => /^#{2,4}\s+\S/.test(line))
+    .slice(0, 80)
+    .join('\n');
+  const opening = markdown.slice(0, ARCHITECTURE_ANCHOR_CHAR_LIMIT);
+  return [opening, headings ? `\n\nKey headings:\n${headings}` : ''].join('').trim();
+}
+
+function stripModuleReferenceHeading(markdown: string): string {
+  return markdown.trim().replace(/^##\s+Module Reference[^\n]*\n+/i, '').trim();
+}
+
 /**
  * Builds the architecture-pass (Pass 1) context string.
  * Uses structural signals, routes, env vars, docs, digest — not per-file summaries.
@@ -430,20 +501,76 @@ function buildArchitectureContext(input: DocGenInput): string {
   return parts.filter(Boolean).join('\n');
 }
 
-/**
- * Builds the module-reference-pass (Pass 2) context string.
- * Contains ALL per-file summaries grouped by directory.
- * Only used when summaries.length > DOC_SPLIT_THRESHOLD.
- */
-function buildModuleRefContext(input: DocGenInput): string {
+function buildModuleRefBatchContext(
+  input: DocGenInput,
+  batch: ModuleReferenceBatch,
+  architectureAnchor: string,
+): string {
   const parts: string[] = [];
   parts.push(`Repository: ${input.repoMap.likelyStack.join(', ') || 'unknown stack'}`);
-  parts.push(`Total analyzed files: ${input.summaries.length}`);
+  parts.push(`Module reference batch: ${batch.index}/${batch.total}`);
+  parts.push(`Files in this batch: ${batch.summaries.length}`);
+  parts.push(`Batch directories: ${batch.label}`);
   parts.push('');
-  parts.push('Below is the complete per-file analysis. For every file, document its exported API, key functions, types, and design decisions at full technical depth.');
+  parts.push('Compact architecture pass context for consistency:');
+  parts.push(architectureAnchor || '(architecture pass unavailable)');
   parts.push('');
-  parts.push(formatFileSummaries(input.summaries));
+  parts.push('Below is the complete per-file analysis for THIS batch only. Document every listed file at full technical depth.');
+  parts.push('');
+  parts.push(formatFileSummaries(batch.summaries));
   return parts.join('\n');
+}
+
+async function generateModuleReferenceBatches(
+  session: ProviderSession,
+  input: DocGenInput,
+  pass1: string,
+  opts: DocGenOptions,
+): Promise<string> {
+  const batches = splitModuleReferenceBatches(input.summaries);
+  const limit = pLimit(MODULE_REF_CONCURRENCY);
+  const architectureAnchor = compactArchitectureAnchor(pass1);
+  opts.onProgress?.(`Module reference split into ${batches.length} bounded sections`);
+
+  // Root Cause vs Logic: one enormous module-reference prompt can trigger provider
+  // context/output failures that surface as retryable 429/5xx responses, leaving
+  // Document Mode in an infinite retry countdown. Generate bounded section calls
+  // instead, while reusing the progressive FileSummary data already produced.
+  const sections = await Promise.all(
+    batches.map((batch) =>
+      limit(async () => {
+        opts.onProgress?.(`Writing module reference ${batch.index}/${batch.total} (${batch.summaries.length} files: ${batch.label})`);
+        const pass2Context = buildModuleRefBatchContext(input, batch, architectureAnchor);
+        const pass2UserMsg = [
+          pass2Context,
+          '',
+          'Generate the module-by-module reference for THIS batch now. Cover every file listed above. Do not document files outside this batch. Do not truncate or abbreviate. Group files by directory.',
+          '\n\nReturn Markdown only.',
+        ].join('\n');
+
+        const section = await chatWithRetry(
+          session,
+          [
+            { role: 'system', content: MODULE_REF_SYSTEM_PROMPT },
+            { role: 'user', content: pass2UserMsg },
+          ],
+          { signal: opts.signal, onRetry: opts.onRetry },
+        );
+        opts.onProgress?.(`Finished module reference ${batch.index}/${batch.total}`);
+        return {
+          index: batch.index,
+          label: batch.label,
+          markdown: stripModuleReferenceHeading(section),
+        };
+      }),
+    ),
+  );
+
+  const ordered = sections.sort((a, b) => a.index - b.index);
+  return [
+    '## Module Reference',
+    ...ordered.map((section) => `<!-- Module reference batch ${section.index}/${batches.length}: ${section.label} -->\n${section.markdown}`),
+  ].join('\n\n');
 }
 
 // =========================================================================
@@ -464,7 +591,7 @@ function buildModuleRefContext(input: DocGenInput): string {
 export async function generateTechnicalDocumentation(
   session: ProviderSession,
   input: DocGenInput,
-  opts: { signal?: AbortSignal; onRetry?: RetryListener } = {},
+  opts: DocGenOptions = {},
 ): Promise<string> {
   const isLargeRepo = input.summaries.length > DOC_SPLIT_THRESHOLD;
 
@@ -521,23 +648,11 @@ export async function generateTechnicalDocumentation(
     return pass1.trim();
   }
 
-  // Pass 2: Module-by-module reference
-  const pass2Context = buildModuleRefContext(input);
-  const pass2UserMsg = [
-    pass2Context,
-    '',
-    'Generate the complete module-by-module reference documentation now. Cover every file listed above. Do not truncate or abbreviate. Group files by directory.',
-    '\n\nReturn Markdown only.',
-  ].join('\n');
-
-  const pass2 = await chatWithRetry(
-    session,
-    [
-      { role: 'system', content: MODULE_REF_SYSTEM_PROMPT },
-      { role: 'user', content: pass2UserMsg },
-    ],
-    { signal: opts.signal, onRetry: opts.onRetry },
-  );
+  // Motivation vs Logic: large Document Mode output is richer and more reliable
+  // when independent module-reference sections are delegated to bounded calls
+  // after the shared architecture pass. The calls can run in parallel because
+  // each receives the architecture anchor plus its own narrow FileSummary batch.
+  const pass2 = await generateModuleReferenceBatches(session, input, pass1, opts);
 
   return [pass1.trim(), '---', pass2.trim()].join('\n\n');
 }

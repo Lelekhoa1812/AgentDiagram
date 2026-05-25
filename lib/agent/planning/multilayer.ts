@@ -388,7 +388,11 @@ export async function runMultiLayerPipeline(
           focus: input.focus,
           layers: result.layers.map((l) => ({ name: l.name, description: l.description })),
         },
-        { signal: input.signal, onRetry: onRetry('instruction') },
+        {
+          signal: input.signal,
+          onRetry: onRetry('instruction'),
+          onProgress: (message) => send({ type: 'log', stage: 'instruction', level: 'info', message }),
+        },
       );
       send({
         type: 'stage',
