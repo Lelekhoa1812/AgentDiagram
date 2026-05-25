@@ -23,6 +23,8 @@ import { edgeLaneOffsets, routeEdgePath, type RoutedEdgePath } from './edgePath'
 
 export interface SceneOptions {
   selectedId?: string | null;
+  /** All IDs in the current multi-selection (drawn with the same selection ring). */
+  multiSelectedIds?: ReadonlySet<string>;
   onSelect?: (id: string | null, kind: 'node' | 'group' | 'edge') => void;
   overrides?: {
     nodes?: Record<string, Partial<LayoutRect>>;
@@ -154,7 +156,7 @@ export function buildScene(
     const titleSize = groupTitleSize(title);
     const icon = getIcon(g.icon);
     const radius = 14;
-    const isSelected = opts.selectedId === g.id;
+    const isSelected = opts.selectedId === g.id || (opts.multiSelectedIds?.has(g.id) ?? false);
 
     return (
       <g key={`g-${g.id}`} data-id={g.id} data-kind="group">
@@ -220,7 +222,7 @@ export function buildScene(
     const pal = paletteFor(color, opts.theme);
     const icon = getIcon(n.icon);
     const label = n.label ?? n.name;
-    const isSelected = opts.selectedId === n.id;
+    const isSelected = opts.selectedId === n.id || (opts.multiSelectedIds?.has(n.id) ?? false);
 
     return (
       <g key={`n-${n.id}`} data-id={n.id} data-kind="node">
@@ -265,11 +267,25 @@ export function buildScene(
 
   function renderEdge(edge: IREdge): React.ReactElement | null {
     if (!isEdgeVisible(edge.id)) return null; // viewport culling (fast check before routing)
-    // Check for pre-routed paths from worker first, fall back to sync routing
-    const prerouted = opts.preRoutedEdges?.get(edge.id);
+
+    // Use the worker pre-routed path when the edge and its connected nodes have
+    // not been moved by the user.  As soon as any position override is present
+    // we recompute synchronously via routeEdgePath so arrows always connect to
+    // the nodes' current (overridden) positions instead of their layout-time
+    // positions.
+    const hasConnectedOverride =
+      !!(opts.overrides?.nodes?.[edge.source] ||
+         opts.overrides?.nodes?.[edge.target] ||
+         opts.overrides?.groups?.[edge.source] ||
+         opts.overrides?.groups?.[edge.target]);
+    const hasEdgeBendOverride = !!(opts.overrides?.edges?.[edge.id]?.bends?.length);
+    const prerouted = (hasConnectedOverride || hasEdgeBendOverride)
+      ? undefined
+      : opts.preRoutedEdges?.get(edge.id);
+
     const routed = prerouted ?? routeEdgePath(edge, layout, opts.overrides, edgeOffsets.get(edge.id) ?? 0);
     if (!routed?.path) return null;
-    const isSelected = opts.selectedId === edge.id;
+    const isSelected = opts.selectedId === edge.id || (opts.multiSelectedIds?.has(edge.id) ?? false);
     const fwdMarker = edge.kind === 'thick' ? ARROW_THICK_ID : ARROW_FWD_ID;
     const markerEnd = edge.kind === 'bwd' ? undefined : `url(#${fwdMarker})`;
     const markerStart =
@@ -286,7 +302,7 @@ export function buildScene(
           strokeWidth={12}
           strokeLinecap="round"
           strokeLinejoin="round"
-          className="cursor-pointer"
+          className={isSelected ? 'cursor-default' : 'cursor-pointer'}
         />
         <path
           d={routed.path}

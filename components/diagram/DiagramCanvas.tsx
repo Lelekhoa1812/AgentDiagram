@@ -32,8 +32,16 @@ export interface DiagramCanvasHandle {
   fitView: () => void;
 }
 
+interface MultiDragItem {
+  id: string;
+  kind: 'node' | 'group';
+  startRect: { x: number; y: number; width: number; height: number };
+  /** Keyed `n:<id>` or `g:<id>` — only populated for group items. */
+  descendantStarts: Record<string, { x: number; y: number }>;
+}
+
 interface DragState {
-  kind: 'pan' | 'node' | 'group' | 'edge-segment';
+  kind: 'pan' | 'node' | 'group' | 'edge-segment' | 'multi';
   id?: string;
   start: { x: number; y: number };
   origin: { x: number; y: number; scale: number };
@@ -42,6 +50,8 @@ interface DragState {
   edgeSegmentIndex?: number;
   edgeSegmentAxis?: 'horizontal' | 'vertical';
   edgeRouteStart?: Point[];
+  /** Populated only for kind === 'multi'. */
+  multiItems?: MultiDragItem[];
 }
 
 const PAD = 32;
@@ -62,10 +72,26 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
   const setOverride = useDiagramStore((s) => s.setOverride);
   const selection = useDiagramStore((s) => s.selection);
   const setSelection = useDiagramStore((s) => s.setSelection);
+  const multiSelection = useDiagramStore((s) => s.multiSelection);
+  const toggleMultiSelectItem = useDiagramStore((s) => s.toggleMultiSelectItem);
+  const clearMultiSelection = useDiagramStore((s) => s.clearMultiSelection);
   const setDiagram = useDiagramStore((s) => s.setDiagram);
   const setLayoutResult = useDiagramStore((s) => s.setLayoutResult);
   const strategy = useDiagramStore((s) => s.layoutStrategy);
   const theme = useDiagramStore((s) => s.theme);
+
+  // All IDs that should be highlighted with a selection ring — primary plus
+  // every item in the multi-selection.  Passed to buildScene as a Set so
+  // the scene builder can check membership in O(1) per element.
+  const multiSelectedIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (selection.id) ids.add(selection.id);
+    for (const item of multiSelection) ids.add(item.id);
+    return ids;
+  }, [selection, multiSelection]);
+  // Ref so the layout effect can read the current set without being a dep.
+  const multiSelectedIdsRef = useRef(multiSelectedIds);
+  useEffect(() => { multiSelectedIdsRef.current = multiSelectedIds; }, [multiSelectedIds]);
 
   const wrapperRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -248,6 +274,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
             // preview for a final diagram where arrows cannot appear detached.
             const nextScene = buildScene(diagram, result, {
               selectedId: selection.id,
+              multiSelectedIds: multiSelectedIdsRef.current,
               overrides,
               theme,
               viewport: wrapperRef.current
@@ -318,6 +345,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
     setScene(
       buildScene(diagram, layoutRef.current, {
         selectedId: selection.id,
+        multiSelectedIds,
         overrides,
         theme,
         viewport: wrapperRef.current
@@ -330,7 +358,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
         preRoutedEdges: preRoutedEdges ?? undefined,
       }),
     );
-  }, [overrides, selection, diagram, theme, preRoutedEdges]);
+  }, [overrides, selection, multiSelectedIds, diagram, theme, preRoutedEdges]);
 
   const fitView = useCallback(() => {
     if (!scene || !wrapperRef.current) return;
@@ -409,6 +437,19 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
     if (!result) return null;
     const edge = diagram.edges.find((candidate) => candidate.id === edgeId);
     if (!edge) return null;
+    // Mirror the prerouted-skip logic from renderEdge in svgScene.tsx so that
+    // the segmentIndex stored in drag state always matches the rendered handles.
+    // Without this, handles are positioned on the prerouted path while drag
+    // operates on the re-computed routeEdgePath — they use different point arrays
+    // and the segment index becomes invalid, causing the edge to jump on first drag.
+    const hasConnectedOverride =
+      !!(overrides.nodes[edge.source] || overrides.nodes[edge.target] ||
+         overrides.groups[edge.source] || overrides.groups[edge.target]);
+    const hasEdgeBendOverride = !!(overrides.edges[edgeId]?.bends?.length);
+    if (!hasConnectedOverride && !hasEdgeBendOverride && preRoutedEdges) {
+      const prerouted = preRoutedEdges.get(edgeId);
+      if (prerouted) return prerouted.points;
+    }
     const edgeOffsets = edgeLaneOffsets(diagram.edges);
     return routeEdgePath(edge, result, overrides, edgeOffsets.get(edge.id) ?? 0)?.points ?? null;
   }
@@ -435,6 +476,51 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
     return bends;
   }
 
+  /**
+   * Build the list of drag items for a multi-select drag.
+   *
+   * Rules:
+   *   • Skips any item that is a descendant of another selected group (it
+   *     will already be moved by its ancestor's descendantStarts).
+   *   • Populates descendantStarts for every group item so children follow.
+   */
+  function buildMultiDragItems(
+    items: { id: string; kind: 'node' | 'group' }[],
+  ): MultiDragItem[] {
+    // Collect every node/group that is a descendant of a selected group.
+    const coveredIds = new Set<string>();
+    for (const item of items) {
+      if (item.kind === 'group') {
+        const d = descendants(item.id);
+        d.nodes.forEach((nid) => coveredIds.add(nid));
+        d.groups.forEach((gid) => coveredIds.add(gid));
+      }
+    }
+
+    const result: MultiDragItem[] = [];
+    for (const item of items) {
+      if (coveredIds.has(item.id)) continue; // moved by an ancestor group
+
+      const rect = findRectFor(item.id, item.kind);
+      if (!rect) continue;
+
+      const descendantStarts: Record<string, { x: number; y: number }> = {};
+      if (item.kind === 'group') {
+        const d = descendants(item.id);
+        for (const nid of d.nodes) {
+          const r = findRectFor(nid, 'node');
+          if (r) descendantStarts[`n:${nid}`] = { x: r.x, y: r.y };
+        }
+        for (const gid of d.groups) {
+          const r = findRectFor(gid, 'group');
+          if (r) descendantStarts[`g:${gid}`] = { x: r.x, y: r.y };
+        }
+      }
+      result.push({ id: item.id, kind: item.kind, startRect: rect, descendantStarts });
+    }
+    return result;
+  }
+
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!wrapperRef.current) return;
     // Do NOT capture the pointer while layout is running. Capturing here would
@@ -443,7 +529,13 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
     // until the user releases the mouse.
     if (isLayingOut) return;
     e.currentTarget.setPointerCapture(e.pointerId);
+
+    const isMultiKey = e.metaKey || e.ctrlKey;
     const target = e.target as Element;
+
+    // ── Edge-segment handle (bend-point drag) ────────────────────────────────
+    // Must be checked first because handles live inside the edge <g> and would
+    // otherwise be caught by the generic [data-id] hit test below.
     const edgeHandle = target.closest('[data-edge-segment]') as Element | null;
     if (edgeHandle) {
       const edgeId = edgeHandle.getAttribute('data-id');
@@ -454,6 +546,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
         | null;
       const route = edgeId ? currentEdgeRoute(edgeId) : null;
       if (edgeId && route && segmentAxis && Number.isFinite(segmentIndex)) {
+        if (!isMultiKey) clearMultiSelection();
         setSelection({ id: edgeId, kind: 'edge' });
         // Motivation vs Logic: selected edge handles drag the existing orthogonal segment rather than re-routing immediately, giving users precise control over the cut while the default renderer remains obstacle-avoiding.
         drag.current = {
@@ -465,6 +558,13 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
           edgeSegmentAxis: segmentAxis,
           edgeRouteStart: route,
         };
+        // Override the CSS grab cursor with the correct resize cursor for the
+        // duration of this drag.  Pointer capture routes all pointer events to
+        // the wrapper, so its cursor takes precedence over the handle element's
+        // Tailwind class — set it inline so it wins over .diagram-canvas.dragging.
+        if (wrapperRef.current) {
+          wrapperRef.current.style.cursor = segmentAxis === 'vertical' ? 'ew-resize' : 'ns-resize';
+        }
         return;
       }
     }
@@ -473,10 +573,61 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
     const id = hit?.getAttribute('data-id') ?? null;
     const kind = hit?.getAttribute('data-kind') as 'node' | 'group' | 'edge' | null;
 
-    if (id && kind) setSelection({ id, kind });
-    else setSelection({ id: null, kind: null });
+    // ── Cmd/Ctrl + click → multi-select toggle ───────────────────────────────
+    if (isMultiKey && id && kind && kind !== 'edge-label' as string) {
+      toggleMultiSelectItem({ id, kind: kind as 'node' | 'group' | 'edge' });
+      // Don't start any drag — the user is building a selection set.
+      drag.current = null;
+      return;
+    }
 
+    // ── Plain click: update primary selection ────────────────────────────────
+    if (id && kind) {
+      setSelection({ id, kind });
+      clearMultiSelection();
+    } else {
+      setSelection({ id: null, kind: null });
+      clearMultiSelection();
+    }
+
+    // ── Edge click: focus the edge without starting a pan drag ───────────────
+    // Requirement: an edge must be selected (focused) before its handles can be
+    // dragged. Clicking the edge body ONLY selects it; dragging immediately
+    // after pans the canvas (same as clicking empty space), which prevents
+    // the common confusion of accidentally moving the viewport while trying to
+    // adjust an arrow.
+    if (kind === 'edge') {
+      // No drag initiated — next pointer-down on an edge *handle* (above) will
+      // fire the edge-segment drag path.
+      drag.current = null;
+      return;
+    }
+
+    // ── Node / Group drag ────────────────────────────────────────────────────
     if (id && (kind === 'node' || kind === 'group')) {
+      // If other items are already multi-selected, drag all of them together.
+      const hasMulti = multiSelection.length > 0;
+      if (hasMulti) {
+        // Build the combined set: primary item + all multi-selection items
+        // (filtering to node/group only — edges cannot be dragged as a group).
+        const allItems: { id: string; kind: 'node' | 'group' }[] = [
+          { id, kind },
+          ...multiSelection
+            .filter((i): i is { id: string; kind: 'node' | 'group' } => i.kind !== 'edge')
+            // Don't duplicate the primary item if it's already in multiSelection.
+            .filter((i) => i.id !== id),
+        ];
+        const multiItems = buildMultiDragItems(allItems);
+        drag.current = {
+          kind: 'multi',
+          start: { x: e.clientX, y: e.clientY },
+          origin: viewport,
+          multiItems,
+        };
+        return;
+      }
+
+      // Single-item drag (existing behaviour).
       const rect = findRectFor(id, kind);
       if (!rect) return;
       const descendantStarts: Record<string, { x: number; y: number }> = {};
@@ -499,9 +650,11 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
         startRect: rect,
         descendantStarts,
       };
-    } else {
-      drag.current = { kind: 'pan', start: { x: e.clientX, y: e.clientY }, origin: viewport };
+      return;
     }
+
+    // ── Canvas pan (empty space click) ───────────────────────────────────────
+    drag.current = { kind: 'pan', start: { x: e.clientX, y: e.clientY }, origin: viewport };
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -532,6 +685,25 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
       setOverride('edges', d.id, { bends: compactManualBends(next) });
       return;
     }
+    // ── Multi-item drag ───────────────────────────────────────────────────────
+    if (d.kind === 'multi') {
+      if (!d.multiItems) return;
+      for (const item of d.multiItems) {
+        setOverride(item.kind === 'node' ? 'nodes' : 'groups', item.id, {
+          x: item.startRect.x + dxScene,
+          y: item.startRect.y + dyScene,
+        });
+        for (const [key, start] of Object.entries(item.descendantStarts)) {
+          const [scope, ...idParts] = key.split(':');
+          const idStr = idParts.join(':');
+          const move = { x: start.x + dxScene, y: start.y + dyScene };
+          if (scope === 'n') setOverride('nodes', idStr, move);
+          else setOverride('groups', idStr, move);
+        }
+      }
+      return;
+    }
+
     if (!d.startRect || !d.id) return;
     if (d.kind === 'node') {
       setOverride('nodes', d.id, { x: d.startRect.x + dxScene, y: d.startRect.y + dyScene });
@@ -551,6 +723,9 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
 
   const onPointerUp = () => {
     drag.current = null;
+    // Restore the default CSS cursor after any drag type (edge-segment drag
+    // sets an inline cursor to override .diagram-canvas.dragging).
+    if (wrapperRef.current) wrapperRef.current.style.cursor = '';
   };
 
   return (

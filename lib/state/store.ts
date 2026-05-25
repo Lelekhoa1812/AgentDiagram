@@ -8,6 +8,7 @@ import type { LayoutStrategy } from '../layout/strategies';
 import { getProviderDefaultModel } from '@/lib/agent/utils/provider-models';
 import type { ProviderId } from '../agent/providers/types';
 import { readUiPreferences, writeUiPreference } from './uiPreferences';
+import { saveDraft, deleteDraft, loadDraft } from '../cache/draftCache';
 import {
   type StoredProject,
   type MultiLayerOutput,
@@ -25,6 +26,32 @@ import {
 
 // Re-export so all existing imports from this module continue to work.
 export type { LayerDiagram, MultiLayerOutput } from './projectStorage';
+
+// ---------------------------------------------------------------------------
+// IndexedDB draft autosave
+// ---------------------------------------------------------------------------
+// Rapid keystrokes and drag events call setDsl / setOverride many times per
+// second. Debouncing at 800 ms means we batch all of those into a single IDB
+// write that fires shortly after the user pauses — cheap enough to ignore.
+//
+// _getState is populated the moment the Zustand creator runs (before any
+// action can be dispatched), so the timer callback always finds it ready.
+// ---------------------------------------------------------------------------
+let _draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
+const DRAFT_DEBOUNCE_MS = 800;
+let _getState: (() => State) | null = null;
+
+function scheduleDraftSave(): void {
+  if (typeof window === 'undefined') return; // SSR guard
+  if (_draftSaveTimer !== null) clearTimeout(_draftSaveTimer);
+  _draftSaveTimer = setTimeout(() => {
+    _draftSaveTimer = null;
+    if (!_getState) return;
+    const state = _getState();
+    const key = state.activeProjectId ?? 'scratch';
+    saveDraft(key, state.dslText, state.overrides);
+  }, DRAFT_DEBOUNCE_MS);
+}
 
 export type Mode = 'editor' | 'agent' | 'multi-layer' | 'custom-prompt';
 export type ThemeMode = 'dark' | 'light';
@@ -100,6 +127,25 @@ interface State {
   generatedProjects: StoredProject[];
   activeProjectId: string | null;
 
+  // Multi-select: additional selected items beyond the primary `selection`.
+  // Each entry mirrors the same { id, kind } shape so the canvas and scene
+  // builder can treat them uniformly with the primary selection.
+  multiSelection: { id: string; kind: 'node' | 'group' | 'edge' }[];
+
+  /**
+   * Apply a persisted draft (DSL + overrides) loaded from IndexedDB on page
+   * start.  Deliberately bypasses localStorage writes and the draft-save
+   * debounce so we don't immediately re-write what we just read.
+   */
+  applyDraft: (dslText: string, overrides: Overrides) => void;
+  /**
+   * Toggle one item in the multi-selection.  If the item is already present
+   * it is removed; otherwise it is added.  The primary `selection` is left
+   * unchanged so the inspector keeps showing the last explicitly-clicked item.
+   */
+  toggleMultiSelectItem: (item: { id: string; kind: 'node' | 'group' | 'edge' }) => void;
+  /** Remove all items from the multi-selection (keeps the primary selection). */
+  clearMultiSelection: () => void;
   setMode: (mode: Mode) => void;
   setTheme: (theme: ThemeMode) => void;
   setDsl: (text: string) => void;
@@ -150,7 +196,11 @@ interface State {
 
 export const useDiagramStore = create<State>()(
   temporal(
-    (set) => ({
+    (set, get) => {
+      // Capture Zustand's getter so the draft-save timer can always read the
+      // latest state without holding a reference to the store export itself.
+      _getState = get;
+      return {
       mode: 'editor',
       theme: 'dark',
       dslText: '',
@@ -175,6 +225,22 @@ export const useDiagramStore = create<State>()(
       instructionMode: false,
       generatedProjects: [],
       activeProjectId: null,
+      multiSelection: [],
+      applyDraft: (dslText, overrides) => {
+        // Applied once on page load from IndexedDB — bypasses localStorage writes
+        // and does NOT schedule a new IndexedDB write to avoid a pointless round-trip.
+        set({ dslText, overrides });
+      },
+      toggleMultiSelectItem: (item) =>
+        set((state) => {
+          const exists = state.multiSelection.some((i) => i.id === item.id);
+          return {
+            multiSelection: exists
+              ? state.multiSelection.filter((i) => i.id !== item.id)
+              : [...state.multiSelection, item],
+          };
+        }),
+      clearMultiSelection: () => set({ multiSelection: [] }),
       setMode: (mode) => {
         writeUiPreference('mode', mode);
         set({ mode });
@@ -185,6 +251,7 @@ export const useDiagramStore = create<State>()(
       },
       setDsl: (text) => {
         writeUiPreference('dslText', text);
+        scheduleDraftSave(); // Also persists to IndexedDB (debounced 800 ms)
         set((state) => {
           if (state.activeProjectId) {
             let multiLayer = state.multiLayer;
@@ -213,14 +280,19 @@ export const useDiagramStore = create<State>()(
         writeUiPreference('layoutStrategy', strategy);
         set({ layoutStrategy: strategy });
       },
-      setOverride: (scope, id, value) =>
+      setOverride: (scope, id, value) => {
+        scheduleDraftSave(); // Persist drag-override positions to IndexedDB
         set((state) => ({
           overrides: {
             ...state.overrides,
             [scope]: { ...state.overrides[scope], [id]: value },
           },
-        })),
-      clearOverrides: () => set({ overrides: { nodes: {}, groups: {}, edges: {} } }),
+        }));
+      },
+      clearOverrides: () => {
+        scheduleDraftSave(); // Write empty overrides so the cleared state is persisted
+        set({ overrides: { nodes: {}, groups: {}, edges: {} } });
+      },
       setSelection: (sel) => set({ selection: sel }),
       setViewport: (v) => set({ viewport: v }),
       setProvider: (cfg) =>
@@ -401,6 +473,8 @@ export const useDiagramStore = create<State>()(
         writeUiPreference('dslText', project.dsl);
         writeUiPreference('instructionMarkdown', project.instructionMarkdown ?? '');
         writeActiveProjectId(project.id);
+        // Start with clean overrides so the canonical layout is shown immediately,
+        // then async-restore any saved drag positions for this project from IndexedDB.
         set({
           dslText: project.dsl,
           activeProjectId: project.id,
@@ -409,9 +483,23 @@ export const useDiagramStore = create<State>()(
           activeLayer: 'overview',
           overrides: { nodes: {}, groups: {}, edges: {} },
         });
+        // Async: restore any persisted override positions for this project.
+        loadDraft(project.id).then((draft) => {
+          if (!draft) return;
+          const hasOverrides =
+            Object.keys(draft.overrides.nodes).length > 0 ||
+            Object.keys(draft.overrides.groups).length > 0 ||
+            Object.keys(draft.overrides.edges).length > 0;
+          if (!hasOverrides) return;
+          // Guard: only apply if the user hasn't already switched to a different project.
+          if (_getState?.()?.activeProjectId === project.id) {
+            set({ overrides: draft.overrides });
+          }
+        }).catch(() => { /* ignore — draft restoration is best-effort */ });
       },
       removeGeneratedProject: (id) => {
         removeStoredProject(id);
+        deleteDraft(id); // Clean up persisted draft so stale overrides can't resurface
         set((state) => {
           const generatedProjects = state.generatedProjects.filter((p) => p.id !== id);
           const activeProjectId = state.activeProjectId === id ? null : state.activeProjectId;
@@ -433,7 +521,8 @@ export const useDiagramStore = create<State>()(
         writeStoredProjects(projects);
         set({ generatedProjects: projects });
       },
-    }),
+      };
+    },
     {
       partialize: (state) => ({
         dslText: state.dslText,

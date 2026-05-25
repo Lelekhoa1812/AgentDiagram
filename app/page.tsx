@@ -22,6 +22,7 @@ export default function Page() {
   const setDsl = useDiagramStore((s) => s.setDsl);
   const clearOverrides = useDiagramStore((s) => s.clearOverrides);
   const hydrateUiPreferences = useDiagramStore((s) => s.hydrateUiPreferences);
+  const applyDraft = useDiagramStore((s) => s.applyDraft);
   const canvasRef = useRef<DiagramCanvasHandle>(null);
   const [isEditorVisible, setIsEditorVisible] = useState(true);
   const [isInspectorVisible, setIsInspectorVisible] = useState(true);
@@ -34,6 +35,73 @@ export default function Page() {
     if (typeof preferences.isEditorVisible === 'boolean') setIsEditorVisible(preferences.isEditorVisible);
     if (typeof preferences.isInspectorVisible === 'boolean') setIsInspectorVisible(preferences.isInspectorVisible);
   }, [hydrateUiPreferences]);
+
+  // Global undo / redo keyboard shortcut.
+  // • Cmd+Z / Ctrl+Z  → undo the last diagram change (DSL edit or node drag)
+  // • Cmd+Shift+Z / Ctrl+Shift+Z (or Ctrl+Y on Windows) → redo
+  //
+  // We defer to Monaco's own undo stack while the editor has focus so that
+  // per-keystroke text undo continues to work as expected there.  Outside the
+  // editor, Zundo's temporal store handles both DSL and override (node-drag)
+  // history as a single unified undo stack.
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const modKey = e.metaKey || e.ctrlKey;
+      if (!modKey) return;
+
+      // Let Monaco handle its own undo/redo when the editor has keyboard focus.
+      if ((document.activeElement as Element | null)?.closest('.monaco-editor')) return;
+
+      if (e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        useDiagramStore.temporal.getState().undo();
+      } else if ((e.key === 'z' && e.shiftKey) || (e.key === 'y' && !e.metaKey)) {
+        // Cmd+Shift+Z (Mac redo) and Ctrl+Y (Windows redo)
+        e.preventDefault();
+        useDiagramStore.temporal.getState().redo();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Async: after the fast synchronous localStorage hydration above, load the
+  // IndexedDB draft and apply any persisted overrides (node drag positions).
+  // IndexedDB is also used as a fallback for DSL text when localStorage has
+  // nothing (e.g. quota exceeded or storage cleared between sessions).
+  useEffect(() => {
+    async function hydrateDraft() {
+      try {
+        const { loadDraft } = await import('@/lib/cache/draftCache');
+        // Read the project key that was just resolved by hydrateUiPreferences().
+        const state = useDiagramStore.getState();
+        const key = state.activeProjectId ?? 'scratch';
+        const draft = await loadDraft(key);
+        if (!draft) return;
+
+        // Guard: ensure the user hasn't navigated away while we awaited.
+        const currentState = useDiagramStore.getState();
+        if ((currentState.activeProjectId ?? 'scratch') !== key) return;
+
+        const hasOverrides =
+          Object.keys(draft.overrides.nodes).length > 0 ||
+          Object.keys(draft.overrides.groups).length > 0 ||
+          Object.keys(draft.overrides.edges).length > 0;
+
+        // Only use the IndexedDB DSL if localStorage gave us nothing (quota
+        // exceeded, private-browsing session cleared, etc.).
+        const dslFromStorage = currentState.dslText;
+        const dslToApply = dslFromStorage || draft.dslText;
+
+        if (hasOverrides || (!dslFromStorage && draft.dslText)) {
+          applyDraft(dslToApply, hasOverrides ? draft.overrides : currentState.overrides);
+        }
+      } catch {
+        // Draft hydration is best-effort — never block the editor.
+      }
+    }
+    hydrateDraft();
+  }, [applyDraft]);
 
   // Seed with the flow example only when there is truly no saved content.
   // Reading directly from localStorage avoids the closure-stale-value trap:
