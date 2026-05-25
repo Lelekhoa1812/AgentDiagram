@@ -455,20 +455,50 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
   }
 
   function compactManualBends(points: Point[]): Point[] {
-    const out: Point[] = [];
+    // 1. Deduplicate exact-duplicate consecutive points.
+    const deduped: Point[] = [];
     for (const point of points) {
-      const last = out[out.length - 1];
+      const last = deduped[deduped.length - 1];
       if (!last || Math.abs(last.x - point.x) > 0.001 || Math.abs(last.y - point.y) > 0.001) {
-        out.push(point);
+        deduped.push(point);
       }
     }
-    if (out.length <= 2) return [];
+    if (deduped.length <= 2) return [];
 
+    // 2. Remove near-collinear interior points whose perpendicular deviation
+    //    from the line through their two neighbours is ≤ 4 px.  This collapses
+    //    the tiny Z-shaped stubs that accumulate after node moves (e.g. two long
+    //    horizontal runs separated by a 2 px vertical connector) so the bend
+    //    handle and the visual "break" disappear automatically on drag end.
+    const NEAR_PX = 4;
+    let current = deduped;
+    let changed = true;
+    while (changed && current.length > 2) {
+      changed = false;
+      const simplified: Point[] = [current[0]!];
+      for (let i = 1; i < current.length - 1; i++) {
+        const prev = simplified[simplified.length - 1]!;
+        const curr = current[i]!;
+        const next = current[i + 1]!;
+        const dx = next.x - prev.x;
+        const dy = next.y - prev.y;
+        const len2 = dx * dx + dy * dy;
+        if (len2 < 0.000001) { simplified.push(curr); continue; }
+        const cross = (curr.x - prev.x) * dy - (curr.y - prev.y) * dx;
+        if (Math.abs(cross) / Math.sqrt(len2) <= NEAR_PX) { changed = true; continue; }
+        simplified.push(curr);
+      }
+      simplified.push(current[current.length - 1]!);
+      current = simplified;
+    }
+    if (current.length <= 2) return [];
+
+    // 3. Remove exactly-collinear interior points (same axis as both neighbours).
     const bends: Point[] = [];
-    for (let i = 1; i < out.length - 1; i++) {
-      const prev = bends[bends.length - 1] ?? out[i - 1]!;
-      const curr = out[i]!;
-      const next = out[i + 1]!;
+    for (let i = 1; i < current.length - 1; i++) {
+      const prev = bends[bends.length - 1] ?? current[i - 1]!;
+      const curr = current[i]!;
+      const next = current[i + 1]!;
       const sameVertical = Math.abs(prev.x - curr.x) < 0.001 && Math.abs(curr.x - next.x) < 0.001;
       const sameHorizontal = Math.abs(prev.y - curr.y) < 0.001 && Math.abs(curr.y - next.y) < 0.001;
       if (!sameVertical && !sameHorizontal) bends.push(curr);

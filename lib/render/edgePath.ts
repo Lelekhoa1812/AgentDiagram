@@ -171,6 +171,61 @@ function removeCollinear(points: Point[]): Point[] {
   return out;
 }
 
+// Maximum perpendicular deviation (layout-pixels) below which an intermediate
+// bend point is treated as "nearly collinear" and removed.  4 px is
+// sub-visual at any practical zoom level but large enough to collapse the
+// tiny perpendicular stubs (2–3 px Z-shapes) that the router occasionally
+// produces when source/target nodes are nearly aligned on one axis.
+const NEAR_COLLINEAR_PX = 4;
+
+/**
+ * Remove intermediate points whose perpendicular deviation from the straight
+ * line through their two neighbours is ≤ NEAR_COLLINEAR_PX.
+ *
+ * Purpose: merge "broken" segments that visually lie on the same line but
+ * carry a small perpendicular stub — e.g. two long horizontal runs joined by
+ * a 2 px vertical connector.  Removing the stub makes the two runs merge into
+ * one continuous segment, eliminating the spurious bend handle and the visual
+ * "break" in the arrow.
+ *
+ * The resulting path is technically non-orthogonal by up to NEAR_COLLINEAR_PX
+ * pixels, but the tiny diagonal is imperceptible at any practical zoom level.
+ *
+ * Runs in a loop until stable because dropping one point can expose another.
+ */
+function removeNearCollinear(points: Point[]): Point[] {
+  if (points.length <= 2) return points;
+  let current = points;
+  let changed = true;
+  while (changed && current.length > 2) {
+    changed = false;
+    const out: Point[] = [current[0]!];
+    for (let i = 1; i < current.length - 1; i++) {
+      const prev = out[out.length - 1]!;
+      const curr = current[i]!;
+      const next = current[i + 1]!;
+      const dx = next.x - prev.x;
+      const dy = next.y - prev.y;
+      const len2 = dx * dx + dy * dy;
+      if (len2 < EPSILON * EPSILON) {
+        // prev and next coincide — keep curr to avoid a degenerate segment.
+        out.push(curr);
+        continue;
+      }
+      // Perpendicular distance from curr to the line through prev→next.
+      const cross = (curr.x - prev.x) * dy - (curr.y - prev.y) * dx;
+      if (Math.abs(cross) / Math.sqrt(len2) <= NEAR_COLLINEAR_PX) {
+        changed = true; // drop this near-collinear bend
+        continue;
+      }
+      out.push(curr);
+    }
+    out.push(current[current.length - 1]!);
+    current = out;
+  }
+  return current;
+}
+
 function buildRoundedPath(points: Point[]): string {
   if (points.length < 2) return '';
   let d = `M ${points[0]!.x} ${points[0]!.y}`;
@@ -836,16 +891,25 @@ export function routeEdgePath(
   const bends = cleanBends(override?.bends ?? laid?.bends ?? [], sourceRect, targetRect);
 
   // Motivation vs Logic: default rendering should choose readable, obstacle-aware Manhattan routes, while manual edge overrides should remain user-authored even if the user intentionally drags a cut across a component.
+  // After automatic routing, removeNearCollinear collapses any tiny perpendicular
+  // stubs (≤ 4 px deviation) into their neighbouring segments.  This merges the
+  // "broken arrow" effect where two nearly-collinear runs are separated by a
+  // tiny Z-shaped jog that the router produces when source/target nodes are
+  // almost (but not exactly) aligned on one axis.
+  // Manual routes are intentionally left unfiltered so user-placed bends are
+  // never silently dropped (compactManualBends handles cleanup on drag end).
   const points = hasManualOverride
     ? manualRoute(sourceRect, targetRect, bends, laid)
-    : automaticRoute(
-        sourceRect,
-        targetRect,
-        layout,
-        overrides,
-        edge.source,
-        edge.target,
-        laneOffset,
+    : removeNearCollinear(
+        automaticRoute(
+          sourceRect,
+          targetRect,
+          layout,
+          overrides,
+          edge.source,
+          edge.target,
+          laneOffset,
+        ),
       );
 
   return {
