@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { IREdge } from '@/lib/ir/types';
 import type { LayoutRect, LayoutResult } from '@/lib/layout/elk';
-import { routeEdgePath } from '../edgePath';
+import { compile } from '@/lib/dsl/compiler';
+import { layout } from '@/lib/layout/elk';
+import { edgeLaneOffsets, routeEdgePath } from '../edgePath';
 
 function layoutResult(): LayoutResult {
   return {
@@ -125,5 +127,92 @@ describe('routeEdgePath', () => {
     expect(routed).not.toBeNull();
     expect(segmentsAreOrthogonal(routed!.points)).toBe(true);
     expect(pathAvoidsRect(routed!.points, obstacle)).toBe(true);
+  });
+
+  it('routes fractional ELK layouts without exploding grid search', async () => {
+    const dsl = `Core Inventory [color: blue] {
+  Asset Master
+  Stock Availability
+  Asset Status
+  Readiness Rules
+}
+
+Reservation & Allocation [color: purple] {
+  Reservations
+  Availability Check
+  Asset Allocation
+  Shortfall Flag
+}
+
+Warehouse Operations [color: teal] {
+  Warehouse Picking
+  Pick List
+  Staging
+  Dispatch Ready
+}
+
+Returns & Condition [color: orange] {
+  Returns Processing
+  Check-In
+  Quality Checks
+  Damage Assessment
+}
+
+Maintenance Control [color: red] {
+  Maintenance Hold
+  Repair Queue
+  Released to Stock
+}
+
+Boundary Interfaces [color: gray] {
+  Commercial Planning And Pricing
+  Event Project Planning
+  Logistics And Event Delivery
+  Procurement And Supplier Management
+  Finance And Reporting
+  External Warehouse Systems
+}
+
+Asset Master > Asset Status: defines assets
+Asset Status > Stock Availability: updates
+Readiness Rules > Stock Availability: governs ready stock
+Reservations => Availability Check: request stock
+Availability Check <> Stock Availability: query / confirm
+Availability Check => Asset Allocation: reserve assets
+Stock Availability > Shortfall Flag: insufficient stock
+Shortfall Flag -- Procurement And Supplier Management: replenishment need
+Asset Allocation => Warehouse Picking: release to pick
+Warehouse Picking > Pick List: generate
+External Warehouse Systems -- Pick List: pick execution
+Pick List > Staging: picked items
+Staging => Dispatch Ready: ready for dispatch
+Dispatch Ready -- Logistics And Event Delivery: handoff
+Returns Processing => Check-In: returned assets
+Check-In > Quality Checks: inspect
+Quality Checks > Damage Assessment: if issue found
+Quality Checks > Released to Stock: if passed
+Damage Assessment => Maintenance Hold: hold asset
+Maintenance Hold > Repair Queue: send for repair
+Repair Queue > Released to Stock: repair complete
+Released to Stock => Stock Availability: restore availability
+Reservations -- Commercial Planning And Pricing: availability input
+Reservations -- Event Project Planning: event demand
+Returns Processing -- Finance And Reporting: loss/damage outcomes
+Asset Allocation -- Event Project Planning: allocated inventory
+Stock Availability -- Commercial Planning And Pricing: available stock
+Asset Status -- Finance And Reporting: asset utilization
+External Warehouse Systems -- Stock Availability: stock sync
+Logistics And Event Delivery -- Returns Processing: returned from event`;
+
+    const diagram = compile(dsl, dsl);
+    const laid = await layout(diagram);
+    const offsets = edgeLaneOffsets(diagram.edges);
+    const started = Date.now();
+    const routed = diagram.edges.map((candidate) =>
+      routeEdgePath(candidate, laid, undefined, offsets.get(candidate.id) ?? 0),
+    );
+
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(routed.every((candidate) => candidate?.path && candidate.points.length >= 2)).toBe(true);
   });
 });

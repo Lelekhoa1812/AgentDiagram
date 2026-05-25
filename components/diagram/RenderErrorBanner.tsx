@@ -26,6 +26,9 @@ function isComplexityError(errors: string[]): boolean {
       e.includes('ELK layout cannot') ||
       e.includes('ELK layout failed') ||
       e.includes('Layout timed out') ||
+      e.includes('Edge routing timed out') ||
+      e.includes('Layout worker failed') ||
+      e.includes('Fallback layout skipped') ||
       e.includes('too complex'),
   );
 }

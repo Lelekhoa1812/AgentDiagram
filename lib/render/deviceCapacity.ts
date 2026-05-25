@@ -15,11 +15,14 @@ export interface DeviceCapacity {
   isHighEnd: boolean;
 }
 
+export const RENDER_TIMEOUT_MS = 120_000;
+
 export interface AdaptiveThresholds {
   complexityLimit: number;
   edgeLimit: number;
   routingFastRouteThreshold: number;
   layoutTimeoutMs: number;
+  renderTimeoutMs: number;
   forceDirectedIterations: number;
   renderElementLimit: number;
   renderPixelLimit: number;
@@ -73,6 +76,7 @@ export function getAdaptiveThresholds(device: DeviceCapacity): AdaptiveThreshold
       routingFastRouteThreshold: 40,
       // Shorter timeout (5s) but still reasonable for layout to complete
       layoutTimeoutMs: 5_000,
+      renderTimeoutMs: RENDER_TIMEOUT_MS,
       // Fewer force-directed iterations (faster convergence)
       forceDirectedIterations: 50,
       renderElementLimit: 450,
@@ -90,6 +94,7 @@ export function getAdaptiveThresholds(device: DeviceCapacity): AdaptiveThreshold
       routingFastRouteThreshold: 120,
       // Longer timeout (15s) allows complex layouts to complete
       layoutTimeoutMs: 15_000,
+      renderTimeoutMs: RENDER_TIMEOUT_MS,
       // More force-directed iterations for better convergence
       forceDirectedIterations: 200,
       renderElementLimit: 1_600,
@@ -103,6 +108,7 @@ export function getAdaptiveThresholds(device: DeviceCapacity): AdaptiveThreshold
     edgeLimit: 120,
     routingFastRouteThreshold: 80,
     layoutTimeoutMs: 10_000,
+    renderTimeoutMs: RENDER_TIMEOUT_MS,
     forceDirectedIterations: 100,
     renderElementLimit: 900,
     renderPixelLimit: 60_000_000,

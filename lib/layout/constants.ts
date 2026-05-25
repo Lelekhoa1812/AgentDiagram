@@ -14,10 +14,11 @@
  */
 import type { Diagram } from '../ir/types';
 import { detectDeviceCapacity, getAdaptiveThresholds, type AdaptiveThresholds } from '../render/deviceCapacity';
+export { RENDER_TIMEOUT_MS } from '../render/deviceCapacity';
 
 // ── Timeouts ───────────────────────────────────────────────────────────────────
-/** How long to wait for ELK before showing the "too complex" error banner.
- *  Raised from the original 2.5 s to give complex-but-valid diagrams room to breathe. */
+/** How long to wait for one layout engine attempt before escalating.
+ *  The canvas-level render budget remains RENDER_TIMEOUT_MS. */
 export const LAYOUT_TIMEOUT_MS = 8_000;
 
 // ── ELK safety limits ──────────────────────────────────────────────────────────

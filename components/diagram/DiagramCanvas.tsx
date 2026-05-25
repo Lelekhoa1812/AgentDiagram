@@ -16,16 +16,12 @@ import { buildScene, type SceneResult } from '@/lib/render/svgScene';
 import type { LayoutResult } from '@/lib/layout/elk';
 import type { Point } from '@/lib/ir/types';
 import { edgeLaneOffsets, routeEdgePath } from '@/lib/render/edgePath';
-import { routeAllEdgesAsync, type RoutedEdgePath } from '@/lib/render/edgeRouter';
+import { routeEdgesProgressively, type RoutedEdgePath } from '@/lib/render/edgeRouter';
 import { getCachedLayout, cacheLayoutResult } from '@/lib/cache/indexdbCache';
 import { diagramHash } from '@/lib/layout/layoutCache';
 import { validateCompletedRoutes } from '@/lib/render/routeValidation';
 import { RenderErrorBanner } from './RenderErrorBanner';
-import {
-  diagramComplexity,
-  getEffectiveThresholds,
-  getDetectedDevice,
-} from '@/lib/layout/constants';
+import { getEffectiveThresholds, getDetectedDevice } from '@/lib/layout/constants';
 
 export interface DiagramCanvasHandle {
   getSvg: () => SVGSVGElement | null;
@@ -56,14 +52,12 @@ interface DragState {
 
 const PAD = 32;
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
-  });
-  return Promise.race([promise, timeoutPromise]).finally(() => {
-    if (timeoutId) clearTimeout(timeoutId);
-  });
+function isAbortError(err: unknown): boolean {
+  return err instanceof DOMException && err.name === 'AbortError';
+}
+
+function remainingMs(deadlineMs: number): number {
+  return Math.max(0, deadlineMs - Date.now());
 }
 
 export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCanvas(_, ref) {
@@ -107,9 +101,11 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
   // Elapsed-time counter shown in the "Computing layout…" spinner.
   // Increments every 500 ms while layout is running so the user knows progress.
   const [layoutElapsedMs, setLayoutElapsedMs] = useState(0);
-  // Completed routed edges from the worker/cache. Null means the current diagram
-  // is not safe to paint yet.
+  // Routed edges from the worker/cache. During progressive rendering this may be
+  // a partial map, with missing edges intentionally skipped by buildScene.
   const [preRoutedEdges, setPreRoutedEdges] = useState<Map<string, RoutedEdgePath> | null>(null);
+  const [isRoutingComplete, setIsRoutingComplete] = useState(false);
+  const renderRunIdRef = useRef(0);
   useEffect(() => {
     if (!isLayingOut) {
       setLayoutElapsedMs(0);
@@ -143,13 +139,46 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
   }, [diagram]);
 
   useEffect(() => {
-    let cancelled = false;
+    const runId = ++renderRunIdRef.current;
+    const controller = new AbortController();
+    let scheduledFrame: number | null = null;
+    const isCurrent = () => !controller.signal.aborted && renderRunIdRef.current === runId;
+
+    const scheduleSceneCommit = (
+      result: LayoutResult,
+      routed: Map<string, RoutedEdgePath>,
+      missingPreRoutedEdge: 'skip' | 'sync',
+    ) => {
+      if (scheduledFrame !== null) cancelAnimationFrame(scheduledFrame);
+      scheduledFrame = requestAnimationFrame(() => {
+        scheduledFrame = null;
+        if (!isCurrent()) return;
+        setScene(
+          buildScene(diagram, result, {
+            selectedId: selection.id,
+            multiSelectedIds: multiSelectedIdsRef.current,
+            overrides,
+            theme,
+            viewport: wrapperRef.current
+              ? {
+                  ...viewportRef.current,
+                  containerW: wrapperRef.current.clientWidth,
+                  containerH: wrapperRef.current.clientHeight,
+                }
+              : undefined,
+            preRoutedEdges: routed,
+            missingPreRoutedEdge,
+          }),
+        );
+      });
+    };
+
     (async () => {
-      if (!cancelled) {
+      if (isCurrent()) {
         setIsLayingOut(true);
-        setScene(null);
         setLayoutResult(null);
         setPreRoutedEdges(null);
+        setIsRoutingComplete(false);
         layoutRef.current = null;
       }
 
@@ -160,7 +189,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
         .map((d) => `Line ${d.line}:${d.column} — ${d.message}`);
 
       if (compileErrors.length > 0) {
-        if (!cancelled) {
+        if (isCurrent()) {
           setScene(null);
           setLayoutResult(null);
           setRenderErrors(compileErrors);
@@ -176,7 +205,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
       const elementCount = diagram.nodes.length + diagram.groups.length + diagram.edges.length;
 
       if (elementCount > effectiveThresholds.renderElementLimit) {
-        if (!cancelled) {
+        if (isCurrent()) {
           setRenderErrors([
             `Diagram too complex to render safely (${elementCount} elements) on this ${deviceLabel} device. ` +
               `Hard limit is ${effectiveThresholds.renderElementLimit} elements to prevent the page from becoming unresponsive. ` +
@@ -187,155 +216,120 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
         return;
       }
 
-      // Guard against the "Invalid array length" RangeError that ELK's
-      // network-simplex algorithm throws on graphs with too many raw edges.
-      // Bail out before the worker even starts so the page stays responsive.
-      if (diagram.edges.length > effectiveThresholds.edgeLimit) {
-        if (!cancelled) {
-          setScene(null);
-          setLayoutResult(null);
-          setRenderErrors([
-            `Diagram has ${diagram.edges.length} edges — ELK layout cannot safely process more than ${effectiveThresholds.edgeLimit} ` +
-              `on this ${deviceLabel} device. ` +
-              `Remove redundant or cross-group edges, use AI Fix to simplify, or Split Layer to divide it into smaller diagrams.`,
-          ]);
-          setIsLayingOut(false);
-        }
-        return;
-      }
-
-      // Guard against cross-group edge density that stresses ELK's network-simplex
-      // even when the raw edge count looks acceptable.
-      // The metric cross-group edges × (1 + nesting depth) is a much more accurate
-      // proxy than the old groups × edges formula — intra-group edges no longer count.
-      const { score: elkComplexity, crossGroupEdges, maxDepth } = diagramComplexity(diagram);
-      if (elkComplexity > effectiveThresholds.complexityLimit) {
-        if (!cancelled) {
-          setScene(null);
-          setLayoutResult(null);
-          setRenderErrors([
-            `Diagram complexity too high (${crossGroupEdges} cross-group edges × nesting depth ${maxDepth + 1} = ${elkComplexity}) — ` +
-              `ELK layout cannot safely process this on this ${deviceLabel} device. ` +
-              `Remove redundant cross-group edges, use AI Fix to simplify, or Split Layer to divide it into smaller diagrams.`,
-          ]);
-          setIsLayingOut(false);
-        }
-        return;
-      }
-
       try {
-        const totalTimeoutMs = Math.max(30_000, effectiveThresholds.layoutTimeoutMs * 4);
+        const renderTimeoutMs = effectiveThresholds.renderTimeoutMs;
+        const deadlineMs = Date.now() + renderTimeoutMs;
         const edgeIds = diagram.edges.map((edge) => edge.id);
+        const cacheKey = diagramHash(diagram, { direction: 'DOWN' });
+        const cached = await getCachedLayout(cacheKey, edgeIds);
+        if (!isCurrent()) return;
 
-        await withTimeout(
-          (async () => {
-            const cacheKey = diagramHash(diagram, { direction: 'DOWN' });
-            const cached = await getCachedLayout(cacheKey, edgeIds);
-            let result: LayoutResult;
-            let routed: Map<string, RoutedEdgePath>;
+        let result: LayoutResult;
+        let routed: Map<string, RoutedEdgePath>;
 
-            if (cached) {
-              console.debug('[Cache] Completed layout cache hit for diagram');
-              result = cached.layoutResult;
-              routed = new Map(cached.routedEdges.map((route) => [route.edgeId, route]));
-            } else {
-              result = await withTimeout(
-                runLayout(diagram, strategy),
-                effectiveThresholds.layoutTimeoutMs,
-                `Layout timed out after ${Math.round(effectiveThresholds.layoutTimeoutMs / 1000)}s — diagram is too complex to render. Use AI Fix to simplify or Split Layer to divide it.`,
-              );
+        if (cached) {
+          console.debug('[Cache] Completed layout cache hit for diagram');
+          result = cached.layoutResult;
+          routed = new Map(cached.routedEdges.map((route) => [route.edgeId, route]));
+        } else {
+          result = await runLayout(diagram, strategy, undefined, {
+            deadlineMs,
+            signal: controller.signal,
+          });
+          if (!isCurrent()) return;
 
-              const edgeOffsets = edgeLaneOffsets(diagram.edges);
-              routed = await routeAllEdgesAsync(
-                diagram.edges,
-                result,
-                overrides,
-                edgeOffsets,
-                Math.max(5_000, effectiveThresholds.layoutTimeoutMs),
-              );
-            }
+          const renderPixels = result.bbox.width * result.bbox.height;
+          if (renderPixels > effectiveThresholds.renderPixelLimit) {
+            throw new Error(
+              `Diagram too complex to render safely (${Math.round(renderPixels / 1_000_000)}M layout pixels) on this ${deviceLabel} device. ` +
+                `Use AI Fix to simplify or Split Layer to divide it into smaller diagrams.`,
+            );
+          }
 
-            const renderPixels = result.bbox.width * result.bbox.height;
-            if (renderPixels > effectiveThresholds.renderPixelLimit) {
-              throw new Error(
-                `Diagram too complex to render safely (${Math.round(renderPixels / 1_000_000)}M layout pixels) on this ${deviceLabel} device. ` +
-                  `Use AI Fix to simplify or Split Layer to divide it into smaller diagrams.`,
-              );
-            }
+          const partialRoutes = new Map<string, RoutedEdgePath>();
+          layoutRef.current = result;
+          setLayoutResult(result);
+          setPreRoutedEdges(partialRoutes);
+          setRenderErrors([]);
 
-            const routeErrors = validateCompletedRoutes(diagram.edges, result, routed);
-            if (routeErrors.length > 0) throw new Error(routeErrors.join('\n'));
+          // Motivation vs Logic: complex diagrams should become inspectable as
+          // soon as layout exists, so the canvas paints nodes/groups first and
+          // then lets worker-routed edges stream in under the same 60s budget.
+          scheduleSceneCommit(result, partialRoutes, 'skip');
 
-            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-            if (cancelled) return;
+          const edgeOffsets = edgeLaneOffsets(diagram.edges);
+          routed = await routeEdgesProgressively(diagram.edges, result, overrides, edgeOffsets, {
+            timeoutMs: Math.max(1, remainingMs(deadlineMs)),
+            batchSize: 16,
+            signal: controller.signal,
+            onBatch: ({ routed: progressiveRoutes }) => {
+              if (!isCurrent()) return;
+              setPreRoutedEdges(progressiveRoutes);
+              scheduleSceneCommit(result, progressiveRoutes, 'skip');
+            },
+          });
+        }
 
-            // Motivation vs Logic: the canvas only commits a new SVG after
-            // layout and every edge route are complete, trading progressive
-            // preview for a final diagram where arrows cannot appear detached.
-            const nextScene = buildScene(diagram, result, {
-              selectedId: selection.id,
-              multiSelectedIds: multiSelectedIdsRef.current,
-              overrides,
-              theme,
-              viewport: wrapperRef.current
-                ? {
-                    ...viewportRef.current,
-                    containerW: wrapperRef.current.clientWidth,
-                    containerH: wrapperRef.current.clientHeight,
-                  }
-                : undefined,
-              preRoutedEdges: routed,
-            });
+        if (!isCurrent()) return;
 
-            layoutRef.current = result;
-            setLayoutResult(result);
-            setPreRoutedEdges(routed);
-            setScene(nextScene);
-            setRenderErrors([]);
+        const renderPixels = result.bbox.width * result.bbox.height;
+        if (renderPixels > effectiveThresholds.renderPixelLimit) {
+          throw new Error(
+            `Diagram too complex to render safely (${Math.round(renderPixels / 1_000_000)}M layout pixels) on this ${deviceLabel} device. ` +
+              `Use AI Fix to simplify or Split Layer to divide it into smaller diagrams.`,
+          );
+        }
 
-            if (!cached) {
-              const routedArray = Array.from(routed.entries()).map(([edgeId, path]) => ({
-                edgeId,
-                ...path,
-              }));
-              cacheLayoutResult(
-                cacheKey,
-                result,
-                routedArray,
-                'default-project',
-                'default-layer',
-                dsl,
-                edgeIds,
-              ).catch((err) =>
-                console.warn('[Cache] Failed to save completed render to IndexDB:', err),
-              );
-            }
-          })(),
-          totalTimeoutMs,
-          `Rendering timed out after ${Math.round(totalTimeoutMs / 1000)}s — diagram is too complex for this ${deviceLabel} device. Use AI Fix to simplify or Split Layer to divide it.`,
-        );
+        const routeErrors = validateCompletedRoutes(diagram.edges, result, routed);
+        if (routeErrors.length > 0) throw new Error(routeErrors.join('\n'));
+
+        layoutRef.current = result;
+        setLayoutResult(result);
+        setPreRoutedEdges(routed);
+        setIsRoutingComplete(true);
+        setRenderErrors([]);
+        scheduleSceneCommit(result, routed, 'sync');
+
+        if (!cached) {
+          const routedArray = Array.from(routed.entries()).map(([edgeId, path]) => ({
+            edgeId,
+            ...path,
+          }));
+          cacheLayoutResult(
+            cacheKey,
+            result,
+            routedArray,
+            'default-project',
+            'default-layer',
+            dsl,
+            edgeIds,
+          ).catch((err) =>
+            console.warn('[Cache] Failed to save completed render to IndexDB:', err),
+          );
+        }
       } catch (err) {
+        if (isAbortError(err) || !isCurrent()) return;
         let errMsg = err instanceof Error ? err.message : String(err);
-        // ELK's network-simplex algorithm throws "Invalid array length" when
-        // the compound graph is too complex (too many nodes/cross-group edges).
         if (errMsg.includes('Invalid array length') || errMsg.includes('worker crashed')) {
           errMsg =
-            `ELK layout failed: diagram is too complex (too many cross-group edges). ` +
-            `Use AI Fix to simplify.`;
+            `Layout worker failed on this complex diagram. ` +
+            `The partial render was kept visible when available; use AI Fix or Split Layer if the diagram does not finish.`;
         }
-        if (!cancelled) {
-          setScene(null);
-          setLayoutResult(null);
+        if (isCurrent()) {
           setRenderErrors([errMsg]);
+          if (!layoutRef.current) {
+            setScene(null);
+            setLayoutResult(null);
+          }
         }
-        // eslint-disable-next-line no-console
         console.warn('Layout failed:', err);
       } finally {
-        setIsLayingOut(false);
+        if (isCurrent()) setIsLayingOut(false);
       }
     })();
     return () => {
-      cancelled = true;
+      controller.abort();
+      if (scheduledFrame !== null) cancelAnimationFrame(scheduledFrame);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [diagram, strategy, theme]);
@@ -356,9 +350,10 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
             }
           : undefined,
         preRoutedEdges: preRoutedEdges ?? undefined,
+        missingPreRoutedEdge: isRoutingComplete ? 'sync' : 'skip',
       }),
     );
-  }, [overrides, selection, multiSelectedIds, diagram, theme, preRoutedEdges]);
+  }, [overrides, selection, multiSelectedIds, diagram, theme, preRoutedEdges, isRoutingComplete]);
 
   const fitView = useCallback(() => {
     if (!scene || !wrapperRef.current) return;

@@ -55,6 +55,12 @@ export interface SceneOptions {
    * while edge routing happens off the main thread.
    */
   preRoutedEdges?: Map<string, RoutedEdgePath>;
+  /**
+   * Controls what screen rendering does while progressive routing is still
+   * missing some worker-produced edge paths. Exports omit this and keep the
+   * original full-fidelity synchronous fallback.
+   */
+  missingPreRoutedEdge?: 'sync' | 'skip';
 }
 
 export interface SceneResult {
@@ -279,11 +285,20 @@ export function buildScene(
          opts.overrides?.groups?.[edge.source] ||
          opts.overrides?.groups?.[edge.target]);
     const hasEdgeBendOverride = !!(opts.overrides?.edges?.[edge.id]?.bends?.length);
-    const prerouted = (hasConnectedOverride || hasEdgeBendOverride)
-      ? undefined
-      : opts.preRoutedEdges?.get(edge.id);
+    const shouldUsePrerouted = !hasConnectedOverride && !hasEdgeBendOverride;
+    const prerouted = shouldUsePrerouted ? opts.preRoutedEdges?.get(edge.id) : undefined;
 
-    const routed = prerouted ?? routeEdgePath(edge, layout, opts.overrides, edgeOffsets.get(edge.id) ?? 0);
+    if (
+      shouldUsePrerouted &&
+      opts.preRoutedEdges &&
+      !prerouted &&
+      opts.missingPreRoutedEdge === 'skip'
+    ) {
+      return null;
+    }
+
+    const routed =
+      prerouted ?? routeEdgePath(edge, layout, opts.overrides, edgeOffsets.get(edge.id) ?? 0);
     if (!routed?.path) return null;
     const isSelected = opts.selectedId === edge.id || (opts.multiSelectedIds?.has(edge.id) ?? false);
     const fwdMarker = edge.kind === 'thick' ? ARROW_THICK_ID : ARROW_FWD_ID;

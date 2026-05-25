@@ -22,6 +22,7 @@ const TURN_PENALTY = 36;
 const LOCAL_OBSTACLE_MARGIN = 180;
 const ROUTING_OBSTACLE_LIMIT = 12;
 const ROUTING_OBSTACLE_CAP = 24;
+const GRID_ROUTE_STATE_LIMIT = 4_000;
 // Above this element count (nodes + groups + edges) the router switches to
 // fast Manhattan paths instead of obstacle-aware A* to keep the main thread
 // responsive. The example "bridge server" diagram has ~80 elements, so 60 is
@@ -485,6 +486,10 @@ function uniqueSorted(values: number[]): number[] {
   return [...new Set(values.map((value) => Math.round(value * 1000) / 1000))].sort((a, b) => a - b);
 }
 
+function coordinateIndex(values: number[], value: number): number {
+  return values.findIndex((candidate) => Math.abs(candidate - value) <= EPSILON);
+}
+
 interface QueueItem {
   key: string;
   priority: number;
@@ -578,10 +583,17 @@ function gridRoute(start: Point, end: Point, obstacles: Obstacle[]): Point[] | n
     ]),
   ]);
 
-  const startX = xs.indexOf(start.x);
-  const startY = ys.indexOf(start.y);
-  const endX = xs.indexOf(end.x);
-  const endY = ys.indexOf(end.y);
+  // Root Cause vs Logic: ELK often emits fractional coordinates; uniqueSorted()
+  // rounds grid lines to stable 0.001px values, so exact indexOf() can miss the
+  // start/end line and seed A* at -1,-1. Use tolerant lookup and cap the search
+  // grid so hard diagrams fall back to simple Manhattan routing instead of
+  // allocating until the browser or worker runs out of memory.
+  if (xs.length * ys.length * 4 > GRID_ROUTE_STATE_LIMIT) return null;
+  const startX = coordinateIndex(xs, start.x);
+  const startY = coordinateIndex(ys, start.y);
+  const endX = coordinateIndex(xs, end.x);
+  const endY = coordinateIndex(ys, end.y);
+  if (startX < 0 || startY < 0 || endX < 0 || endY < 0) return null;
   const startKey = `${startX},${startY},none`;
   const endPrefix = `${endX},${endY},`;
   const pointFor = (ix: number, iy: number): Point => ({ x: xs[ix]!, y: ys[iy]! });

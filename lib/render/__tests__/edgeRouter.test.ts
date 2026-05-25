@@ -5,6 +5,7 @@ import type { LayoutResult } from '@/lib/layout/elk';
 interface RouteRequest {
   requestId: number;
   edges: IREdge[];
+  batchSize: number;
 }
 
 type Listener = (event: MessageEvent<unknown>) => void;
@@ -33,8 +34,7 @@ class FakeWorker {
     const delay = message.requestId === 1 ? 20 : 0;
     setTimeout(() => {
       if (this.terminated) return;
-      const data = message.edges.map((edge: IREdge) => ({
-        requestId: message.requestId,
+      const routes = message.edges.map((edge: IREdge) => ({
         edgeId: edge.id,
         path: `M 0 0 L ${message.requestId} ${message.requestId}`,
         points: [
@@ -43,7 +43,23 @@ class FakeWorker {
         ],
         labelPoint: { x: message.requestId, y: message.requestId },
       }));
-      this.emit('message', { data });
+      this.emit('message', {
+        data: {
+          requestId: message.requestId,
+          type: 'batch',
+          routes,
+          completed: routes.length,
+          total: routes.length,
+        },
+      });
+      this.emit('message', {
+        data: {
+          requestId: message.requestId,
+          type: 'complete',
+          completed: routes.length,
+          total: routes.length,
+        },
+      });
     }, delay);
   }
 
@@ -133,6 +149,105 @@ describe('routeAllEdgesAsync', () => {
     );
   });
 
+  it('streams route batches before resolving', async () => {
+    class BatchWorker extends FakeWorker {
+      override postMessage(message: RouteRequest) {
+        this.posts.push(message);
+        setTimeout(() => {
+          this.emit('message', {
+            data: {
+              requestId: message.requestId,
+              type: 'batch',
+              routes: [
+                {
+                  edgeId: 'a',
+                  path: 'M 0 0 L 1 1',
+                  points: [
+                    { x: 0, y: 0 },
+                    { x: 1, y: 1 },
+                  ],
+                  labelPoint: { x: 1, y: 1 },
+                },
+              ],
+              completed: 1,
+              total: 2,
+            },
+          });
+        }, 0);
+        setTimeout(() => {
+          this.emit('message', {
+            data: {
+              requestId: message.requestId,
+              type: 'batch',
+              routes: [
+                {
+                  edgeId: 'b',
+                  path: 'M 0 0 L 2 2',
+                  points: [
+                    { x: 0, y: 0 },
+                    { x: 2, y: 2 },
+                  ],
+                  labelPoint: { x: 2, y: 2 },
+                },
+              ],
+              completed: 2,
+              total: 2,
+            },
+          });
+          this.emit('message', {
+            data: { requestId: message.requestId, type: 'complete', completed: 2, total: 2 },
+          });
+        }, 10);
+      }
+    }
+
+    vi.stubGlobal('Worker', BatchWorker);
+    const { routeEdgesProgressively } = await import('../edgeRouter');
+    const batches: number[] = [];
+
+    const routed = routeEdgesProgressively(
+      [edge('a'), edge('b')],
+      layout,
+      undefined,
+      new Map(),
+      {
+        timeoutMs: 1_000,
+        batchSize: 1,
+        onBatch: ({ completed }) => batches.push(completed),
+      },
+    );
+
+    await vi.advanceTimersByTimeAsync(11);
+
+    await expect(routed).resolves.toEqual(
+      new Map([
+        [
+          'a',
+          {
+            path: 'M 0 0 L 1 1',
+            points: [
+              { x: 0, y: 0 },
+              { x: 1, y: 1 },
+            ],
+            labelPoint: { x: 1, y: 1 },
+          },
+        ],
+        [
+          'b',
+          {
+            path: 'M 0 0 L 2 2',
+            points: [
+              { x: 0, y: 0 },
+              { x: 2, y: 2 },
+            ],
+            labelPoint: { x: 2, y: 2 },
+          },
+        ],
+      ]),
+    );
+    expect(batches).toEqual([1, 2]);
+  });
+
   it('rejects and restarts the worker when routing times out', async () => {
     class SilentWorker extends FakeWorker {
       override postMessage(message: RouteRequest) {
@@ -148,5 +263,11 @@ describe('routeAllEdgesAsync', () => {
 
     await expectation;
     expect(workers[0]?.terminated).toBe(true);
+
+    vi.stubGlobal('Worker', FakeWorker);
+    const next = routeAllEdgesAsync([edge('after-timeout')], layout, undefined, new Map(), 1_000);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(next).resolves.toHaveProperty('size', 1);
+    expect(workers).toHaveLength(2);
   });
 });

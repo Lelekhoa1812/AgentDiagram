@@ -2,7 +2,8 @@
  * Edge Router Worker Wrapper
  *
  * Manages a singleton Web Worker for edge routing off the main thread.
- * Mirrors the pattern established in lib/layout/elk.ts.
+ * Supports progressive batch delivery so large diagrams can paint nodes/groups
+ * first, then fill in edges without blocking the browser page.
  */
 
 import type { IREdge, Point } from '../ir/types';
@@ -19,16 +20,23 @@ interface RouteRequest {
   layoutEdges: Array<[string, LayoutEdge]>;
   overrides: Record<string, { bends: Point[] }>;
   edgeOffsets: Array<[string, number]>;
+  batchSize: number;
 }
 
-/**
- * Response from the worker includes edgeId for mapping.
- * The RoutedEdgePath interface doesn't include edgeId since it's the Map key.
- */
 interface RouteResponse extends RoutedEdgePath {
-  requestId: number;
   edgeId: string;
 }
+
+type RouteWorkerMessage =
+  | {
+      requestId: number;
+      type: 'batch';
+      routes: RouteResponse[];
+      completed: number;
+      total: number;
+    }
+  | { requestId: number; type: 'complete'; completed: number; total: number }
+  | { requestId: number; type: 'error'; error: string };
 
 interface EdgeOverrides {
   nodes?: Record<string, Partial<LayoutRect>>;
@@ -36,23 +44,61 @@ interface EdgeOverrides {
   edges?: Record<string, { bends: Point[] }>;
 }
 
+export interface RouteProgress {
+  routed: Map<string, RoutedEdgePath>;
+  batch: Map<string, RoutedEdgePath>;
+  completed: number;
+  total: number;
+}
+
+export interface ProgressiveRouteOptions {
+  timeoutMs?: number;
+  batchSize?: number;
+  signal?: AbortSignal;
+  onBatch?: (progress: RouteProgress) => void;
+}
+
 let routerWorker: Worker | null = null;
 let nextRequestId = 1;
 
 interface PendingRouteRequest {
+  routes: Map<string, RoutedEdgePath>;
   resolve: (value: Map<string, RoutedEdgePath>) => void;
   reject: (reason: Error) => void;
   timeoutId: ReturnType<typeof setTimeout>;
+  abortHandler?: () => void;
+  signal?: AbortSignal;
+  onBatch?: (progress: RouteProgress) => void;
 }
 
 const pendingRouteRequests = new Map<number, PendingRouteRequest>();
 
+function toRouteMap(routes: RouteResponse[]): Map<string, RoutedEdgePath> {
+  return new Map(
+    routes.map((route) => [
+      route.edgeId,
+      {
+        path: route.path,
+        points: route.points,
+        labelPoint: route.labelPoint,
+      },
+    ]),
+  );
+}
+
+function cleanupPending(requestId: number, pending: PendingRouteRequest): void {
+  clearTimeout(pending.timeoutId);
+  if (pending.signal && pending.abortHandler) {
+    pending.signal.removeEventListener('abort', pending.abortHandler);
+  }
+  pendingRouteRequests.delete(requestId);
+}
+
 function rejectPendingRequests(error: Error): void {
-  for (const pending of pendingRouteRequests.values()) {
-    clearTimeout(pending.timeoutId);
+  for (const [requestId, pending] of pendingRouteRequests) {
+    cleanupPending(requestId, pending);
     pending.reject(error);
   }
-  pendingRouteRequests.clear();
 }
 
 function resetRouterWorker(error?: Error): void {
@@ -63,36 +109,34 @@ function resetRouterWorker(error?: Error): void {
   if (error) rejectPendingRequests(error);
 }
 
-function handleWorkerMessage(event: MessageEvent<RouteResponse[]>) {
-  const first = event.data[0];
-  const requestId = first?.requestId;
+function handleWorkerMessage(event: MessageEvent<RouteWorkerMessage>) {
+  const requestId = event.data?.requestId;
   if (requestId === undefined) return;
 
   const pending = pendingRouteRequests.get(requestId);
   if (!pending) return;
-  pendingRouteRequests.delete(requestId);
-  clearTimeout(pending.timeoutId);
-
-  if (first && event.data.length === 1 && first.edgeId === '' && !first.path) {
-    pending.reject(new Error('Edge routing worker failed before completing routes.'));
-    return;
-  }
 
   // Root Cause vs Logic: route worker responses can arrive after newer renders
   // have started, so every response is matched by request id before updating UI
   // state; stale messages are ignored instead of painting old arrows.
-  pending.resolve(
-    new Map(
-      event.data.map((r) => [
-        r.edgeId,
-        {
-          path: r.path,
-          points: r.points,
-          labelPoint: r.labelPoint,
-        } as RoutedEdgePath,
-      ]),
-    ),
-  );
+  if (event.data.type === 'batch') {
+    const batch = toRouteMap(event.data.routes);
+    for (const [edgeId, route] of batch) pending.routes.set(edgeId, route);
+    pending.onBatch?.({
+      routed: new Map(pending.routes),
+      batch,
+      completed: event.data.completed,
+      total: event.data.total,
+    });
+    return;
+  }
+
+  cleanupPending(requestId, pending);
+  if (event.data.type === 'error') {
+    pending.reject(new Error(event.data.error || 'Edge routing worker failed.'));
+    return;
+  }
+  pending.resolve(new Map(pending.routes));
 }
 
 function handleWorkerError(error: ErrorEvent) {
@@ -102,13 +146,10 @@ function handleWorkerError(error: ErrorEvent) {
 
 function getRouterWorker(): Worker {
   if (!routerWorker) {
-    // In Next.js, we use module worker syntax
-    // The TypeScript file is compiled by webpack during build
     routerWorker = new Worker(new URL('../workers/route-worker.ts', import.meta.url), {
       type: 'module',
     });
 
-    // Log for debugging
     console.debug('[EdgeRouter] Worker instantiated');
     routerWorker.addEventListener('message', handleWorkerMessage);
     routerWorker.addEventListener('error', handleWorkerError);
@@ -116,24 +157,23 @@ function getRouterWorker(): Worker {
   return routerWorker;
 }
 
-/**
- * Route all edges asynchronously using the worker.
- * Falls back to returning empty results if worker fails — caller should use sync routing.
- */
-export async function routeAllEdgesAsync(
+export async function routeEdgesProgressively(
   edges: IREdge[],
   layout: LayoutResult,
   overrides: EdgeOverrides | undefined,
   edgeOffsets: Map<string, number>,
-  timeoutMs = 10_000,
+  options: ProgressiveRouteOptions = {},
 ): Promise<Map<string, RoutedEdgePath>> {
   if (edges.length === 0) return new Map();
+  if (options.signal?.aborted) {
+    throw new DOMException('Edge routing aborted.', 'AbortError');
+  }
 
   const worker = getRouterWorker();
   const requestId = nextRequestId++;
+  const timeoutMs = options.timeoutMs ?? 10_000;
+  const batchSize = Math.max(1, options.batchSize ?? 16);
 
-  // Serialize the request
-  // Maps must be converted to arrays since they're not JSON-serializable
   const request: RouteRequest = {
     requestId,
     edges,
@@ -142,6 +182,7 @@ export async function routeAllEdgesAsync(
     layoutEdges: Array.from(layout.edges.entries()),
     overrides: overrides?.edges ?? {},
     edgeOffsets: Array.from(edgeOffsets.entries()),
+    batchSize,
   };
 
   return new Promise((resolve, reject) => {
@@ -151,17 +192,44 @@ export async function routeAllEdgesAsync(
       );
     }, timeoutMs);
 
-    pendingRouteRequests.set(requestId, { resolve, reject, timeoutId });
+    const pending: PendingRouteRequest = {
+      routes: new Map(),
+      resolve,
+      reject,
+      timeoutId,
+      signal: options.signal,
+      onBatch: options.onBatch,
+    };
+
+    if (options.signal) {
+      pending.abortHandler = () => {
+        resetRouterWorker(new DOMException('Edge routing aborted.', 'AbortError') as Error);
+      };
+      options.signal.addEventListener('abort', pending.abortHandler, { once: true });
+    }
+
+    pendingRouteRequests.set(requestId, pending);
     try {
       worker.postMessage(request);
     } catch (err) {
-      console.error('[EdgeRouter] Failed to post message to worker:', err);
-      pendingRouteRequests.delete(requestId);
-      clearTimeout(timeoutId);
+      cleanupPending(requestId, pending);
       resetRouterWorker();
       reject(err instanceof Error ? err : new Error(String(err)));
     }
   });
+}
+
+/**
+ * Compatibility wrapper for callers that still need all routes as one result.
+ */
+export async function routeAllEdgesAsync(
+  edges: IREdge[],
+  layout: LayoutResult,
+  overrides: EdgeOverrides | undefined,
+  edgeOffsets: Map<string, number>,
+  timeoutMs = 10_000,
+): Promise<Map<string, RoutedEdgePath>> {
+  return routeEdgesProgressively(edges, layout, overrides, edgeOffsets, { timeoutMs });
 }
 
 /**

@@ -399,6 +399,10 @@ function resetGraphvizWorker(): void {
   }
 }
 
+export function terminateGraphvizWorker(): void {
+  resetGraphvizWorker();
+}
+
 async function runGraphvizInWorker(
   request: Omit<GraphvizWorkerRequest, 'requestId'>,
   timeoutMs: number,
