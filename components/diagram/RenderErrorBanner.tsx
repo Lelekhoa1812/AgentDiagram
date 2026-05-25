@@ -46,6 +46,9 @@ export function RenderErrorBanner({ errors, onDismiss }: Props) {
   const [splitting, setSplitting] = useState(false);
 
   const showSplitLayer = isComplexityError(errors);
+  const title = showSplitLayer
+    ? 'Diagram rendering stopped — diagram is too complex'
+    : 'Diagram rendering error — DSL syntax/format issue detected';
 
   const currentModel =
     provider.provider === 'foundry' ? (provider.customModel ?? provider.model) : provider.model;
@@ -173,9 +176,7 @@ export function RenderErrorBanner({ errors, onDismiss }: Props) {
         <AlertTriangle size={14} className="mt-0.5 flex-shrink-0 text-red-400" />
 
         <div className="min-w-0 flex-1">
-          <div className="text-[11px] font-semibold text-red-400">
-            Diagram rendering error — DSL syntax/format issue detected
-          </div>
+          <div className="text-[11px] font-semibold text-red-400">{title}</div>
 
           {/* Full error messages — no truncation */}
           <div className="mt-1 space-y-0.5">

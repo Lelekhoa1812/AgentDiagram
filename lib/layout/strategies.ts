@@ -1,8 +1,9 @@
 import type { Diagram } from '../ir/types';
 import { layout, type LayoutOptions, type LayoutResult } from './elk';
 import { cacheGet, cacheSet, diagramHash } from './layoutCache';
-import { layoutWithGraphviz } from './graphviz';
+import { layoutWithGraphviz, prewarmGraphvizWasm } from './graphviz';
 import { layoutForceDirected } from './forceDirected';
+import { diagramComplexity, getEffectiveThresholds } from './constants';
 
 export type LayoutStrategy = 'auto' | 'layered' | 'force-lite' | 'grid-cluster' | 'manual';
 
@@ -12,6 +13,12 @@ export async function runLayout(
   opts?: LayoutOptions,
 ): Promise<LayoutResult> {
   const resolvedOpts = resolveOpts(diagram, strategy, opts);
+  const thresholds = getEffectiveThresholds();
+  const { score: complexity } = diagramComplexity(diagram);
+
+  if (complexity >= thresholds.complexityLimit * 0.65) {
+    prewarmGraphvizWasm();
+  }
 
   // ── Layout cache ─────────────────────────────────────────────────────────
   // Skip ELK entirely when the structural diagram and options are identical to
@@ -35,7 +42,7 @@ export async function runLayout(
       elkErr instanceof Error ? elkErr.message : elkErr,
     );
     try {
-      result = await layoutWithGraphviz(diagram, resolvedOpts);
+      result = await layoutWithGraphviz(diagram, resolvedOpts, thresholds.layoutTimeoutMs);
     } catch (gvErr) {
       // eslint-disable-next-line no-console
       console.warn(

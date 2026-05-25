@@ -21,6 +21,8 @@ export interface AdaptiveThresholds {
   routingFastRouteThreshold: number;
   layoutTimeoutMs: number;
   forceDirectedIterations: number;
+  renderElementLimit: number;
+  renderPixelLimit: number;
 }
 
 /**
@@ -30,11 +32,14 @@ export interface AdaptiveThresholds {
 export function detectDeviceCapacity(): DeviceCapacity {
   // CPU cores: navigator.hardwareConcurrency (supported in most modern browsers)
   // Default to 4 if unavailable
-  const cpuCores = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency ?? 4 : 4;
+  const cpuCores = typeof navigator !== 'undefined' ? (navigator.hardwareConcurrency ?? 4) : 4;
 
   // Memory: navigator.deviceMemory (supported in Chromium, not Safari/Firefox)
   // Default to 8GB if unavailable. This is an estimate and may not be accurate.
-  const memoryGB = typeof navigator !== 'undefined' ? (navigator as any).deviceMemory ?? 8 : 8;
+  const memoryGB =
+    typeof navigator !== 'undefined'
+      ? ((navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 8)
+      : 8;
 
   // Classify device based on specs
   // Low-end: <= 2 cores AND <= 4GB memory
@@ -70,6 +75,8 @@ export function getAdaptiveThresholds(device: DeviceCapacity): AdaptiveThreshold
       layoutTimeoutMs: 5_000,
       // Fewer force-directed iterations (faster convergence)
       forceDirectedIterations: 50,
+      renderElementLimit: 450,
+      renderPixelLimit: 24_000_000,
     };
   }
 
@@ -85,6 +92,8 @@ export function getAdaptiveThresholds(device: DeviceCapacity): AdaptiveThreshold
       layoutTimeoutMs: 15_000,
       // More force-directed iterations for better convergence
       forceDirectedIterations: 200,
+      renderElementLimit: 1_600,
+      renderPixelLimit: 120_000_000,
     };
   }
 
@@ -95,6 +104,8 @@ export function getAdaptiveThresholds(device: DeviceCapacity): AdaptiveThreshold
     routingFastRouteThreshold: 80,
     layoutTimeoutMs: 10_000,
     forceDirectedIterations: 100,
+    renderElementLimit: 900,
+    renderPixelLimit: 60_000_000,
   };
 }
 

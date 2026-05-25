@@ -20,6 +20,7 @@ interface EdgeOverrides {
 }
 
 interface RouteRequest {
+  requestId: number;
   edges: IREdge[];
   nodes: Array<[string, LayoutRect]>;
   groups: Array<[string, LayoutRect]>;
@@ -34,6 +35,7 @@ interface RouteRequest {
  * (the edgeId is the Map key in the main thread).
  */
 interface RouteResponse {
+  requestId: number;
   edgeId: string;
   path: string;
   points: Point[];
@@ -65,6 +67,7 @@ function reconstructLayout(
 }
 
 self.onmessage = (event: MessageEvent<RouteRequest>) => {
+  const requestId = event.data?.requestId ?? -1;
   try {
     const { edges, nodes, groups, layoutEdges, overrides, edgeOffsets } = event.data;
 
@@ -80,14 +83,10 @@ self.onmessage = (event: MessageEvent<RouteRequest>) => {
 
     // Route all edges using the synchronous routing logic
     const results: RouteResponse[] = edges.map((edge) => {
-      const routed = routeEdgePath(
-        edge,
-        layout,
-        edgeOverridesObj,
-        edgeOffsetMap.get(edge.id) ?? 0,
-      );
+      const routed = routeEdgePath(edge, layout, edgeOverridesObj, edgeOffsetMap.get(edge.id) ?? 0);
 
       return {
+        requestId,
         edgeId: edge.id,
         path: routed?.path ?? '',
         points: routed?.points ?? [],
@@ -100,6 +99,6 @@ self.onmessage = (event: MessageEvent<RouteRequest>) => {
   } catch (err) {
     console.error('[Route Worker] Error during edge routing:', err);
     // Send error signal by posting empty array so main thread can fall back to sync
-    self.postMessage([]);
+    self.postMessage([{ requestId, edgeId: '', path: '', points: [], labelPoint: { x: 0, y: 0 } }]);
   }
 };

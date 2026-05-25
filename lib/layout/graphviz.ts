@@ -38,8 +38,8 @@ function dotStr(s: string): string {
 
 function buildDot(diagram: Diagram, opts: LayoutOptions): string {
   const direction = opts.direction === 'RIGHT' ? 'LR' : 'TB';
-  const nodeSep   = ((opts.nodeNodeSpacing ?? 28) / GV_TO_PX).toFixed(4);
-  const rankSep   = ((opts.layerSpacing ?? 48)    / GV_TO_PX).toFixed(4);
+  const nodeSep = ((opts.nodeNodeSpacing ?? 28) / GV_TO_PX).toFixed(4);
+  const rankSep = ((opts.layerSpacing ?? 48) / GV_TO_PX).toFixed(4);
 
   const lines: string[] = [
     `digraph G {`,
@@ -48,7 +48,7 @@ function buildDot(diagram: Diagram, opts: LayoutOptions): string {
   ];
 
   const groupById = new Map(diagram.groups.map((g) => [g.id, g]));
-  const nodeById  = new Map(diagram.nodes.map((n) => [n.id, n]));
+  const nodeById = new Map(diagram.nodes.map((n) => [n.id, n]));
 
   function emitGroup(groupId: string, indent: string): void {
     const g = groupById.get(groupId);
@@ -71,9 +71,9 @@ function buildDot(diagram: Diagram, opts: LayoutOptions): string {
     const n = nodeById.get(nodeId);
     if (!n) return;
     const label = n.label ?? n.name;
-    const sz    = nodeSize(label);
-    const wIn   = (sz.width  / GV_TO_PX).toFixed(4);
-    const hIn   = (sz.height / GV_TO_PX).toFixed(4);
+    const sz = nodeSize(label);
+    const wIn = (sz.width / GV_TO_PX).toFixed(4);
+    const hIn = (sz.height / GV_TO_PX).toFixed(4);
     lines.push(`${indent}${dotStr(nodeId)} [label=${dotStr(label)} width=${wIn} height=${hIn}];`);
   }
 
@@ -102,20 +102,20 @@ interface GvNode {
   id: string;
   cx: number; // center-x, inches, x=0 is left
   cy: number; // center-y, inches, y=0 is BOTTOM
-  w:  number; // width, inches
-  h:  number; // height, inches
+  w: number; // width, inches
+  h: number; // height, inches
 }
 
 interface GvEdge {
-  tail:   string;
-  head:   string;
+  tail: string;
+  head: string;
   points: Array<{ x: number; y: number }>; // inches, y=0 is BOTTOM
 }
 
 interface GvPlain {
-  graphH: number;    // total graph height in inches (for y-flip)
-  nodes:  GvNode[];
-  edges:  GvEdge[];
+  graphH: number; // total graph height in inches (for y-flip)
+  nodes: GvNode[];
+  edges: GvEdge[];
 }
 
 function parsePlain(plain: string): GvPlain {
@@ -124,7 +124,7 @@ function parsePlain(plain: string): GvPlain {
   let graphH = 1;
 
   for (const raw of plain.split('\n')) {
-    const line  = raw.trim();
+    const line = raw.trim();
     const parts = line.split(/\s+/);
     switch (parts[0]) {
       case 'graph': {
@@ -140,8 +140,8 @@ function parsePlain(plain: string): GvPlain {
           id,
           cx: parseFloat(parts[2] ?? '0'),
           cy: parseFloat(parts[3] ?? '0'),
-          w:  parseFloat(parts[4] ?? '1'),
-          h:  parseFloat(parts[5] ?? '0.5'),
+          w: parseFloat(parts[4] ?? '1'),
+          h: parseFloat(parts[5] ?? '0.5'),
         });
         break;
       }
@@ -149,7 +149,7 @@ function parsePlain(plain: string): GvPlain {
         // edge <tail> <head> <n> <x1> <y1> <x2> <y2> ... [<label> <lx> <ly>] <style> <color>
         const tail = (parts[1] ?? '').replace(/^"|"$/g, '');
         const head = (parts[2] ?? '').replace(/^"|"$/g, '');
-        const n    = parseInt(parts[3] ?? '0', 10);
+        const n = parseInt(parts[3] ?? '0', 10);
         const pts: Array<{ x: number; y: number }> = [];
         for (let i = 0; i < n; i++) {
           pts.push({
@@ -196,7 +196,10 @@ function computeGroupRects(
     const g = groupById.get(groupId);
     if (!g) return null;
 
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity;
     let hasContent = false;
 
     for (const childId of g.children) {
@@ -217,10 +220,10 @@ function computeGroupRects(
     if (!hasContent) return null;
 
     const rect: LayoutRect = {
-      x:      minX - GROUP_PAD,
-      y:      minY - GROUP_PAD - GROUP_TITLE_H,
-      width:  (maxX - minX) + GROUP_PAD * 2,
-      height: (maxY - minY) + GROUP_PAD * 2 + GROUP_TITLE_H,
+      x: minX - GROUP_PAD,
+      y: minY - GROUP_PAD - GROUP_TITLE_H,
+      width: maxX - minX + GROUP_PAD * 2,
+      height: maxY - minY + GROUP_PAD * 2 + GROUP_TITLE_H,
     };
     result.set(groupId, rect);
     return rect;
@@ -243,14 +246,16 @@ function computeGroupRects(
  * strategies are exhausted. Logs a console warning when invoked so developers
  * can observe fallback usage.
  */
-export async function layoutWithGraphviz(
+export async function layoutWithGraphvizDirect(
   diagram: Diagram,
   opts: LayoutOptions,
 ): Promise<LayoutResult> {
   // Dynamic import — the 780 KB WASM bundle is fetched only on first ELK failure.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { Graphviz } = await import('@hpcc-js/wasm-graphviz' as any);
-  const gv = await (Graphviz as { load(): Promise<{ layout(d: string, f: string, e: string): string }> }).load();
+  const gv = await (
+    Graphviz as { load(): Promise<{ layout(d: string, f: string, e: string): string }> }
+  ).load();
 
   const dotSrc = buildDot(diagram, opts);
 
@@ -260,7 +265,7 @@ export async function layoutWithGraphviz(
   } catch (err) {
     throw new Error(
       `[Graphviz] layout failed: ${err instanceof Error ? err.message : String(err)}\n` +
-      `DOT source:\n${dotSrc.slice(0, 400)}`,
+        `DOT source:\n${dotSrc.slice(0, 400)}`,
     );
   }
 
@@ -268,22 +273,25 @@ export async function layoutWithGraphviz(
 
   // ── Assemble LayoutResult ───────────────────────────────────────────────
   const result: LayoutResult = {
-    nodes:  new Map(),
+    nodes: new Map(),
     groups: new Map(),
-    edges:  new Map(),
-    bbox:   { x: 0, y: 0, width: 0, height: 0 },
+    edges: new Map(),
+    bbox: { x: 0, y: 0, width: 0, height: 0 },
   };
 
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity;
 
   // Nodes
   for (const gvn of gvNodes) {
-    const pxW  = px(gvn.w);
-    const pxH  = px(gvn.h);
+    const pxW = px(gvn.w);
+    const pxH = px(gvn.h);
     const rect: LayoutRect = {
-      x:      px(gvn.cx) - pxW / 2,
-      y:      py(gvn.cy, graphH) - pxH / 2,
-      width:  pxW,
+      x: px(gvn.cx) - pxW / 2,
+      y: py(gvn.cy, graphH) - pxH / 2,
+      width: pxW,
       height: pxH,
     };
     result.nodes.set(gvn.id, rect);
@@ -317,12 +325,12 @@ export async function layoutWithGraphviz(
     if (!irEdge) continue;
     usedEdgeIds.add(irEdge.id);
     result.edges.set(irEdge.id, {
-      id:     irEdge.id,
+      id: irEdge.id,
       source: gve.tail,
       target: gve.head,
-      start:  pts[0]!,
-      end:    pts[pts.length - 1]!,
-      bends:  pts.slice(1, -1),
+      start: pts[0]!,
+      end: pts[pts.length - 1]!,
+      bends: pts.slice(1, -1),
     });
   }
 
@@ -333,3 +341,143 @@ export async function layoutWithGraphviz(
 
   return result;
 }
+
+interface SerializedLayoutResult {
+  nodes: Array<[string, LayoutRect]>;
+  groups: Array<[string, LayoutRect]>;
+  edges: Array<[string, LayoutResult['edges'] extends Map<string, infer E> ? E : never]>;
+  bbox: LayoutResult['bbox'];
+}
+
+interface GraphvizWorkerRequest {
+  requestId: number;
+  diagram: Diagram;
+  opts: LayoutOptions;
+  kind: 'layout' | 'prewarm';
+}
+
+interface GraphvizWorkerResponse {
+  requestId: number;
+  result?: SerializedLayoutResult;
+  error?: string;
+}
+
+let graphvizWorker: Worker | null = null;
+let graphvizRequestId = 1;
+
+function serializeLayoutResult(result: LayoutResult): SerializedLayoutResult {
+  return {
+    nodes: Array.from(result.nodes.entries()),
+    groups: Array.from(result.groups.entries()),
+    edges: Array.from(result.edges.entries()),
+    bbox: result.bbox,
+  };
+}
+
+function deserializeLayoutResult(result: SerializedLayoutResult): LayoutResult {
+  return {
+    nodes: new Map(result.nodes),
+    groups: new Map(result.groups),
+    edges: new Map(result.edges),
+    bbox: result.bbox,
+  };
+}
+
+function getGraphvizWorker(): Worker {
+  if (!graphvizWorker) {
+    graphvizWorker = new Worker(new URL('../workers/graphviz-worker.ts', import.meta.url), {
+      type: 'module',
+    });
+  }
+  return graphvizWorker;
+}
+
+function resetGraphvizWorker(): void {
+  if (graphvizWorker) {
+    graphvizWorker.terminate();
+    graphvizWorker = null;
+  }
+}
+
+async function runGraphvizInWorker(
+  request: Omit<GraphvizWorkerRequest, 'requestId'>,
+  timeoutMs: number,
+): Promise<SerializedLayoutResult | undefined> {
+  const worker = getGraphvizWorker();
+  const requestId = graphvizRequestId++;
+
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      resetGraphvizWorker();
+      reject(new Error(`Graphviz Wasm timed out after ${Math.round(timeoutMs / 1000)}s.`));
+    }, timeoutMs);
+
+    const cleanup = () => {
+      clearTimeout(timeoutId);
+      worker.removeEventListener('message', onMessage);
+      worker.removeEventListener('error', onError);
+    };
+
+    const onMessage = (event: MessageEvent<GraphvizWorkerResponse>) => {
+      if (event.data.requestId !== requestId) return;
+      cleanup();
+      if (event.data.error) {
+        reject(new Error(event.data.error));
+        return;
+      }
+      resolve(event.data.result);
+    };
+
+    const onError = (event: ErrorEvent) => {
+      cleanup();
+      resetGraphvizWorker();
+      reject(new Error(event.message || 'Graphviz Wasm worker crashed.'));
+    };
+
+    worker.addEventListener('message', onMessage);
+    worker.addEventListener('error', onError);
+    worker.postMessage({ requestId, ...request } satisfies GraphvizWorkerRequest);
+  });
+}
+
+export async function layoutWithGraphviz(
+  diagram: Diagram,
+  opts: LayoutOptions,
+  timeoutMs = 10_000,
+): Promise<LayoutResult> {
+  if (typeof window === 'undefined' || typeof Worker === 'undefined') {
+    return layoutWithGraphvizDirect(diagram, opts);
+  }
+
+  const result = await runGraphvizInWorker({ kind: 'layout', diagram, opts }, timeoutMs);
+  if (!result) throw new Error('Graphviz Wasm worker did not return a layout.');
+  return deserializeLayoutResult(result);
+}
+
+export function prewarmGraphvizWasm(): void {
+  if (typeof window === 'undefined' || typeof Worker === 'undefined') return;
+  const schedule =
+    'requestIdleCallback' in window
+      ? (cb: () => void) => window.requestIdleCallback(cb, { timeout: 2_000 })
+      : (cb: () => void) => window.setTimeout(cb, 250);
+
+  schedule(() => {
+    runGraphvizInWorker(
+      {
+        kind: 'prewarm',
+        diagram: {
+          meta: { kind: 'flow', source: '' },
+          nodes: [],
+          groups: [],
+          edges: [],
+          roots: [],
+          diagnostics: [],
+        },
+        opts: {},
+      },
+      5_000,
+    ).catch((err) => console.debug('[Graphviz] Wasm prewarm skipped:', err));
+  });
+}
+
+export { serializeLayoutResult, deserializeLayoutResult };

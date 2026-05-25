@@ -7,7 +7,7 @@
  *
  * Cache entries include:
  * - layoutResult: The ELK-computed or Graphviz-computed layout
- * - routedEdges: Pre-computed SVG paths and control points (optional)
+ * - routedEdges: Pre-computed SVG paths and control points (required)
  * - Project/layer metadata for cache invalidation on deletion
  * - LRU timestamp for eviction when storage quota is reached
  *
@@ -21,7 +21,7 @@ import type { RoutedEdgePath } from '../render/edgePath';
 /**
  * Cached routed edge path with edgeId for reconstruction in the main thread.
  */
-interface CachedRoutedEdge extends RoutedEdgePath {
+export interface CachedRoutedEdge extends RoutedEdgePath {
   edgeId: string;
 }
 
@@ -36,7 +36,18 @@ export interface CachedDiagram {
   layerId: string; // for layer-level deletion
   timestamp: number; // last accessed (milliseconds since epoch)
   layoutResult: LayoutResult; // ELK or Graphviz layout
-  routedEdges?: CachedRoutedEdge[]; // pre-routed edge paths with IDs (array for JSON serialization)
+  routedEdges: CachedRoutedEdge[]; // pre-routed edge paths with IDs (array for JSON serialization)
+}
+
+export function hasCompletedRoutes(
+  routedEdges: CachedRoutedEdge[] | undefined,
+  expectedEdgeIds?: readonly string[],
+): routedEdges is CachedRoutedEdge[] {
+  if (!routedEdges) return false;
+  if (!expectedEdgeIds) return routedEdges.length > 0;
+  if (routedEdges.length !== expectedEdgeIds.length) return false;
+  const cachedIds = new Set(routedEdges.map((edge) => edge.edgeId));
+  return expectedEdgeIds.every((id) => cachedIds.has(id));
 }
 
 /**
@@ -45,21 +56,29 @@ export interface CachedDiagram {
  */
 export async function getCachedLayout(
   cacheKey: string,
+  expectedEdgeIds?: readonly string[],
 ): Promise<{
   layoutResult: LayoutResult;
-  routedEdges?: CachedRoutedEdge[];
+  routedEdges: CachedRoutedEdge[];
 } | null> {
   try {
     const db = await openDB();
-    const store = db
-      .transaction([STORE_NAME], 'readonly')
-      .objectStore(STORE_NAME);
+    const store = db.transaction([STORE_NAME], 'readonly').objectStore(STORE_NAME);
 
     return new Promise((resolve, reject) => {
       const req = store.get(cacheKey);
       req.onsuccess = () => {
         const entry = req.result as CachedDiagram | undefined;
         if (entry) {
+          if (!hasCompletedRoutes(entry.routedEdges, expectedEdgeIds)) {
+            // Root Cause vs Logic: older cache writes stored layout before edge
+            // routing finished, so reusing them could resurrect disconnected
+            // arrows. Treat incomplete cache records as misses and let a fresh
+            // complete render replace them.
+            resolve(null);
+            return;
+          }
+
           // Async update timestamp without blocking the read
           db.transaction([STORE_NAME], 'readwrite')
             .objectStore(STORE_NAME)
@@ -95,14 +114,20 @@ export async function cacheLayoutResult(
   projectId: string,
   layerId: string,
   dslHash: string,
+  expectedEdgeIds?: readonly string[],
 ): Promise<void> {
   try {
+    if (!hasCompletedRoutes(routedEdges, expectedEdgeIds)) {
+      // Root Cause vs Logic: IndexDB is a user-visible render shortcut, so it
+      // must only contain completed layouts with every route attached; partial
+      // entries are indistinguishable from broken diagrams on reload.
+      return;
+    }
+
     const db = await openDB();
 
     // First, check if cache is full and evict oldest entry
-    const store = db
-      .transaction([STORE_NAME], 'readwrite')
-      .objectStore(STORE_NAME);
+    const store = db.transaction([STORE_NAME], 'readwrite').objectStore(STORE_NAME);
 
     const countReq = store.count();
     countReq.onsuccess = () => {
@@ -144,9 +169,7 @@ export async function cacheLayoutResult(
 export async function clearByLayerId(layerId: string): Promise<void> {
   try {
     const db = await openDB();
-    const store = db
-      .transaction([STORE_NAME], 'readwrite')
-      .objectStore(STORE_NAME);
+    const store = db.transaction([STORE_NAME], 'readwrite').objectStore(STORE_NAME);
 
     return new Promise((resolve, reject) => {
       const getAllReq = store.getAll();
@@ -173,9 +196,7 @@ export async function clearByLayerId(layerId: string): Promise<void> {
 export async function clearByProjectId(projectId: string): Promise<void> {
   try {
     const db = await openDB();
-    const store = db
-      .transaction([STORE_NAME], 'readwrite')
-      .objectStore(STORE_NAME);
+    const store = db.transaction([STORE_NAME], 'readwrite').objectStore(STORE_NAME);
 
     return new Promise((resolve, reject) => {
       const getAllReq = store.getAll();
@@ -202,9 +223,7 @@ export async function clearByProjectId(projectId: string): Promise<void> {
 export async function clearAllCache(): Promise<void> {
   try {
     const db = await openDB();
-    const store = db
-      .transaction([STORE_NAME], 'readwrite')
-      .objectStore(STORE_NAME);
+    const store = db.transaction([STORE_NAME], 'readwrite').objectStore(STORE_NAME);
 
     return new Promise((resolve, reject) => {
       const req = store.clear();
@@ -223,9 +242,7 @@ export async function clearAllCache(): Promise<void> {
 export async function getCacheSize(): Promise<number> {
   try {
     const db = await openDB();
-    const store = db
-      .transaction([STORE_NAME], 'readonly')
-      .objectStore(STORE_NAME);
+    const store = db.transaction([STORE_NAME], 'readonly').objectStore(STORE_NAME);
 
     return new Promise((resolve, reject) => {
       const req = store.count();
