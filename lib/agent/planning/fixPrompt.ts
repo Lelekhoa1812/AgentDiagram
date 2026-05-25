@@ -10,11 +10,11 @@
  *      while preserving everything the user did not ask to change.
  */
 
-import type { ProviderSession, RetryListener } from './providers';
+import type { ProviderSession, RetryListener } from '../providers';
 import { chatStructuredWithRetry } from './structuredOutput';
 import { DiagramPlanSchema, type DiagramPlan } from './planner';
-import { COLOR_NAMES } from '../ir/types';
-import { knownIconNames } from '../icons/registry';
+import { COLOR_NAMES } from '../../ir/types';
+import { knownIconNames } from '../../icons/registry';
 import { ClarifyingQuestionsSchema, type ClarifyingQuestions, type CustomAnswer } from './customPrompt';
 
 // Shared JSON schema for clarifying questions (same shape as custom-prompt clarify)

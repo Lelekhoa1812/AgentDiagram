@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseStructuredJson } from '../structuredOutput';
+import { parseStructuredJson } from '../planning/structuredOutput';
 
 describe('parseStructuredJson', () => {
   it('accepts fenced JSON', () => {

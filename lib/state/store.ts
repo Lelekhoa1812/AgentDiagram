@@ -5,7 +5,7 @@ import { temporal } from 'zundo';
 import type { Diagram, Point } from '../ir/types';
 import type { LayoutResult, LayoutRect } from '../layout/elk';
 import type { LayoutStrategy } from '../layout/strategies';
-import { getProviderDefaultModel } from '@/lib/agent/provider-models';
+import { getProviderDefaultModel } from '@/lib/agent/utils/provider-models';
 import type { ProviderId } from '../agent/providers/types';
 import { readUiPreferences, writeUiPreference } from './uiPreferences';
 import {

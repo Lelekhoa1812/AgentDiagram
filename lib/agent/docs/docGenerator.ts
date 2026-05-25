@@ -54,14 +54,14 @@
  * generate from a simple file read.
  */
 
-import type { ProviderSession, RetryListener } from './providers';
-import { chatWithRetry } from './providers';
-import type { FileSummary } from './summarizer';
-import type { RepoMap } from './repoScanner';
-import type { ImportGraph } from './importGraph';
+import type { ProviderSession, RetryListener } from '../providers';
+import { chatWithRetry } from '../providers';
+import type { FileSummary } from '../analysis/summarizer';
+import type { RepoMap } from '../repo/repoScanner';
+import type { ImportGraph } from '../repo/importGraph';
 import type { DocPrior } from './docReader';
-import type { RepoContextDigest } from './repoContext';
-import type { AnalysisDigest } from './analysisBudget';
+import type { RepoContextDigest } from '../repo/repoContext';
+import type { AnalysisDigest } from '../analysis/analysisBudget';
 
 // =========================================================================
 // Public interface

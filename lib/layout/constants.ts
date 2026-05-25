@@ -5,7 +5,7 @@
  *   - components/diagram/DiagramCanvas.tsx  (render guards)
  *   - lib/layout/elk.ts                     (strategy selection)
  *   - lib/agent/repair.ts                   (AI repair triggers)
- *   - lib/agent/splitLayer.ts               (partition sizing)
+ *   - lib/agent/planning/splitLayer.ts               (partition sizing)
  *
  * Any threshold change now only needs one edit here.
  *

@@ -1,4 +1,4 @@
-import type { RepoMap, ScannedFile } from './repoScanner';
+import type { RepoMap, ScannedFile } from '../repo/repoScanner';
 
 /**
  * Heuristic relevance scoring for each file given a diagram type and an

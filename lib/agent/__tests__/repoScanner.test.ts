@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { AGENT_FILE_ALLOWLIST, scanRepo } from '../repoScanner';
+import { AGENT_FILE_ALLOWLIST, scanRepo } from '../repo/repoScanner';
 
 async function write(root: string, rel: string, content: string): Promise<void> {
   const abs = join(root, rel);

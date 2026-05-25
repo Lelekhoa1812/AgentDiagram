@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isHiddenByDefault, defaultScannerIgnorePatterns } from '../ignoreDefaults';
+import { isHiddenByDefault, defaultScannerIgnorePatterns } from '../repo/ignoreDefaults';
 
 describe('ignoreDefaults', () => {
   it('keeps only exact README.md visible while hiding config, setup, test, and generated files', () => {

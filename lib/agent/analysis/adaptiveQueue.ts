@@ -1,5 +1,5 @@
-import type { RetryListener } from './providers';
-import type { RetryNotice } from './providers/types';
+import type { RetryListener } from '../providers';
+import type { RetryNotice } from '../providers/types';
 
 export interface AdaptiveQueueEvent {
   kind: 'rate-limit' | 'recover';

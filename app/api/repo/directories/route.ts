@@ -3,8 +3,8 @@ import path from 'node:path';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { defaultRepoPath, resolveBrowsePath } from '@/lib/security/pathGuard';
-import { normalizeIgnoredFolders } from '@/lib/agent/repoScanner';
-import { isHiddenByDefault } from '@/lib/agent/ignoreDefaults';
+import { normalizeIgnoredFolders } from '@/lib/agent/repo/repoScanner';
+import { isHiddenByDefault } from '@/lib/agent/repo/ignoreDefaults';
 
 export const runtime = 'nodejs';
 

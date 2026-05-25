@@ -1,5 +1,5 @@
-import type { DiagramKind } from './classifier';
-import { COLOR_NAMES } from '../ir/types';
+import type { DiagramKind } from '../analysis/classifier';
+import { COLOR_NAMES } from '../../ir/types';
 
 export const DSL_GRAMMAR_SUMMARY = `
 AgentDiagram DSL syntax:

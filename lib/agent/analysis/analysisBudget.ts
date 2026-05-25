@@ -1,7 +1,7 @@
 import type { DiagramKind, Relevance } from './classifier';
-import type { ImportGraph } from './importGraph';
-import type { RepoContextDigest } from './repoContext';
-import type { RepoMap } from './repoScanner';
+import type { ImportGraph } from '../repo/importGraph';
+import type { RepoContextDigest } from '../repo/repoContext';
+import type { RepoMap } from '../repo/repoScanner';
 import type { FileSummary } from './summarizer';
 
 export type AnalysisTier = 1 | 2 | 3 | 4 | 5;

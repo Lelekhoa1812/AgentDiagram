@@ -5,7 +5,7 @@ import { flushSync } from 'react-dom';
 import { AlertTriangle, Layers, RotateCw, Wand2, X } from 'lucide-react';
 import { useDiagramStore } from '@/lib/state/store';
 import { compile } from '@/lib/dsl/compiler';
-import { splitDiagramIntoLayers } from '@/lib/agent/splitLayer';
+import { splitDiagramIntoLayers } from '@/lib/agent/planning/splitLayer';
 import { readAgentStream, readErrorMessage } from '../agent/streamEvents';
 
 interface Props {

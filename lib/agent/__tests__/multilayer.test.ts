@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { compile } from '../../dsl/compiler';
-import { overviewDslFromCatalog } from '../multilayer';
-import type { LayerCatalog } from '../planner';
+import { overviewDslFromCatalog } from '../planning/multilayer';
+import type { LayerCatalog } from '../planning/planner';
 
 describe('overviewDslFromCatalog', () => {
   it('produces parseable overview DSL with stable sanitized names', () => {

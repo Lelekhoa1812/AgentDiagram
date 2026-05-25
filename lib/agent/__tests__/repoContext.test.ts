@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { scanRepo } from '../repoScanner';
-import { extractImportGraph } from '../importGraph';
-import { buildRepoContext, selectLayerContextSummaries } from '../repoContext';
-import type { FileSummary } from '../summarizer';
+import { scanRepo } from '../repo/repoScanner';
+import { extractImportGraph } from '../repo/importGraph';
+import { buildRepoContext, selectLayerContextSummaries } from '../repo/repoContext';
+import type { FileSummary } from '../analysis/summarizer';
 
 async function write(root: string, rel: string, content: string): Promise<void> {
   const abs = join(root, rel);

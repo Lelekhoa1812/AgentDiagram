@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeFileSummary } from '../summarizer';
+import { normalizeFileSummary } from '../analysis/summarizer';
 
 describe('normalizeFileSummary', () => {
   it('clamps oversized provider arrays before strict validation', () => {

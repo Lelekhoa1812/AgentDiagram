@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { validateWithRetry, PROVIDER_ENV } from '@/lib/agent/providers';
-import { tryRepair } from '@/lib/agent/repair';
+import { tryRepair } from '@/lib/agent/planning/repair';
 import { makeSseStream } from '@/lib/util/stream';
 import { methodNotAllowedResponse } from '@/lib/util/http';
 

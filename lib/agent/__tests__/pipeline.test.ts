@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateRenderableDsl } from '../pipeline';
+import { validateRenderableDsl } from '../planning/pipeline';
 
 describe('validateRenderableDsl', () => {
   it('rejects unrenderable slash output before it can be persisted as a generated project', () => {

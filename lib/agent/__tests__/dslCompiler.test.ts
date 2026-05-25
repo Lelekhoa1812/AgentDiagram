@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { planToDsl } from '../dslCompiler';
+import { planToDsl } from '../planning/dslCompiler';
 import { compile } from '../../dsl/compiler';
 
 describe('planToDsl', () => {

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BookOpenText } from 'lucide-react';
 import { readUiPreference, writeUiPreference } from '@/lib/state/uiPreferences';
-import type { RepoSourceConfig, RepoSourceType } from '@/lib/agent/repoTypes';
+import type { RepoSourceConfig, RepoSourceType } from '@/lib/agent/repo/repoTypes';
 
 interface ScanResult {
   resolved: string;

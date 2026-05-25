@@ -18,17 +18,17 @@
 
 import pLimit from 'p-limit';
 import { z } from 'zod';
-import type { ProviderSession, RetryListener } from './providers';
-import { validateWithRetry } from './providers';
+import type { ProviderSession, RetryListener } from '../providers';
+import { validateWithRetry } from '../providers';
 import { chatStructuredWithRetry } from './structuredOutput';
 import { generateInstructionGuide, generatePlanFromPrompt, formatAnswers, type CustomAnswer } from './customPrompt';
 import { planToDsl } from './dslCompiler';
 import { tryRepair } from './repair';
-import { compile } from '../dsl/compiler';
-import type { SseEvent } from '../util/stream';
-import type { LayerDiagram, MultiLayerOutput } from '../state/store';
-import { COLOR_NAMES } from '../ir/types';
-import { knownIconNames } from '../icons/registry';
+import { compile } from '../../dsl/compiler';
+import type { SseEvent } from '../../util/stream';
+import type { LayerDiagram, MultiLayerOutput } from '../../state/store';
+import { COLOR_NAMES } from '../../ir/types';
+import { knownIconNames } from '../../icons/registry';
 
 // =========================================================================
 // Layer catalog for prompt-based flow

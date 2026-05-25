@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { assignSummaryDepths, buildAnalysisDigest, createAnalysisBudget } from '../analysisBudget';
-import type { Relevance } from '../classifier';
-import type { ImportGraph } from '../importGraph';
-import type { RepoContextDigest } from '../repoContext';
-import type { RepoMap, ScannedFile } from '../repoScanner';
+import { assignSummaryDepths, buildAnalysisDigest, createAnalysisBudget } from '../analysis/analysisBudget';
+import type { Relevance } from '../analysis/classifier';
+import type { ImportGraph } from '../repo/importGraph';
+import type { RepoContextDigest } from '../repo/repoContext';
+import type { RepoMap, ScannedFile } from '../repo/repoScanner';
 
 function file(path: string): ScannedFile {
   return { path, bytes: 120, ext: path.split('.').pop() ?? 'ts' };

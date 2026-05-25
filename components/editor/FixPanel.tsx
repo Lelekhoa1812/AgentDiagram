@@ -6,7 +6,7 @@ import { useDiagramStore } from '@/lib/state/store';
 import { ProviderConfig } from '../agent/ProviderConfig';
 import { AnalysisAnimation } from '../agent/AnalysisAnimation';
 import { readAgentStream, readErrorMessage, type AgentStreamEvent } from '../agent/streamEvents';
-import { FIX_CLARIFY_STAGES, FIX_APPLY_STAGES } from '@/lib/agent/fixPipeline';
+import { FIX_CLARIFY_STAGES, FIX_APPLY_STAGES } from '@/lib/agent/planning/fixPipeline';
 import type { ClarifyStreamOutput } from '@/lib/util/stream';
 
 type Step = 'prompt' | 'questions' | 'generating' | 'complete';

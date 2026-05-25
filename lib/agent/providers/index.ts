@@ -13,7 +13,7 @@ export {
   GROK_MODELS,
   PROVIDER_DEFAULTS,
   getProviderDefaultModel,
-} from '../provider-models';
+} from '../utils/provider-models';
 export const PROVIDER_ENV: Record<ProviderId, string> = {
   openai: 'OPENAI_API_KEY',
   anthropic: 'CLAUDE_API_KEY',

@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { AGENT_FILE_ALLOWLIST } from '@/lib/agent/repoScanner';
+import { AGENT_FILE_ALLOWLIST } from '@/lib/agent/repo/repoScanner';
 import { defaultRepoPath } from '@/lib/security/pathGuard';
-import { RepoSourceError, resolveRepoSource, scanResolvedRepoSource } from '@/lib/agent/repoSource';
-import { optionalUrl } from '@/lib/agent/requestValidation';
+import { RepoSourceError, resolveRepoSource, scanResolvedRepoSource } from '@/lib/agent/repo/repoSource';
+import { optionalUrl } from '@/lib/agent/planning/requestValidation';
 
 export const runtime = 'nodejs';
 

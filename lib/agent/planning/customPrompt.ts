@@ -18,12 +18,12 @@
  */
 
 import { z } from 'zod';
-import type { ProviderSession, RetryListener } from './providers';
-import { chatWithRetry } from './providers';
+import type { ProviderSession, RetryListener } from '../providers';
+import { chatWithRetry } from '../providers';
 import { chatStructuredWithRetry } from './structuredOutput';
 import { DiagramPlanSchema, type DiagramPlan } from './planner';
-import { COLOR_NAMES } from '../ir/types';
-import { knownIconNames } from '../icons/registry';
+import { COLOR_NAMES } from '../../ir/types';
+import { knownIconNames } from '../../icons/registry';
 
 // =========================================================================
 // Clarifying questions

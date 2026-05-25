@@ -1,4 +1,4 @@
-import type { ProviderId } from './providers/types';
+import type { ProviderId } from '../providers/types';
 
 export const OPENAI_MODELS = [
   'gpt-5.5',

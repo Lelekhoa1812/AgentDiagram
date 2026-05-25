@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { runFixClarify } from '@/lib/agent/fixPipeline';
+import { runFixClarify } from '@/lib/agent/planning/fixPipeline';
 import { makeSseStream } from '@/lib/util/stream';
 import { methodNotAllowedResponse } from '@/lib/util/http';
 import { PROVIDER_ENV } from '@/lib/agent/providers';

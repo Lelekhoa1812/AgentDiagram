@@ -1,9 +1,9 @@
 import { z } from 'zod';
-import { type ProviderSession, type RetryListener } from './providers';
-import { chatStructuredWithRetry } from './structuredOutput';
+import { type ProviderSession, type RetryListener } from '../providers';
+import { chatStructuredWithRetry } from '../planning/structuredOutput';
 import { readCache, writeCache } from './cache';
 import { chunkFile } from './chunker';
-import { sha1 } from '../util/hash';
+import { sha1 } from '../../util/hash';
 
 const LIMITS = {
   exports: 20,

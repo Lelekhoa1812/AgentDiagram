@@ -1,11 +1,11 @@
 import { z } from 'zod';
-import { runMultiLayerPipeline } from '@/lib/agent/multilayer';
+import { runMultiLayerPipeline } from '@/lib/agent/planning/multilayer';
 import { makeSseStream } from '@/lib/util/stream';
 import { methodNotAllowedResponse } from '@/lib/util/http';
 import { defaultRepoPath } from '@/lib/security/pathGuard';
 import { PROVIDER_ENV } from '@/lib/agent/providers';
-import { RepoSourceError, resolveRepoSource, type ResolvedRepoSource } from '@/lib/agent/repoSource';
-import { optionalUrl } from '@/lib/agent/requestValidation';
+import { RepoSourceError, resolveRepoSource, type ResolvedRepoSource } from '@/lib/agent/repo/repoSource';
+import { optionalUrl } from '@/lib/agent/planning/requestValidation';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

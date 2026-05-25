@@ -5,7 +5,7 @@
  */
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { RepoMap } from './repoScanner';
+import type { RepoMap } from '../repo/repoScanner';
 
 export interface DocPrior {
   path: string;

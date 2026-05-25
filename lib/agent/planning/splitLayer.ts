@@ -11,10 +11,10 @@
  * Complexity constants are defined in lib/layout/constants.ts (single source of truth).
  */
 
-import { formatDiagram } from '../dsl/formatter';
-import type { Diagram } from '../ir/types';
-import type { LayerDiagram } from '../state/projectStorage';
-import { ELK_COMPLEXITY_LIMIT, diagramComplexity } from '../layout/constants';
+import { formatDiagram } from '../../dsl/formatter';
+import type { Diagram } from '../../ir/types';
+import type { LayerDiagram } from '../../state/projectStorage';
+import { ELK_COMPLEXITY_LIMIT, diagramComplexity } from '../../layout/constants';
 
 /**
  * Splits `diagram` into 2–10 sub-layer diagrams.

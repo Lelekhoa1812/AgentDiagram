@@ -8,12 +8,12 @@
  * Both stream SSE events compatible with the existing AnalysisAnimation.
  */
 
-import { validateWithRetry, type ProviderSession } from './providers';
+import { validateWithRetry, type ProviderSession } from '../providers';
 import { generateClarifyingQuestions, generateInstructionGuide, generatePlanFromPrompt, type ClarifyingQuestions, type CustomAnswer } from './customPrompt';
 import { planToDsl } from './dslCompiler';
 import { tryRepair } from './repair';
-import { compile } from '../dsl/compiler';
-import type { SseEvent } from '../util/stream';
+import { compile } from '../../dsl/compiler';
+import type { SseEvent } from '../../util/stream';
 
 export interface ClarifyInput {
   session: ProviderSession;

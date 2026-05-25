@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { approxTokenCount, chunkFile } from '../chunker';
+import { approxTokenCount, chunkFile } from '../analysis/chunker';
 
 describe('chunkFile', () => {
   it('splits near logical class/function boundaries and stays near the target size', () => {

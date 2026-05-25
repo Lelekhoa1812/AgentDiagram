@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { optionalUrl } from '../requestValidation';
+import { optionalUrl } from '../planning/requestValidation';
 
 describe('requestValidation', () => {
   it('treats blank repoUrl values as omitted', () => {

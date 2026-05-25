@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { adaptiveMap, type AdaptiveQueueEvent } from '../adaptiveQueue';
+import { adaptiveMap, type AdaptiveQueueEvent } from '../analysis/adaptiveQueue';
 
 describe('adaptiveMap', () => {
   afterEach(() => {

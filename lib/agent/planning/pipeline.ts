@@ -12,20 +12,20 @@
  *  10. Validate + repair
  */
 
-import { AGENT_FILE_ALLOWLIST } from './repoScanner';
-import { classifyRelevance, type DiagramKind } from './classifier';
-import { generateTechnicalDocumentation } from './docGenerator';
+import { AGENT_FILE_ALLOWLIST } from '../repo/repoScanner';
+import { classifyRelevance, type DiagramKind } from '../analysis/classifier';
+import { generateTechnicalDocumentation } from '../docs/docGenerator';
 import { generatePlan } from './planner';
 import { planToDsl } from './dslCompiler';
 import { tryRepair } from './repair';
-import { compile } from '../dsl/compiler';
-import { validateWithRetry, type ProviderSession } from './providers';
-import type { SseEvent } from '../util/stream';
-import { extractImportGraph, topClusters } from './importGraph';
-import { readDocPriors } from './docReader';
-import { buildRepoContext } from './repoContext';
-import { scanResolvedRepoSource, type ResolvedRepoSource } from './repoSource';
-import { analyzeRelevantFiles, quickAnalysisDigest } from './analysisRunner';
+import { compile } from '../../dsl/compiler';
+import { validateWithRetry, type ProviderSession } from '../providers';
+import type { SseEvent } from '../../util/stream';
+import { extractImportGraph, topClusters } from '../repo/importGraph';
+import { readDocPriors } from '../docs/docReader';
+import { buildRepoContext } from '../repo/repoContext';
+import { scanResolvedRepoSource, type ResolvedRepoSource } from '../repo/repoSource';
+import { analyzeRelevantFiles, quickAnalysisDigest } from '../analysis/analysisRunner';
 
 export interface PipelineInput {
   repoSource: ResolvedRepoSource;

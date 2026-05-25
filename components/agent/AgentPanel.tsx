@@ -4,7 +4,7 @@ import { useRef, useState } from 'react';
 import { useDiagramStore } from '@/lib/state/store';
 import { ProviderConfig } from './ProviderConfig';
 import { RepoInput } from './RepoInput';
-import type { RepoSourceConfig } from '@/lib/agent/repoTypes';
+import type { RepoSourceConfig } from '@/lib/agent/repo/repoTypes';
 import { DiagramTypePicker } from './DiagramTypePicker';
 import { FocusPromptBox } from './FocusPromptBox';
 import { QuickModeToggle } from './QuickModeToggle';

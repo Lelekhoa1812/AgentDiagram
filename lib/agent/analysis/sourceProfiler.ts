@@ -1,6 +1,6 @@
-import type { ImportGraph } from './importGraph';
-import type { RepoContextDigest } from './repoContext';
-import type { ScannedFile } from './repoScanner';
+import type { ImportGraph } from '../repo/importGraph';
+import type { RepoContextDigest } from '../repo/repoContext';
+import type { ScannedFile } from '../repo/repoScanner';
 import { normalizeFileSummary, type FileSummary } from './summarizer';
 
 const EXPORT_PATTERNS: Array<RegExp> = [

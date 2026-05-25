@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { buildPlanUserMessage } from '../planner';
-import type { AnalysisDigest } from '../analysisBudget';
-import type { ImportGraph } from '../importGraph';
-import type { RepoMap, ScannedFile } from '../repoScanner';
-import type { FileSummary } from '../summarizer';
+import { buildPlanUserMessage } from '../planning/planner';
+import type { AnalysisDigest } from '../analysis/analysisBudget';
+import type { ImportGraph } from '../repo/importGraph';
+import type { RepoMap, ScannedFile } from '../repo/repoScanner';
+import type { FileSummary } from '../analysis/summarizer';
 
 function scanned(path: string): ScannedFile {
   return { path, bytes: 100, ext: 'ts' };

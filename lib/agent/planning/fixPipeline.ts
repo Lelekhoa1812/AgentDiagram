@@ -9,13 +9,13 @@
  * Both stream SSE events compatible with AnalysisAnimation.
  */
 
-import { validateWithRetry, type ProviderSession } from './providers';
+import { validateWithRetry, type ProviderSession } from '../providers';
 import { generateFixClarifyingQuestions, generateFixedPlan } from './fixPrompt';
 import { planToDsl } from './dslCompiler';
 import { tryRepair } from './repair';
-import { compile } from '../dsl/compiler';
+import { compile } from '../../dsl/compiler';
 import type { ClarifyingQuestions, CustomAnswer } from './customPrompt';
-import type { SseEvent } from '../util/stream';
+import type { SseEvent } from '../../util/stream';
 
 export interface FixClarifyInput {
   session: ProviderSession;

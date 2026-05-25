@@ -15,22 +15,22 @@
  */
 
 import pLimit from 'p-limit';
-import { AGENT_FILE_ALLOWLIST } from './repoScanner';
-import { classifyRelevance } from './classifier';
+import { AGENT_FILE_ALLOWLIST } from '../repo/repoScanner';
+import { classifyRelevance } from '../analysis/classifier';
 import { generatePlan, identifyLayers, type LayerCatalog } from './planner';
 import { planToDsl } from './dslCompiler';
 import { tryRepair } from './repair';
-import { compile } from '../dsl/compiler';
-import { validateWithRetry, type ProviderSession } from './providers';
-import { generateTechnicalDocumentation } from './docGenerator';
-import type { SseEvent } from '../util/stream';
-import { extractImportGraph } from './importGraph';
-import { readDocPriors } from './docReader';
-import { buildRepoContext, selectLayerContextSummaries } from './repoContext';
-import { scanResolvedRepoSource, type ResolvedRepoSource } from './repoSource';
-import type { LayerDiagram, MultiLayerOutput } from '../state/store';
-import { analyzeRelevantFiles, quickAnalysisDigest } from './analysisRunner';
-import { focusAnalysisDigest } from './analysisBudget';
+import { compile } from '../../dsl/compiler';
+import { validateWithRetry, type ProviderSession } from '../providers';
+import { generateTechnicalDocumentation } from '../docs/docGenerator';
+import type { SseEvent } from '../../util/stream';
+import { extractImportGraph } from '../repo/importGraph';
+import { readDocPriors } from '../docs/docReader';
+import { buildRepoContext, selectLayerContextSummaries } from '../repo/repoContext';
+import { scanResolvedRepoSource, type ResolvedRepoSource } from '../repo/repoSource';
+import type { LayerDiagram, MultiLayerOutput } from '../../state/store';
+import { analyzeRelevantFiles, quickAnalysisDigest } from '../analysis/analysisRunner';
+import { focusAnalysisDigest } from '../analysis/analysisBudget';
 
 export interface MultiLayerInput {
   repoSource: ResolvedRepoSource;

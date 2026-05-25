@@ -12,13 +12,13 @@ import {
   type SummaryAssignment,
 } from './analysisBudget';
 import type { DiagramKind, Relevance } from './classifier';
-import type { ImportGraph } from './importGraph';
-import type { RepoContextDigest } from './repoContext';
-import { readRepoFile, type RepoMap } from './repoScanner';
+import type { ImportGraph } from '../repo/importGraph';
+import type { RepoContextDigest } from '../repo/repoContext';
+import { readRepoFile, type RepoMap } from '../repo/repoScanner';
 import { createSignatureSummary } from './sourceProfiler';
 import { summarizeFile } from './summarizer';
-import type { ProviderSession, RetryListener } from './providers';
-import type { SseEvent } from '../util/stream';
+import type { ProviderSession, RetryListener } from '../providers';
+import type { SseEvent } from '../../util/stream';
 
 export interface RepoAnalysisResult {
   budget: AnalysisBudget;

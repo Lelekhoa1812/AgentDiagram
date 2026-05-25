@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createSignatureSummary } from '../sourceProfiler';
+import { createSignatureSummary } from '../analysis/sourceProfiler';
 
 describe('createSignatureSummary', () => {
   it('captures deterministic public surface and side effects without an LLM call', () => {

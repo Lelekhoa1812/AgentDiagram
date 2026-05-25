@@ -8,7 +8,7 @@ import {
   GEMINI_MODELS,
   GROK_MODELS,
   getProviderDefaultModel,
-} from '@/lib/agent/provider-models';
+} from '@/lib/agent/utils/provider-models';
 import type { ProviderId } from '@/lib/agent/providers/types';
 
 const PROVIDERS: Array<{ id: ProviderId; label: string; envVar: string; note: string }> = [

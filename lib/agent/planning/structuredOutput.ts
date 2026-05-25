@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { chatWithRetry, type ChatMessage, type ProviderSession, type RetryListener } from './providers';
-import { withRetry } from './providers/retry';
+import { chatWithRetry, type ChatMessage, type ProviderSession, type RetryListener } from '../providers';
+import { withRetry } from '../providers/retry';
 
 interface StructuredOutputOptions<T> {
   signal?: AbortSignal;

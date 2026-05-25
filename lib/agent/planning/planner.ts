@@ -1,15 +1,15 @@
 import { z } from 'zod';
-import { type ProviderSession, type RetryListener } from './providers';
+import { type ProviderSession, type RetryListener } from '../providers';
 import { chatStructuredWithRetry } from './structuredOutput';
-import type { FileSummary } from './summarizer';
-import type { RepoMap } from './repoScanner';
-import type { DiagramKind } from './classifier';
-import type { ImportGraph } from './importGraph';
-import type { DocPrior } from './docReader';
-import type { RepoContextDigest } from './repoContext';
-import type { AnalysisDigest } from './analysisBudget';
-import { COLOR_NAMES } from '../ir/types';
-import { knownIconNames } from '../icons/registry';
+import type { FileSummary } from '../analysis/summarizer';
+import type { RepoMap } from '../repo/repoScanner';
+import type { DiagramKind } from '../analysis/classifier';
+import type { ImportGraph } from '../repo/importGraph';
+import type { DocPrior } from '../docs/docReader';
+import type { RepoContextDigest } from '../repo/repoContext';
+import type { AnalysisDigest } from '../analysis/analysisBudget';
+import { COLOR_NAMES } from '../../ir/types';
+import { knownIconNames } from '../../icons/registry';
 
 export const DiagramPlanSchema = z.object({
   title: z.string(),

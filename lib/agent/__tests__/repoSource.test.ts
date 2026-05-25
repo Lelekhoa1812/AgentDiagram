@@ -13,8 +13,8 @@ vi.mock('node:child_process', () => ({
   default: { execFile: childProcessMock.execFile },
 }));
 
-import { normalizeGitHubRepoUrl, RepoSourceError, resolveRepoSource, scanResolvedRepoSource } from '../repoSource';
-import { AGENT_FILE_ALLOWLIST } from '../repoScanner';
+import { normalizeGitHubRepoUrl, RepoSourceError, resolveRepoSource, scanResolvedRepoSource } from '../repo/repoSource';
+import { AGENT_FILE_ALLOWLIST } from '../repo/repoScanner';
 import * as childProcess from 'node:child_process';
 
 const mockedExecFile = vi.mocked(childProcess.execFile);

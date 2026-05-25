@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { classifyRelevance } from '../classifier';
-import type { RepoMap, ScannedFile } from '../repoScanner';
+import { classifyRelevance } from '../analysis/classifier';
+import type { RepoMap, ScannedFile } from '../repo/repoScanner';
 
 function file(path: string): ScannedFile {
   return { path, ext: path.split('.').pop() ?? '', bytes: 100 };

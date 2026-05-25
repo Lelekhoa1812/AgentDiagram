@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { ImportGraph } from './importGraph';
 import type { RepoMap } from './repoScanner';
-import type { FileSummary } from './summarizer';
+import type { FileSummary } from '../analysis/summarizer';
 
 export interface FolderCluster {
   folder: string;

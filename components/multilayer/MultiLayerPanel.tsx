@@ -4,7 +4,7 @@ import { useRef, useState } from 'react';
 import { useDiagramStore, type MultiLayerOutput } from '@/lib/state/store';
 import { ProviderConfig } from '@/components/agent/ProviderConfig';
 import { RepoInput } from '@/components/agent/RepoInput';
-import type { RepoSourceConfig } from '@/lib/agent/repoTypes';
+import type { RepoSourceConfig } from '@/lib/agent/repo/repoTypes';
 import { FocusPromptBox } from '@/components/agent/FocusPromptBox';
 import { QuickModeToggle } from '@/components/agent/QuickModeToggle';
 import { AnalysisAnimation } from '@/components/agent/AnalysisAnimation';
