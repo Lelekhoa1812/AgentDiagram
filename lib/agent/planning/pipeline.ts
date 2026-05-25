@@ -14,7 +14,7 @@
 
 import { AGENT_FILE_ALLOWLIST } from './repoScanner';
 import { classifyRelevance, type DiagramKind } from './classifier';
-import { generateInstructionGuide } from './customPrompt';
+import { generateTechnicalDocumentation } from './docGenerator';
 import { generatePlan } from './planner';
 import { planToDsl } from './dslCompiler';
 import { tryRepair } from './repair';
@@ -258,28 +258,43 @@ export async function runPipeline(
 
     let instructionMarkdown: string | undefined;
     if (input.instructionMode) {
-      send({ type: 'stage', stage: 'instruction', status: 'start', message: 'Writing Instruction Mode guide…' });
-      const instructionContext = [
-        `Repository stack: ${repoMap.likelyStack.join(', ') || 'unknown'}`,
-        `Generated diagram title: ${plan.title}`,
-        `Top-level groups: ${plan.groups.slice(0, 8).map((group) => `${group.name} (${group.children.length} items)`).join(', ') || 'none'}`,
-        `Key nodes: ${plan.nodes.slice(0, 16).map((node) => node.name).join(', ') || 'none'}`,
-        `Primary edges: ${plan.edges.slice(0, 16).map((edge) => `${edge.source} ${edge.kind} ${edge.target}${edge.label ? `: ${edge.label}` : ''}`).join('; ') || 'none'}`,
-        `Uncertainties: ${plan.uncertainties.join('; ') || 'none'}`,
-        `Omitted: ${plan.omitted.join('; ') || 'none'}`,
-      ].join('\n');
-      instructionMarkdown = await generateInstructionGuide(
+      // Motivation vs Logic: the old implementation passed only 7 sparse text lines
+      // (plan title, top-8 groups, 16 nodes, 16 edges) to generateInstructionGuide,
+      // discarding the full per-file FileSummary array, import graph, repo context,
+      // and analysis digest that the pipeline had already collected. The new
+      // generateTechnicalDocumentation call feeds ALL those pre-computed signals,
+      // producing documentation at source-code depth rather than a generic build guide.
+      const isLargeRepo = summaries.length > 80;
+      send({
+        type: 'stage',
+        stage: 'instruction',
+        status: 'start',
+        message: isLargeRepo
+          ? `Writing deep technical reference (${summaries.length} files, two-pass mode)…`
+          : `Writing deep technical reference (${summaries.length} files)…`,
+      });
+      instructionMarkdown = await generateTechnicalDocumentation(
         input.session,
         {
-          prompt: `Repository analysis for a ${input.kind} diagram.`,
-          intentSummary: input.focus || 'No specific focus provided.',
-          answers: [],
+          repoMap,
+          summaries,
+          importGraph,
+          docs,
+          repoContext,
+          analysisDigest: analysis.digest,
           diagramStyle: 'single',
-          diagramContext: instructionContext,
+          diagramTitle: plan.title,
+          focus: input.focus,
+          planGroups: plan.groups.map((g) => ({ name: g.name, children: g.children })),
         },
         { signal: input.signal, onRetry: onRetry('instruction') },
       );
-      send({ type: 'stage', stage: 'instruction', status: 'done', message: 'Instruction guide ready' });
+      send({
+        type: 'stage',
+        stage: 'instruction',
+        status: 'done',
+        message: `Deep technical reference ready (${Math.round((instructionMarkdown?.length ?? 0) / 1024)} KB)`,
+      });
     }
 
     send({ type: 'result', dsl, instructionMarkdown });

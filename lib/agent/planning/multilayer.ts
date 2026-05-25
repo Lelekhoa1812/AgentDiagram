@@ -22,7 +22,7 @@ import { planToDsl } from './dslCompiler';
 import { tryRepair } from './repair';
 import { compile } from '../dsl/compiler';
 import { validateWithRetry, type ProviderSession } from './providers';
-import { generateInstructionGuide } from './customPrompt';
+import { generateTechnicalDocumentation } from './docGenerator';
 import type { SseEvent } from '../util/stream';
 import { extractImportGraph } from './importGraph';
 import { readDocPriors } from './docReader';
@@ -360,25 +360,42 @@ export async function runMultiLayerPipeline(
 
     let instructionMarkdown: string | undefined;
     if (input.instructionMode) {
-      send({ type: 'stage', stage: 'instruction', status: 'start', message: 'Writing Instruction Mode guide…' });
-      const instructionContext = [
-        `Repository stack: ${repoMap.likelyStack.join(', ') || 'unknown'}`,
-        `Overview diagram: ${result.overview.name} — ${result.overview.description}`,
-        `Layer summaries: ${result.layers.slice(0, 8).map((layer) => `${layer.name} — ${layer.description}`).join('; ') || 'none'}`,
-        'The user selected a multi-layer repository diagram that should lead from overview to per-layer implementations.',
-      ].join('\n');
-      instructionMarkdown = await generateInstructionGuide(
+      // Motivation vs Logic: the old implementation assembled only 4 text lines
+      // (repo stack, overview name, layer summaries) and discarded the full
+      // FileSummary array, import graph, and repo context that were already collected.
+      // generateTechnicalDocumentation feeds ALL pre-computed signals — yielding
+      // documentation at source-code depth, covering every module and data flow.
+      const isLargeRepo = summaries.length > 80;
+      send({
+        type: 'stage',
+        stage: 'instruction',
+        status: 'start',
+        message: isLargeRepo
+          ? `Writing deep technical reference (${summaries.length} files, two-pass mode)…`
+          : `Writing deep technical reference (${summaries.length} files)…`,
+      });
+      instructionMarkdown = await generateTechnicalDocumentation(
         input.session,
         {
-          prompt: 'Repository analysis for a multi-layer diagram.',
-          intentSummary: input.focus || 'No specific focus provided.',
-          answers: [],
+          repoMap,
+          summaries,
+          importGraph,
+          docs,
+          repoContext,
+          analysisDigest: analysis.digest,
           diagramStyle: 'multi-layer',
-          diagramContext: instructionContext,
+          diagramTitle: `${result.overview.name} — ${result.overview.description}`,
+          focus: input.focus,
+          layers: result.layers.map((l) => ({ name: l.name, description: l.description })),
         },
         { signal: input.signal, onRetry: onRetry('instruction') },
       );
-      send({ type: 'stage', stage: 'instruction', status: 'done', message: 'Instruction guide ready' });
+      send({
+        type: 'stage',
+        stage: 'instruction',
+        status: 'done',
+        message: `Deep technical reference ready (${Math.round((instructionMarkdown?.length ?? 0) / 1024)} KB)`,
+      });
     }
 
     send({ type: 'result-multilayer', output: result, instructionMarkdown });
