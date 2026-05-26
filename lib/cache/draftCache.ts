@@ -13,7 +13,8 @@
  * upgrade in one does not affect the other.
  */
 
-import type { Overrides } from '../state/store';
+import type { Overrides, Viewport } from '../state/store';
+import type { MultiLayerOutput, StoredProject } from '../state/projectStorage';
 
 const DB_NAME = 'diagram-drafts';
 const DB_VERSION = 1;
@@ -24,6 +25,18 @@ export interface EditorDraft {
   key: string;
   dslText: string;
   overrides: Overrides;
+  /** Active project tab when the snapshot was taken, if any. */
+  activeProjectId: string | null;
+  /** All open project tabs so a refresh can recover the current working set. */
+  generatedProjects: StoredProject[];
+  /** Active multi-layer bundle for the current project, if present. */
+  multiLayer: MultiLayerOutput | null;
+  /** Currently selected tab within a multi-layer project. */
+  activeLayer: string;
+  /** Persisted instruction guide tied to the active project. */
+  instructionMarkdown: string;
+  /** Viewport so a refresh can restore the visible diagram region. */
+  viewport: Viewport;
   /** Unix milliseconds — used to detect which source is more recent. */
   updatedAt: number;
 }
@@ -34,6 +47,68 @@ let _dbOpenPromise: Promise<IDBDatabase> | null = null;
 
 function canUseIndexedDB(): boolean {
   return typeof window !== 'undefined' && typeof indexedDB !== 'undefined';
+}
+
+function canUseLocalStorage(): boolean {
+  return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+}
+
+function draftShadowKey(key: string): string {
+  return `agentdiagram:draft-shadow:v1:${key}`;
+}
+
+function validateDraft(value: unknown): EditorDraft | null {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    typeof (value as Partial<EditorDraft>).key !== 'string' ||
+    typeof (value as Partial<EditorDraft>).dslText !== 'string' ||
+    typeof (value as Partial<EditorDraft>).updatedAt !== 'number'
+  ) {
+    return null;
+  }
+
+  const candidate = value as Partial<EditorDraft>;
+  if (
+    typeof candidate.overrides !== 'object' ||
+    candidate.overrides === null ||
+    typeof candidate.activeProjectId !== 'string' && candidate.activeProjectId !== null ||
+    !Array.isArray(candidate.generatedProjects) ||
+    typeof candidate.activeLayer !== 'string' ||
+    typeof candidate.instructionMarkdown !== 'string' ||
+    typeof candidate.viewport !== 'object' ||
+    candidate.viewport === null
+  ) {
+    return null;
+  }
+
+  return candidate as EditorDraft;
+}
+
+export function writeDraftShadow(draft: Omit<EditorDraft, 'updatedAt'>): void {
+  if (!canUseLocalStorage()) return;
+  try {
+    window.localStorage.setItem(
+      draftShadowKey(draft.key),
+      JSON.stringify({ ...draft, updatedAt: Date.now() }),
+    );
+  } catch (err) {
+    console.warn('[DraftCache] Failed to write draft shadow:', err);
+  }
+}
+
+export function readDraftShadow(key: string): EditorDraft | null {
+  if (!canUseLocalStorage()) return null;
+  try {
+    const raw = window.localStorage.getItem(draftShadowKey(key));
+    if (!raw) return null;
+    const parsed = validateDraft(JSON.parse(raw));
+    if (!parsed || parsed.key !== key) return null;
+    return parsed;
+  } catch (err) {
+    console.warn('[DraftCache] Failed to read draft shadow:', err);
+    return null;
+  }
 }
 
 function openDB(): Promise<IDBDatabase> {
@@ -85,19 +160,15 @@ function openDB(): Promise<IDBDatabase> {
  * @param dslText  Current DSL editor content.
  * @param overrides  Node/group/edge position overrides from drag operations.
  */
-export async function saveDraft(
-  key: string,
-  dslText: string,
-  overrides: Overrides,
-): Promise<void> {
+export async function saveDraft(draft: Omit<EditorDraft, 'updatedAt'>): Promise<void> {
   try {
+    writeDraftShadow(draft);
     const db = await openDB();
     return new Promise<void>((resolve, reject) => {
       const tx = db.transaction([DRAFTS_STORE], 'readwrite');
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
-      const draft: EditorDraft = { key, dslText, overrides, updatedAt: Date.now() };
-      tx.objectStore(DRAFTS_STORE).put(draft);
+      tx.objectStore(DRAFTS_STORE).put({ ...draft, updatedAt: Date.now() });
     });
   } catch (err) {
     // Silently swallow — caching is an optimisation, not critical path.
@@ -111,16 +182,21 @@ export async function saveDraft(
  */
 export async function loadDraft(key: string): Promise<EditorDraft | null> {
   try {
+    const shadowDraft = readDraftShadow(key);
     const db = await openDB();
-    return new Promise<EditorDraft | null>((resolve, reject) => {
+    const indexedDraft = await new Promise<EditorDraft | null>((resolve, reject) => {
       const tx = db.transaction([DRAFTS_STORE], 'readonly');
       const req = tx.objectStore(DRAFTS_STORE).get(key);
       req.onsuccess = () => resolve((req.result as EditorDraft) ?? null);
       req.onerror = () => reject(req.error);
     });
+
+    if (!indexedDraft) return shadowDraft;
+    if (!shadowDraft) return indexedDraft;
+    return shadowDraft.updatedAt > indexedDraft.updatedAt ? shadowDraft : indexedDraft;
   } catch (err) {
     console.warn('[DraftCache] Failed to load draft:', err);
-    return null;
+    return readDraftShadow(key);
   }
 }
 
@@ -131,6 +207,9 @@ export async function loadDraft(key: string): Promise<EditorDraft | null> {
  */
 export async function deleteDraft(key: string): Promise<void> {
   try {
+    if (canUseLocalStorage()) {
+      window.localStorage.removeItem(draftShadowKey(key));
+    }
     const db = await openDB();
     return new Promise<void>((resolve, reject) => {
       const tx = db.transaction([DRAFTS_STORE], 'readwrite');

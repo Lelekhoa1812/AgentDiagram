@@ -111,9 +111,8 @@ export default function Page() {
   }, []);
 
   // Async: after the fast synchronous localStorage hydration above, load the
-  // IndexedDB draft and apply any persisted overrides (node drag positions).
-  // IndexedDB is also used as a fallback for DSL text when localStorage has
-  // nothing (e.g. quota exceeded or storage cleared between sessions).
+  // IndexedDB draft and restore the latest persisted DSL + overrides. This is
+  // the recovery path when localStorage is stale, missing, or quota-limited.
   useEffect(() => {
     async function hydrateDraft() {
       try {
@@ -127,20 +126,10 @@ export default function Page() {
         // Guard: ensure the user hasn't navigated away while we awaited.
         const currentState = useDiagramStore.getState();
         if ((currentState.activeProjectId ?? 'scratch') !== key) return;
-
-        const hasOverrides =
-          Object.keys(draft.overrides.nodes).length > 0 ||
-          Object.keys(draft.overrides.groups).length > 0 ||
-          Object.keys(draft.overrides.edges).length > 0;
-
-        // Only use the IndexedDB DSL if localStorage gave us nothing (quota
-        // exceeded, private-browsing session cleared, etc.).
-        const dslFromStorage = currentState.dslText;
-        const dslToApply = dslFromStorage || draft.dslText;
-
-        if (hasOverrides || (!dslFromStorage && draft.dslText)) {
-          applyDraft(dslToApply, hasOverrides ? draft.overrides : currentState.overrides);
-        }
+        // Root Cause vs Logic: localStorage can be stale or quota-limited even
+        // when IndexedDB has the latest draft, so the recovered draft must win
+        // during hydration rather than acting like an optional overlay.
+        applyDraft(draft);
       } catch {
         // Draft hydration is best-effort — never block the editor.
       } finally {

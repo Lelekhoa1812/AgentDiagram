@@ -1,14 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-const { saveDraft, deleteDraft, loadDraft } = vi.hoisted(() => ({
+const { saveDraft, deleteDraft, loadDraft, writeDraftShadow } = vi.hoisted(() => ({
   saveDraft: vi.fn(async () => undefined),
   deleteDraft: vi.fn(async () => undefined),
   loadDraft: vi.fn(async () => null),
+  writeDraftShadow: vi.fn(() => undefined),
 }));
 
 vi.mock('../../cache/draftCache', () => ({
   deleteDraft,
   loadDraft,
   saveDraft,
+  writeDraftShadow,
 }));
 
 import { useDiagramStore, type MultiLayerOutput } from '../store';
@@ -64,6 +66,7 @@ describe('project tab loading', () => {
     saveDraft.mockClear();
     deleteDraft.mockClear();
     loadDraft.mockClear();
+    writeDraftShadow.mockClear();
     installLocalStorageMock();
     writeStoredProjects([]);
     useDiagramStore.setState({
@@ -151,6 +154,43 @@ describe('project tab loading', () => {
       'api dsl edited',
     );
     expect(storedProject?.dsl).toBe('overview dsl');
+  });
+
+  it('restores the IndexedDB draft over stale project state on hydration', () => {
+    const project = addStoredProject('Repo', 'overview dsl', sampleMultiLayer);
+    useDiagramStore.setState({ generatedProjects: [project] });
+    useDiagramStore.getState().openProject({
+      id: project.id,
+      dsl: project.dsl,
+      multiLayer: project.multiLayer,
+    });
+
+    useDiagramStore.getState().setActiveLayer('Data');
+    useDiagramStore.getState().applyDraft({
+      key: project.id,
+      dslText: 'data dsl restored',
+      overrides: {
+        nodes: { n1: { x: 42, y: 24 } },
+        groups: {},
+        edges: {},
+      },
+      activeProjectId: project.id,
+      generatedProjects: [project],
+      multiLayer: project.multiLayer ?? null,
+      activeLayer: 'Data',
+      instructionMarkdown: '',
+      viewport: { x: 0, y: 0, scale: 1 },
+    });
+
+    const state = useDiagramStore.getState();
+    expect(state.dslText).toBe('data dsl restored');
+    expect(state.overrides.nodes.n1).toEqual({ x: 42, y: 24 });
+    expect(state.multiLayer?.layers.find((layer) => layer.name === 'Data')?.dsl).toBe(
+      'data dsl restored',
+    );
+    expect(state.generatedProjects[0]?.multiLayer?.layers.find((layer) => layer.name === 'Data')?.dsl).toBe(
+      'data dsl restored',
+    );
   });
 
   it('hydrates the saved DSL for the active multi-layer tab', () => {

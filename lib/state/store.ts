@@ -8,7 +8,7 @@ import type { LayoutStrategy } from '../layout/strategies';
 import { getProviderDefaultModel } from '@/lib/agent/utils/provider-models';
 import type { ProviderId } from '../agent/providers/types';
 import { readUiPreferences, writeUiPreference } from './uiPreferences';
-import { saveDraft, deleteDraft, loadDraft } from '../cache/draftCache';
+import { saveDraft, deleteDraft, loadDraft, writeDraftShadow } from '../cache/draftCache';
 import {
   type StoredProject,
   type MultiLayerOutput,
@@ -42,6 +42,12 @@ type DraftSnapshot = {
   key: string;
   dslText: string;
   overrides: Overrides;
+  activeProjectId: string | null;
+  generatedProjects: StoredProject[];
+  multiLayer: MultiLayerOutput | null;
+  activeLayer: string;
+  instructionMarkdown: string;
+  viewport: Viewport;
 };
 
 let _pendingDraftSnapshot: DraftSnapshot | null = null;
@@ -54,6 +60,12 @@ function snapshotDraft(state: State): DraftSnapshot {
     key: state.activeProjectId ?? 'scratch',
     dslText: state.dslText,
     overrides: state.overrides,
+    activeProjectId: state.activeProjectId,
+    generatedProjects: state.generatedProjects,
+    multiLayer: state.multiLayer,
+    activeLayer: state.activeLayer,
+    instructionMarkdown: state.instructionMarkdown,
+    viewport: state.viewport,
   };
 }
 
@@ -65,7 +77,7 @@ async function drainDraftSaveQueue(): Promise<void> {
       const snapshot = _pendingDraftSnapshot;
       _pendingDraftSnapshot = null;
       try {
-        await saveDraft(snapshot.key, snapshot.dslText, snapshot.overrides);
+        await saveDraft(snapshot);
       } catch (err) {
         // Root Cause vs Logic: refreshes were outrunning the old debounce window, so we now persist the latest snapshot immediately and keep going even if one IndexedDB write fails.
         console.warn('[DraftCache] Failed to save draft:', err);
@@ -81,6 +93,7 @@ async function drainDraftSaveQueue(): Promise<void> {
 function scheduleDraftSave(): void {
   if (typeof window === 'undefined' || !_getState) return;
   _pendingDraftSnapshot = snapshotDraft(_getState());
+  writeDraftShadow(_pendingDraftSnapshot);
   if (_draftSaveScheduled) return;
   _draftSaveScheduled = true;
   queueMicrotask(() => {
@@ -92,7 +105,14 @@ function scheduleDraftSave(): void {
 export async function flushDraftSave(): Promise<void> {
   if (typeof window === 'undefined' || !_getState) return;
   _pendingDraftSnapshot = snapshotDraft(_getState());
-  await drainDraftSaveQueue();
+  writeDraftShadow(_pendingDraftSnapshot);
+  // Root Cause vs Logic: a manual save shortcut should not stop after the
+  // currently running IndexedDB transaction if another change lands during the
+  // same refresh/save window, so we keep draining until the queue is empty.
+  while (true) {
+    await drainDraftSaveQueue();
+    if (!_pendingDraftSnapshot) return;
+  }
 }
 
 export type Mode = 'editor' | 'agent' | 'multi-layer' | 'custom-prompt';
@@ -179,7 +199,7 @@ interface State {
    * start.  Deliberately bypasses localStorage writes and the draft-save
    * debounce so we don't immediately re-write what we just read.
    */
-  applyDraft: (dslText: string, overrides: Overrides) => void;
+  applyDraft: (draft: DraftSnapshot) => void;
   /**
    * Toggle one item in the multi-selection.  If the item is already present
    * it is removed; otherwise it is added.  The primary `selection` is left
@@ -268,10 +288,52 @@ export const useDiagramStore = create<State>()(
       generatedProjects: [],
       activeProjectId: null,
       multiSelection: [],
-      applyDraft: (dslText, overrides) => {
-        // Applied once on page load from IndexedDB — bypasses localStorage writes
-        // and does NOT schedule a new IndexedDB write to avoid a pointless round-trip.
-        set({ dslText, overrides });
+      applyDraft: (draft) => {
+        // Root Cause vs Logic: localStorage can lag or fail independently of
+        // IndexedDB, so a recovered draft must win during hydration instead of
+        // only filling empty fields. When the draft also carries tab/project
+        // state, we restore that too so the working set survives a refresh.
+        set((state) => {
+          const hasProjectState =
+            draft.activeProjectId !== null && draft.generatedProjects.length > 0;
+
+          if (!hasProjectState) {
+            return {
+              dslText: draft.dslText,
+              overrides: draft.overrides,
+              viewport: draft.viewport,
+            };
+          }
+
+          const activeProject =
+            draft.generatedProjects.find((project) => project.id === draft.activeProjectId) ?? null;
+          const multiLayer = activeProject?.multiLayer ?? draft.multiLayer;
+          const restoredActiveLayer =
+            multiLayer && getMultiLayerDsl(multiLayer, draft.activeLayer) !== undefined
+              ? draft.activeLayer
+              : 'overview';
+          const updatedProject =
+            activeProject && multiLayer
+              ? applyProjectDsl(activeProject, draft.dslText, restoredActiveLayer)
+              : activeProject
+                ? { ...activeProject, dsl: draft.dslText }
+                : null;
+
+          return {
+            dslText: draft.dslText,
+            overrides: draft.overrides,
+            viewport: draft.viewport,
+            generatedProjects: updatedProject
+              ? draft.generatedProjects.map((project) =>
+                  project.id === draft.activeProjectId ? updatedProject : project,
+                )
+              : draft.generatedProjects,
+            activeProjectId: draft.activeProjectId,
+            multiLayer: updatedProject?.multiLayer ?? multiLayer,
+            activeLayer: restoredActiveLayer,
+            instructionMarkdown: draft.instructionMarkdown,
+          };
+        });
       },
       toggleMultiSelectItem: (item) =>
         set((state) => {
@@ -531,14 +593,9 @@ export const useDiagramStore = create<State>()(
         // Async: restore any persisted override positions for this project.
         loadDraft(project.id).then((draft) => {
           if (!draft) return;
-          const hasOverrides =
-            Object.keys(draft.overrides.nodes).length > 0 ||
-            Object.keys(draft.overrides.groups).length > 0 ||
-            Object.keys(draft.overrides.edges).length > 0;
-          if (!hasOverrides) return;
           // Guard: only apply if the user hasn't already switched to a different project.
           if (_getState?.()?.activeProjectId === project.id) {
-            set({ overrides: draft.overrides });
+            get().applyDraft(draft);
           }
         }).catch(() => { /* ignore — draft restoration is best-effort */ });
       },
