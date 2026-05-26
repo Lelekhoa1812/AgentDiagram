@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import Editor, { type OnMount } from '@monaco-editor/react';
 import type * as Monaco from 'monaco-editor';
 import {
@@ -50,6 +50,7 @@ import {
 import { BottomPanel } from '@/components/code-space/BottomPanel';
 import {
   deleteCodeSpaceProject,
+  deleteCodeSpaceSession,
   readCodeSpacePreferences,
   readCodeSpaceProjects,
   readCodeSpaceSessions,
@@ -327,6 +328,113 @@ export function CodeSpaceWorkspace() {
     updateSession(session);
     return session;
   }, [activeProjectId, activeSession, updateSession]);
+
+  // Motivation vs Logic: Keep naming and cleanup inside the sidebar so session management stays in the context of the chat list.
+  const renameSession = useCallback(
+    (session: CodeSpaceAgentSession) => {
+      const nextTitle = window.prompt('Rename session', session.title)?.trim();
+      if (!nextTitle || nextTitle === session.title) return;
+      updateSession({ ...session, title: nextTitle, updatedAt: Date.now() });
+    },
+    [updateSession],
+  );
+  const deleteSession = useCallback(
+    async (session: CodeSpaceAgentSession) => {
+      if (!window.confirm(`Delete session "${session.title}"? This cannot be undone.`)) {
+        return;
+      }
+      setSessions((current) => {
+        const next = current.filter((item) => item.id !== session.id);
+        setActiveSessionId((activeId) => {
+          if (activeId === session.id) {
+            return next[0]?.id ?? null;
+          }
+          return activeId;
+        });
+        return next;
+      });
+      try {
+        await deleteCodeSpaceSession(session.id);
+      } catch {
+        // Persistence errors are non-critical; the UI already dropped the session.
+      }
+    },
+    [deleteCodeSpaceSession, setActiveSessionId, setSessions],
+  );
+
+  type SessionRowProps = {
+    session: CodeSpaceAgentSession;
+    selectable?: boolean;
+  };
+  const SessionRow = ({ session, selectable = false }: SessionRowProps) => {
+    const isActive = selectable && activeSessionId === session.id;
+    const handleSelect = () => {
+      if (!selectable) return;
+      setActiveSessionId(session.id);
+    };
+    const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+      if (!selectable) return;
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        setActiveSessionId(session.id);
+      }
+    };
+    const statusText = session.archived ? 'archived' : session.status;
+    const formattedAt = new Date(session.updatedAt).toLocaleString();
+    const interactionProps = selectable
+      ? {
+          role: 'button' as const,
+          tabIndex: 0,
+          onClick: handleSelect,
+          onKeyDown: handleKeyDown,
+        }
+      : {};
+    return (
+      <div
+        {...interactionProps}
+        className={`mb-1 flex items-start justify-between rounded border px-2 py-2 text-[12px] ${isActive ? 'border-accent/50 bg-accent/10' : 'border-transparent hover:border-[#2a2a2a] hover:bg-[#252526]'} group`}
+      >
+        <div className="flex-1">
+          <div className="flex items-center gap-2">
+            {session.archived && <Archive size={12} className="text-[#8b8b8b]" />}
+            <div className="truncate font-medium">{session.title}</div>
+          </div>
+          <div className="mt-1 flex items-center gap-2 text-[10px] text-[#8b8b8b]">
+            <History size={11} />
+            <span>{statusText}</span>
+            <span>·</span>
+            <span>{formattedAt}</span>
+          </div>
+        </div>
+        <div className="ml-3 flex items-center gap-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              renameSession(session);
+            }}
+            className="rounded border border-transparent px-1.5 text-[#8b8b8b] hover:border-[#3a3a3a] hover:text-[#d4d4d4]"
+            title="Rename session"
+            aria-label="Rename session"
+          >
+            <Pencil size={12} />
+          </button>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              void deleteSession(session);
+            }}
+            className="rounded border border-transparent px-1.5 text-[#8b8b8b] hover:border-[#3a3a3a] hover:text-[#d4d4d4]"
+            title="Delete session"
+            aria-label="Delete session"
+          >
+            <Trash2 size={12} />
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   const refreshGitStatus = useCallback(async (project: CodeSpaceProject) => {
     if (!project.rootPath) return;
@@ -1314,8 +1422,11 @@ export function CodeSpaceWorkspace() {
                     Root path: <span className="font-mono text-[11px] text-[#d4d4d4]">{activeProject.rootPath ?? 'Unknown'}</span>
                   </div>
                   <div className="flex flex-wrap justify-end gap-2">
+                    {/* Commented buttons hide the quick actions from the preview. */}
+                    {/*
                     <button type="button" onClick={() => setLeftVisible(true)} className="rounded border border-[#2a2a2a] bg-[#252526] px-3 py-1.5 text-[11px] text-[#d4d4d4]">Show Explorer</button>
                     <button type="button" onClick={() => activeProject && void loadTree(activeProject, '')} className="rounded border border-accent/40 bg-accent/15 px-3 py-1.5 text-[11px] font-semibold text-accent hover:bg-accent/25">Refresh Preview</button>
+                    */}
                   </div>
                 </div>
               </div>
@@ -1374,13 +1485,12 @@ export function CodeSpaceWorkspace() {
           <div className="min-h-0 flex-1 overflow-auto p-3">
             <div className="mb-2 text-[11px] uppercase tracking-wider text-[#8b8b8b]">Recent</div>
             {recentSessions.length ? recentSessions.map((session) => (
-              <button key={session.id} type="button" onClick={() => setActiveSessionId(session.id)} className={`mb-1 w-full rounded border px-2 py-2 text-left text-[12px] ${activeSessionId === session.id ? 'border-accent/50 bg-accent/10' : 'border-transparent hover:border-[#2a2a2a] hover:bg-[#252526]'}`}>
-                <div className="truncate font-medium">{session.title}</div>
-                <div className="mt-1 flex items-center gap-2 text-[10px] text-[#8b8b8b]"><History size={11} /> {session.status} · {new Date(session.updatedAt).toLocaleString()}</div>
-              </button>
+              <SessionRow key={session.id} session={session} selectable />
             )) : <div className="rounded border border-dashed border-[#37373d] p-3 text-[12px] text-[#8b8b8b]">No sessions yet.</div>}
             <div className="mb-2 mt-5 text-[11px] uppercase tracking-wider text-[#8b8b8b]">Archived</div>
-            {archivedSessions.length ? archivedSessions.map((session) => <div key={session.id} className="flex items-center gap-2 text-[12px] text-[#8b8b8b]"><Archive size={12} /> {session.title}</div>) : <div className="text-[12px] text-[#555]">Nothing archived.</div>}
+            {archivedSessions.length ? archivedSessions.map((session) => (
+              <SessionRow key={session.id} session={session} />
+            )) : <div className="text-[12px] text-[#555]">Nothing archived.</div>}
           </div>
           <div className="border-t border-[#2a2a2a] p-3">
             {!activeSession?.messages.length && (

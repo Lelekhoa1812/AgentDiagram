@@ -120,6 +120,16 @@ export async function saveCodeSpaceSession(session: CodeSpaceAgentSession): Prom
   await putInStore(SESSION_STORE, session);
 }
 
+export async function deleteCodeSpaceSession(sessionId: string): Promise<void> {
+  const db = await openCodeSpaceDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction([SESSION_STORE], 'readwrite');
+    const request = tx.objectStore(SESSION_STORE).delete(sessionId);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
 export async function readCodeSpaceTabs(): Promise<CodeSpaceEditorTab[]> {
   const tabs = await getAllFromStore<CodeSpaceEditorTab>(TAB_STORE);
   return tabs.sort((a, b) => b.lastOpenedAt - a.lastOpenedAt);
