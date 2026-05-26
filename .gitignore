@@ -20,6 +20,7 @@ tests/visual/__snapshots__/*.actual.png
 tests/visual/__snapshots__/*.diff.png
 
 .claude
+.superpowers
 .cursor
 .vscode
 .cache/github-repos/

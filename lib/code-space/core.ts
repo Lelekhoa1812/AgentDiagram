@@ -89,6 +89,8 @@ export interface CodeSpaceToolCall {
   summary: string;
   input?: unknown;
   output?: unknown;
+  error?: string;
+  durationMs?: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -124,7 +126,7 @@ export interface CodeSpaceAgentSession {
   id: string;
   projectId: string | null;
   title: string;
-  status: 'idle' | 'planning' | 'applying' | 'reviewing' | 'checking' | 'finalized' | 'blocked';
+  status: 'idle' | 'planning' | 'applying' | 'reviewing' | 'checking' | 'finalized' | 'blocked' | 'running' | 'waiting_review' | 'verified' | 'needs_review';
   mode: 'chat' | 'agent' | 'fresh-start';
   messages: CodeSpaceMessage[];
   toolCalls: CodeSpaceToolCall[];
@@ -136,6 +138,15 @@ export interface CodeSpaceAgentSession {
   updatedAt: number;
   archived: boolean;
   localCacheVersion: number;
+  toolBudget: number;
+  toolCallCount: number;
+  filesChanged: string[];
+  agentChangesets: Array<{
+    filePath: string;
+    beforeContent: string;
+    afterContent: string;
+    acceptedAt: number;
+  }>;
 }
 
 export type CodeSpaceBottomTab = 'problems' | 'output' | 'debug' | 'terminal';

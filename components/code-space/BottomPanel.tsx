@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   AlertCircle,
   AlertTriangle,
@@ -9,6 +9,7 @@ import {
   Loader2,
   MessageCircle,
   TerminalSquare,
+  Trash2,
 } from 'lucide-react';
 import type { CodeSpaceAgentSession, CodeSpaceBottomTab } from '@/lib/code-space/core';
 
@@ -39,15 +40,16 @@ interface TerminalEntry {
   command: string;
   stdout: string;
   stderr: string;
-  exitCode: number;
-  status: 'success' | 'error';
+  exitCode?: number;
+  status: 'running' | 'success' | 'error';
   timestamp: number;
+  completedAt?: number;
 }
 
 const TAB_META: Record<CodeSpaceBottomTab, { label: string; icon: typeof AlertCircle }> = {
   problems: { label: 'Problems', icon: AlertTriangle },
   output: { label: 'Output', icon: TerminalSquare },
-  debug: { label: 'Debug Console', icon: MessageCircle },
+  debug: { label: 'Console', icon: MessageCircle },
   terminal: { label: 'Terminal', icon: TerminalSquare },
 };
 
@@ -64,7 +66,7 @@ function splitCommandLine(value: string): string[] {
   let current = '';
   let quote: '"' | "'" | null = null;
   for (let i = 0; i < value.length; i += 1) {
-    const char = value[i];
+    const char = value[i] ?? '';
     if (quote) {
       if (char === '\\' && i + 1 < value.length) {
         current += value[i + 1];
@@ -102,6 +104,14 @@ function randomId() {
   return `${Date.now()}:${Math.random().toString(16).slice(2)}`;
 }
 
+function entrySignature(parts: Array<string | number | boolean | null | undefined>): string {
+  return parts.map((part) => String(part ?? '')).join('|');
+}
+
+function formatTerminalPrompt(projectName: string): string {
+  return `${projectName || 'terminal'} %`;
+}
+
 // Motivation vs Logic: Align the bottom console with Cursor's Problems/Output/Debug/Terminal workflow so
 // each tab surface real diagnostics, logs, and terminal output instead of a single catch-all stream.
 export function BottomPanel({
@@ -121,6 +131,18 @@ export function BottomPanel({
   const [terminalBusy, setTerminalBusy] = useState(false);
   const [terminalError, setTerminalError] = useState<string | null>(null);
   const [commandInput, setCommandInput] = useState('');
+  const [clearedSignatures, setClearedSignatures] = useState<{
+    problems: Set<string>;
+    output: Set<string>;
+    debug: Set<string>;
+    workspaceError: string | null;
+  }>({
+    problems: new Set(),
+    output: new Set(),
+    debug: new Set(),
+    workspaceError: null,
+  });
+  const terminalScrollRef = useRef<HTMLDivElement | null>(null);
 
   const toolCalls = activeSession?.toolCalls ?? [];
   const verificationResults = activeSession?.verificationResults ?? [];
@@ -128,7 +150,7 @@ export function BottomPanel({
   const todos = activeSession?.todos ?? [];
   const debugMessages = activeSession?.messages ?? [];
 
-  const problems = useMemo<ProblemEntry[]>(() => {
+  const problems = useMemo<Array<ProblemEntry & { signature: string }>>(() => {
     const entries: ProblemEntry[] = [];
     if (error) {
       entries.push({
@@ -171,13 +193,82 @@ export function BottomPanel({
         });
       });
     entries.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
-    return entries;
+    return entries.map((entry) => ({
+      ...entry,
+      signature: entrySignature([entry.id, entry.source, entry.severity, entry.message]),
+    }));
   }, [error, toolCalls, verificationResults, todos]);
 
-  const problemsCount = problems.length;
-  const outputCount = toolCalls.length;
-  const debugCount = debugMessages.length;
+  const visibleWorkspaceError = error && error !== clearedSignatures.workspaceError ? error : null;
+  const visibleProblems = useMemo(
+    () =>
+      problems.filter((problem) => !clearedSignatures.problems.has(problem.signature)).filter((problem) => {
+        if (problem.source !== 'Workspace') return true;
+        return visibleWorkspaceError === problem.message;
+      }),
+    [clearedSignatures.problems, problems, visibleWorkspaceError],
+  );
+  const visibleOutput = useMemo(
+    () =>
+      toolCalls.filter((call) => !clearedSignatures.output.has(entrySignature([call.id, call.status, call.summary]))),
+    [clearedSignatures.output, toolCalls],
+  );
+  const visibleDebug = useMemo(() => {
+    const visiblePlan = plan
+      .map((step, index) => ({
+        id: entrySignature(['plan', index, step]),
+        signature: entrySignature(['plan', index, step]),
+        step,
+      }))
+      .filter((entry) => !clearedSignatures.debug.has(entry.signature));
+    const visibleTodos = todos
+      .map((todo) => ({
+        id: entrySignature(['todo', todo.id, todo.text, todo.done]),
+        signature: entrySignature(['todo', todo.id, todo.text, todo.done]),
+        todo,
+      }))
+      .filter((entry) => !clearedSignatures.debug.has(entry.signature));
+    const visibleMessages = debugMessages
+      .map((message) => ({
+        id: entrySignature(['message', message.id, message.role, message.content]),
+        signature: entrySignature(['message', message.id, message.role, message.content]),
+        message,
+      }))
+      .filter((entry) => !clearedSignatures.debug.has(entry.signature));
+    return { visiblePlan, visibleTodos, visibleMessages };
+  }, [clearedSignatures.debug, debugMessages, plan, todos]);
+
+  const problemsCount = visibleProblems.length;
+  const outputCount = visibleOutput.length;
+  const debugCount = visibleDebug.visiblePlan.length + visibleDebug.visibleTodos.length + visibleDebug.visibleMessages.length;
   const terminalCount = terminalHistory.length;
+
+  useEffect(() => {
+    const scrollNode = terminalScrollRef.current;
+    if (!scrollNode) return;
+    scrollNode.scrollTo({ top: scrollNode.scrollHeight });
+  }, [terminalHistory, bottomActiveTab, projectName]);
+
+  const handleClearLogs = () => {
+    setClearedSignatures((current) => {
+      const nextProblems = new Set(current.problems);
+      const nextOutput = new Set(current.output);
+      const nextDebug = new Set(current.debug);
+
+      for (const problem of visibleProblems) nextProblems.add(problem.signature);
+      for (const call of visibleOutput) nextOutput.add(entrySignature([call.id, call.status, call.summary]));
+      for (const entry of visibleDebug.visiblePlan) nextDebug.add(entry.signature);
+      for (const entry of visibleDebug.visibleTodos) nextDebug.add(entry.signature);
+      for (const entry of visibleDebug.visibleMessages) nextDebug.add(entry.signature);
+
+      return {
+        problems: nextProblems,
+        output: nextOutput,
+        debug: nextDebug,
+        workspaceError: visibleWorkspaceError ?? current.workspaceError,
+      };
+    });
+  };
 
   const handleTerminalSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -190,43 +281,60 @@ export function BottomPanel({
     const tokens = splitCommandLine(trimmed);
     if (!tokens.length) return;
     const [command, ...args] = tokens;
+    const entryId = randomId();
     setTerminalBusy(true);
     setTerminalError(null);
+    setTerminalHistory((current) => [
+      ...current,
+      {
+        id: entryId,
+        command: trimmed,
+        stdout: '',
+        stderr: '',
+        exitCode: undefined,
+        status: 'running',
+        timestamp: Date.now(),
+      },
+    ]);
     try {
-      const start = Date.now();
       const response = await fetch('/api/code-space/terminal', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rootPath: projectRoot, command, args }),
       });
       const payload = await response.json();
-      const entry: TerminalEntry = {
-        id: randomId(),
-        command: trimmed,
-        stdout: payload.stdout ?? '',
-        stderr: payload.stderr ?? '',
-        exitCode: typeof payload.exitCode === 'number' ? payload.exitCode : 1,
-        status: response.ok ? 'success' : 'error',
-        timestamp: Date.now(),
-      };
-      setTerminalHistory((current) => [...current, entry]);
+      setTerminalHistory((current) =>
+        current.map((entry) =>
+          entry.id === entryId
+            ? {
+                ...entry,
+                stdout: payload.stdout ?? '',
+                stderr: payload.stderr ?? '',
+                exitCode: typeof payload.exitCode === 'number' ? payload.exitCode : response.ok ? 0 : 1,
+                status: response.ok ? 'success' : 'error',
+                completedAt: Date.now(),
+              }
+            : entry,
+        ),
+      );
       if (!response.ok) {
         setTerminalError(payload.error ?? 'Command failed');
       }
       setCommandInput('');
     } catch (err) {
-      setTerminalHistory((current) => [
-        ...current,
-        {
-          id: randomId(),
-          command: trimmed,
-          stdout: '',
-          stderr: err instanceof Error ? err.message : String(err),
-          exitCode: 1,
-          status: 'error',
-          timestamp: Date.now(),
-        },
-      ]);
+      setTerminalHistory((current) =>
+        current.map((entry) =>
+          entry.id === entryId
+            ? {
+                ...entry,
+                stderr: err instanceof Error ? err.message : String(err),
+                exitCode: 1,
+                status: 'error',
+                completedAt: Date.now(),
+              }
+            : entry,
+        ),
+      );
       setTerminalError(err instanceof Error ? err.message : String(err));
     } finally {
       setTerminalBusy(false);
@@ -235,9 +343,9 @@ export function BottomPanel({
 
   const renderTabContent = () => {
     if (bottomActiveTab === 'problems') {
-      return problems.length ? (
+      return visibleProblems.length ? (
         <div className="space-y-2 text-sm">
-          {problems.map((problem) => (
+          {visibleProblems.map((problem) => (
             <div
               key={problem.id}
               className="flex items-center justify-between rounded border border-[#2a2a2a] bg-[#0f0f0f] p-2"
@@ -264,9 +372,9 @@ export function BottomPanel({
       );
     }
     if (bottomActiveTab === 'output') {
-      return toolCalls.length ? (
+      return visibleOutput.length ? (
         <div className="space-y-2 text-[12px]">
-          {toolCalls.map((call) => (
+          {visibleOutput.map((call) => (
             <div key={call.id} className="rounded border border-[#2a2a2a] bg-[#0f0f0f] p-2">
               <div className="flex items-center justify-between gap-2 text-[11px]">
                 <div className="flex flex-wrap items-center gap-2 font-semibold uppercase tracking-wider text-[#8ca0c2]">
@@ -280,9 +388,9 @@ export function BottomPanel({
                 </span>
               </div>
               <p className="mt-1 text-[12px] text-[#d4d4d4]">{call.summary}</p>
-              {(call.input || call.output) && (
+              {(call.input !== undefined || call.output !== undefined) && (
                 <div className="mt-2 space-y-1 text-[10px] text-[#8b8b8b]">
-                  {call.input && (
+                  {call.input !== undefined && (
                     <details className="rounded border border-[#2a2a2a] bg-[#151515] p-2">
                       <summary className="cursor-pointer">Input</summary>
                       <pre className="whitespace-pre-wrap text-[11px] text-[#c6d0e1]">
@@ -290,7 +398,7 @@ export function BottomPanel({
                       </pre>
                     </details>
                   )}
-                  {call.output && (
+                  {call.output !== undefined && (
                     <details className="rounded border border-[#2a2a2a] bg-[#151515] p-2">
                       <summary className="cursor-pointer">Output</summary>
                       <pre className="whitespace-pre-wrap text-[11px] text-[#c6d0e1]">
@@ -313,13 +421,13 @@ export function BottomPanel({
           <section>
             <div className="flex items-center justify-between text-[10px] uppercase tracking-widest text-[#6d6d6d]">
               <span>Plan</span>
-              <span>{plan.length} step{plan.length === 1 ? '' : 's'}</span>
+              <span>{visibleDebug.visiblePlan.length} step{visibleDebug.visiblePlan.length === 1 ? '' : 's'}</span>
             </div>
-            {plan.length ? (
+            {visibleDebug.visiblePlan.length ? (
               <ol className="mt-1 space-y-1 pl-4 text-[#d4d4d4]">
-                {plan.map((step, index) => (
-                  <li key={`${step}:${index}`} className="marker:text-[#6d6d6d]">
-                    {step}
+                {visibleDebug.visiblePlan.map((entry) => (
+                  <li key={entry.id} className="marker:text-[#6d6d6d]">
+                    {entry.step}
                   </li>
                 ))}
               </ol>
@@ -330,14 +438,14 @@ export function BottomPanel({
           <section>
             <div className="flex items-center justify-between text-[10px] uppercase tracking-widest text-[#6d6d6d]">
               <span>Todos</span>
-              <span>{todos.filter((todo) => !todo.done).length} active</span>
+              <span>{visibleDebug.visibleTodos.filter((entry) => !entry.todo.done).length} active</span>
             </div>
-            {todos.length ? (
+            {visibleDebug.visibleTodos.length ? (
               <div className="mt-1 space-y-1 text-[#d4d4d4]">
-                {todos.map((todo) => (
-                  <div key={todo.id} className="flex items-center gap-2 text-[11px]">
-                    <span className={`h-3 w-3 rounded-full border ${todo.done ? 'border-[#3b8b3b] bg-[#3b8b3b]' : 'border-[#4a4a4a]'}`} />
-                    <span className={todo.done ? 'text-[#6d6d6d]' : 'text-[#d4d4d4]'}>{todo.text}</span>
+                {visibleDebug.visibleTodos.map((entry) => (
+                  <div key={entry.id} className="flex items-center gap-2 text-[11px]">
+                    <span className={`h-3 w-3 rounded-full border ${entry.todo.done ? 'border-[#3b8b3b] bg-[#3b8b3b]' : 'border-[#4a4a4a]'}`} />
+                    <span className={entry.todo.done ? 'text-[#6d6d6d]' : 'text-[#d4d4d4]'}>{entry.todo.text}</span>
                   </div>
                 ))}
               </div>
@@ -348,24 +456,24 @@ export function BottomPanel({
           <section>
             <div className="flex items-center justify-between text-[10px] uppercase tracking-widest text-[#6d6d6d]">
               <span>Messages</span>
-              <span>{debugMessages.length}</span>
+              <span>{visibleDebug.visibleMessages.length}</span>
             </div>
-            {debugMessages.length ? (
+            {visibleDebug.visibleMessages.length ? (
               <div className="mt-1 space-y-2 max-h-[120px] overflow-y-auto">
-                {debugMessages.map((message) => (
-                  <div key={message.id} className="rounded border border-[#2a2a2a] bg-[#0f0f0f] p-2">
+                {visibleDebug.visibleMessages.map((entry) => (
+                  <div key={entry.id} className="rounded border border-[#2a2a2a] bg-[#0f0f0f] p-2">
                     <div className="flex items-center justify-between text-[10px] text-[#6d6d6d]">
                       <div className="flex items-center gap-2">
-                        {message.role === 'assistant' ? (
+                        {entry.message.role === 'assistant' ? (
                           <Bot size={12} className="text-[#9ec3ff]" />
                         ) : (
                           <MessageCircle size={12} className="text-[#f3a3ff]" />
                         )}
-                        <span className="uppercase tracking-widest">{message.role}</span>
+                        <span className="uppercase tracking-widest">{entry.message.role}</span>
                       </div>
-                      <span>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      <span>{new Date(entry.message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                     </div>
-                    <p className="mt-1 text-[12px] text-[#d4d4d4]">{message.content}</p>
+                    <p className="mt-1 text-[12px] text-[#d4d4d4]">{entry.message.content}</p>
                   </div>
                 ))}
               </div>
@@ -376,71 +484,61 @@ export function BottomPanel({
         </div>
       );
     }
+    // Motivation vs Logic: We do not have a persistent PTY backend here, so the terminal must feel like a real shell
+    // through prompt rows, scrollback, and inline results while still executing one command per request.
     return (
-      <div className="space-y-3">
-        <form onSubmit={handleTerminalSubmit} className="flex flex-col gap-2">
-          <div className="flex items-center justify-between text-[10px] uppercase tracking-widest text-[#6d6d6d]">
-            <span>Running under</span>
-            <span className="text-[10px] text-[#8b8b8b]">{projectName}</span>
-          </div>
-          <input
-            value={commandInput}
-            onChange={(event) => setCommandInput(event.target.value)}
-            disabled={terminalBusy || !projectRoot}
-            placeholder={projectRoot ? 'e.g. git status' : 'Open a project to use the terminal'}
-            className="rounded border border-[#2a2a2a] bg-[#151515] px-3 py-2 text-[12px] outline-none disabled:cursor-not-allowed disabled:opacity-50"
-          />
-          <div className="flex items-center gap-2">
-            <button
-              type="submit"
-              disabled={terminalBusy || !commandInput.trim() || !projectRoot}
-              className="flex items-center gap-1 rounded bg-accent/20 px-3 py-1 text-[12px] font-semibold text-accent disabled:opacity-40"
-            >
-              {terminalBusy ? (
-                <>
-                  <Loader2 className="h-3 w-3 animate-spin text-accent" />
-                  Running…
-                </>
-              ) : (
-                'Run'
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={() => setTerminalHistory([])}
-              disabled={!terminalHistory.length}
-              className="rounded border border-[#2a2a2a] px-3 py-1 text-[12px] text-[#8b8b8b] disabled:opacity-40"
-            >
-              Clear
-            </button>
-          </div>
-          {terminalError && <p className="text-[11px] text-[#ff7b72]">{terminalError}</p>}
-        </form>
-        <div className="space-y-2">
+      <div className="flex h-full flex-col rounded border border-[#232323] bg-[#0c0c0c] font-mono text-[11px] text-[#d4d4d4]">
+        <div ref={terminalScrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 leading-5">
           {terminalHistory.length ? (
             terminalHistory.map((entry) => (
-              <div key={entry.id} className="rounded border border-[#2a2a2a] bg-[#0f0f0f] p-2 text-[11px]">
-                <div className="flex items-center justify-between text-[10px] text-[#6d6d6d]">
-                  <span className="font-mono text-[11px] text-[#d4d4d4]">{entry.command}</span>
-                  <span className="flex items-center gap-2">
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] ${entry.status === 'success' ? 'bg-[#1a4c28] text-[#76f59e]' : 'bg-[#5c1616] text-[#ffb3b3]'}`}>
-                      {entry.status === 'success' ? `exit ${entry.exitCode}` : 'error'}
-                    </span>
-                    <span>{new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+              <div key={entry.id} className="rounded border border-[#1f1f1f] bg-[#111111] p-3">
+                <div className="flex items-start gap-2">
+                  <span className="shrink-0 text-[#6f6f6f]">{formatTerminalPrompt(projectName)}</span>
+                  <span className="break-all text-[#d4d4d4]">{entry.command}</span>
+                  <span className="ml-auto shrink-0">
+                    {entry.status === 'running' ? (
+                      <span className="inline-flex items-center gap-1 rounded-full border border-[#2a2a2a] px-2 py-0.5 text-[9px] uppercase tracking-widest text-[#8b8b8b]">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Running
+                      </span>
+                    ) : (
+                      <span className={`rounded-full px-2 py-0.5 text-[9px] uppercase tracking-widest ${entry.status === 'success' ? 'bg-[#1a4c28] text-[#76f59e]' : 'bg-[#5c1616] text-[#ffb3b3]'}`}>
+                        {entry.status === 'success' ? `exit ${entry.exitCode ?? 0}` : 'error'}
+                      </span>
+                    )}
                   </span>
                 </div>
-                {entry.stdout && (
-                  <pre className="mt-2 whitespace-pre-wrap text-[11px] text-[#c6d0e1]">{entry.stdout}</pre>
-                )}
-                {entry.stderr && (
-                  <pre className="mt-1 whitespace-pre-wrap text-[11px] text-[#ffb3b3]">{entry.stderr}</pre>
+                {(entry.stdout || entry.stderr) && (
+                  <div className="mt-2 space-y-1 pl-4">
+                    {entry.stdout && <pre className="whitespace-pre-wrap text-[#c6d0e1]">{entry.stdout}</pre>}
+                    {entry.stderr && <pre className="whitespace-pre-wrap text-[#ffb3b3]">{entry.stderr}</pre>}
+                  </div>
                 )}
               </div>
             ))
           ) : (
-            <p className="text-[12px] text-[#8b8b8b]">Run a command to bootstrap the terminal history.</p>
+            <div className="rounded border border-dashed border-[#2a2a2a] px-3 py-4 text-[#8b8b8b]">
+              Terminal output will appear here once you run a command.
+            </div>
           )}
         </div>
+        <form onSubmit={handleTerminalSubmit} className="border-t border-[#232323] bg-[#101010] px-3 py-2">
+          <div className="flex items-center gap-2">
+            <span className="shrink-0 text-[#6f6f6f]">{formatTerminalPrompt(projectName)}</span>
+            <input
+              value={commandInput}
+              onChange={(event) => setCommandInput(event.target.value)}
+              disabled={terminalBusy || !projectRoot}
+              placeholder={projectRoot ? 'type a command and press Enter' : 'Open a project to use the terminal'}
+              className="min-w-0 flex-1 border-0 bg-transparent p-0 text-[#e6edf3] outline-none placeholder:text-[#5f5f5f] disabled:cursor-not-allowed disabled:opacity-40"
+              autoCapitalize="off"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+            />
+          </div>
+          {terminalError && <p className="mt-1 text-[#ff7b72]">{terminalError}</p>}
+        </form>
       </div>
     );
   };
@@ -448,7 +546,7 @@ export function BottomPanel({
   return (
     <div className="h-52 border-t border-[#2a2a2a] bg-[#121212]">
       <div className="flex h-9 items-center justify-between border-b border-[#2a2a2a] px-3">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           {Object.entries(TAB_META).map(([id, { label, icon: Icon }]) => {
             const tabId = id as CodeSpaceBottomTab;
             const count =
@@ -465,7 +563,7 @@ export function BottomPanel({
                 type="button"
                 onClick={() => onTabChange(tabId)}
                 aria-pressed={bottomActiveTab === tabId}
-                className={`flex items-center gap-1 rounded px-3 py-1 text-[11px] font-semibold uppercase tracking-wide transition ${
+                className={`flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-normal transition ${
                   bottomActiveTab === tabId
                     ? 'bg-[#171717] text-white'
                     : 'text-[#8c8c8c] hover:text-white'
@@ -473,26 +571,39 @@ export function BottomPanel({
               >
                 {/* Root Cause vs Logic: lucide icons are React components, not plain functions, so render via JSX. */}
                 <Icon
-                  size={14}
+                  size={12}
                   className={bottomActiveTab === tabId ? 'text-white' : 'text-[#8c8c8c]'}
                 />
-                <span>
+                <span className="whitespace-nowrap">
                   {label}
-                  <span className="ml-1 text-[10px] text-[#6d6d6d]">({count})</span>
+                  <span className="ml-1 text-[9px] text-[#6d6d6d]">({count})</span>
                 </span>
               </button>
             );
           })}
         </div>
-        <div className="flex items-center gap-2 text-[11px] text-[#8c8c8c]">
-          <span className="rounded-full border border-[#2a2a2a] px-2 py-0.5 text-[10px] uppercase">{activeSession?.status ?? 'idle'}</span>
-          <button type="button" onClick={onToggleMinimap} className="rounded border border-[#2a2a2a] px-2 py-0.5 text-[10px] text-[#8c8c8c] hover:text-white">
+        <div className="flex items-center gap-1.5 text-[10px] text-[#8c8c8c]">
+          <span className="rounded-full border border-[#2a2a2a] px-2 py-0.5 text-[9px] uppercase">{activeSession?.status ?? 'idle'}</span>
+          <button
+            type="button"
+            onClick={handleClearLogs}
+            disabled={!visibleProblems.length && !visibleOutput.length && !visibleDebug.visiblePlan.length && !visibleDebug.visibleTodos.length && !visibleDebug.visibleMessages.length && !visibleWorkspaceError}
+            className="rounded border border-[#2a2a2a] px-2 py-0.5 text-[9px] text-[#8c8c8c] hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+            title="Clear Problems, Output, and Console logs"
+            aria-label="Clear Problems, Output, and Console logs"
+          >
+            <span className="inline-flex items-center gap-1">
+              <Trash2 size={10} />
+              Clear
+            </span>
+          </button>
+          <button type="button" onClick={onToggleMinimap} className="rounded border border-[#2a2a2a] px-2 py-0.5 text-[9px] text-[#8c8c8c] hover:text-white">
             Minimap {minimapEnabled ? 'On' : 'Off'}
           </button>
-          <button type="button" onClick={onToggleWordWrap} className="rounded border border-[#2a2a2a] px-2 py-0.5 text-[10px] text-[#8c8c8c] hover:text-white">
+          <button type="button" onClick={onToggleWordWrap} className="rounded border border-[#2a2a2a] px-2 py-0.5 text-[9px] text-[#8c8c8c] hover:text-white">
             Wrap {wordWrap ? 'On' : 'Off'}
           </button>
-          <button type="button" onClick={onHide} className="rounded border border-[#2a2a2a] px-2 py-0.5 text-[10px] text-[#8c8c8c] hover:text-white">
+          <button type="button" onClick={onHide} className="rounded border border-[#2a2a2a] px-2 py-0.5 text-[9px] text-[#8c8c8c] hover:text-white">
             Hide
           </button>
         </div>

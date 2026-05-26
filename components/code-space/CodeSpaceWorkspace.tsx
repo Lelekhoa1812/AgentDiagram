@@ -35,7 +35,6 @@ import {
 import { useDiagramStore } from '@/lib/state/store';
 import { writeUiPreference } from '@/lib/state/uiPreferences';
 import {
-  classifyCodeSpaceIntent,
   createCodeSpaceProject,
   dedupeCodeSpaceProjects,
   detectCodeSpaceLanguage,
@@ -44,6 +43,7 @@ import {
   type CodeSpaceAgentSession,
   type CodeSpaceBottomTab,
   type CodeSpaceEditorTab,
+  type CodeSpaceMessage,
   type CodeSpaceProject,
   type CodeSpaceTreeNode,
 } from '@/lib/code-space/core';
@@ -62,6 +62,8 @@ import {
 } from '@/lib/code-space/persistence';
 import { registerDslLanguage } from '@/components/editor/dslLanguage';
 import { ProviderConfig } from '@/components/agent/ProviderConfig';
+import { AgentPanel } from '@/components/code-space/AgentPanel';
+import type { AgentSSEEvent } from '@/lib/code-space/agent/types';
 
 interface FilePayload {
   path: string;
@@ -99,6 +101,16 @@ const DEFAULT_SESSION_EXAMPLES = [
 
 function nowId(prefix: string): string {
   return `${prefix}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function getApiKey(providerId: string): string {
+  try {
+    const stored = localStorage.getItem(`provider_config_${providerId}`);
+    if (stored) return (JSON.parse(stored) as { apiKey?: string }).apiKey ?? '';
+  } catch {
+    // Ignore storage parse errors and fall back to empty string.
+  }
+  return '';
 }
 
 function projectNameFromPath(rootPath: string): string {
@@ -176,6 +188,10 @@ function createSession(projectId: string | null, title = 'New coding session', m
     updatedAt: ts,
     archived: false,
     localCacheVersion: 1,
+    toolBudget: 50,
+    toolCallCount: 0,
+    filesChanged: [],
+    agentChangesets: [],
   };
 }
 
@@ -191,6 +207,7 @@ function fileIcon(path: string) {
 export function CodeSpaceWorkspace() {
   const setMode = useDiagramStore((s) => s.setMode);
   const theme = useDiagramStore((s) => s.theme);
+  const provider = useDiagramStore((s) => s.provider);
   const [projects, setProjects] = useState<CodeSpaceProject[]>([]);
   const [sessions, setSessions] = useState<CodeSpaceAgentSession[]>([]);
   const [tabs, setTabs] = useState<CodeSpaceEditorTab[]>([]);
@@ -212,8 +229,6 @@ export function CodeSpaceWorkspace() {
   const [revealHidden, setRevealHidden] = useState(false);
   const [repoUrl, setRepoUrl] = useState('');
   const [localPath, setLocalPath] = useState('');
-  const [prompt, setPrompt] = useState('');
-  const [sessionSearch, setSessionSearch] = useState('');
   const [projectSearch, setProjectSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [providerConfigOpen, setProviderConfigOpen] = useState(false);
@@ -238,7 +253,25 @@ export function CodeSpaceWorkspace() {
   const emptyAutoDeleteCheckedIds = useRef<Set<string>>(new Set());
   const activeProject = projects.find((project) => project.id === activeProjectId) ?? null;
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
-  const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
+  const activeSession = sessions.find((session) => session.id === activeSessionId && session.projectId === activeProjectId) ?? null;
+
+  // Agent state
+  const [agentRunning, setAgentRunning] = useState(false);
+  const [pendingDiffs, setPendingDiffs] = useState<Array<{
+    diffId: string;
+    filePath: string;
+    oldContent: string;
+    newContent: string;
+  }>>([]);
+  const [terminalStream, setTerminalStream] = useState('');
+  const [agentChangesets, setAgentChangesets] = useState<Array<{
+    filePath: string;
+    beforeContent: string;
+    afterContent: string;
+    acceptedAt: number;
+  }>>([]);
+  const agentAbortRef = useRef<AbortController | null>(null);
+  const runningSessionIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     projectsRef.current = projects;
@@ -278,11 +311,13 @@ export function CodeSpaceWorkspace() {
         });
         setSessions((current) => mergeById(current, storedSessions));
         setTabs((current) => mergeById(current, storedTabs));
-        if (!preferences.activeProjectId && storedProjects[0]) {
-          setActiveProjectId((prev) => prev ?? storedProjects[0].id);
+        const firstProject = storedProjects[0];
+        if (!preferences.activeProjectId && firstProject) {
+          setActiveProjectId((prev) => prev ?? firstProject.id);
         }
-        if (!preferences.activeSessionId && storedSessions[0]) {
-          setActiveSessionId((prev) => prev ?? storedSessions[0].id);
+        const firstSession = storedSessions[0];
+        if (!preferences.activeSessionId && firstSession) {
+          setActiveSessionId((prev) => prev ?? firstSession.id);
         }
       },
     );
@@ -321,8 +356,75 @@ export function CodeSpaceWorkspace() {
     void saveCodeSpaceSession(session);
   }, []);
 
+  // Motivation vs Logic: session updates must stay scoped to one persisted record so independent sessions can diverge without sharing history or tool state.
+  const patchSession = useCallback((sessionId: string, updater: (session: CodeSpaceAgentSession) => CodeSpaceAgentSession) => {
+    let nextSession: CodeSpaceAgentSession | null = null;
+    setSessions((current) => {
+      const remaining: CodeSpaceAgentSession[] = [];
+      for (const session of current) {
+        if (session.id !== sessionId) {
+          remaining.push(session);
+          continue;
+        }
+        nextSession = updater(session);
+      }
+      return nextSession ? [nextSession, ...remaining] : current;
+    });
+    if (nextSession) {
+      void saveCodeSpaceSession(nextSession);
+    }
+  }, []);
+
+  const appendSessionMessage = useCallback(
+    (sessionId: string, message: { id: string; role: 'user' | 'assistant' | 'system' | 'tool'; content: string; createdAt: number }) => {
+      patchSession(sessionId, (session) => ({
+        ...session,
+        messages: [...session.messages, message],
+        updatedAt: Date.now(),
+      }));
+    },
+    [patchSession],
+  );
+
+  const updateSessionMessage = useCallback(
+    (sessionId: string, messageId: string, updater: (message: CodeSpaceAgentSession['messages'][number]) => CodeSpaceAgentSession['messages'][number]) => {
+      patchSession(sessionId, (session) => ({
+        ...session,
+        messages: session.messages.map((message) => (message.id === messageId ? updater(message) : message)),
+        updatedAt: Date.now(),
+      }));
+    },
+    [patchSession],
+  );
+
+  const upsertSessionToolCall = useCallback(
+    (sessionId: string, toolCall: Partial<CodeSpaceAgentSession['toolCalls'][number]> & { id: string; name: string }) => {
+      patchSession(sessionId, (session) => {
+        const existingIndex = session.toolCalls.findIndex((entry) => entry.id === toolCall.id);
+        const existing = existingIndex >= 0 ? session.toolCalls[existingIndex] : null;
+        const merged = {
+          id: toolCall.id,
+          name: toolCall.name,
+          status: toolCall.status ?? existing?.status ?? 'running',
+          summary: toolCall.summary ?? existing?.summary ?? '',
+          input: toolCall.input ?? existing?.input,
+          output: toolCall.output ?? existing?.output,
+          error: toolCall.error ?? existing?.error,
+          durationMs: toolCall.durationMs ?? existing?.durationMs,
+          createdAt: toolCall.createdAt ?? existing?.createdAt ?? Date.now(),
+          updatedAt: toolCall.updatedAt ?? Date.now(),
+        };
+        const nextToolCalls = [...session.toolCalls];
+        if (existingIndex >= 0) nextToolCalls[existingIndex] = merged;
+        else nextToolCalls.push(merged);
+        return { ...session, toolCalls: nextToolCalls, updatedAt: Date.now() };
+      });
+    },
+    [patchSession],
+  );
+
   const ensureSession = useCallback(() => {
-    if (activeSession) return activeSession;
+    if (activeSession && activeSession.projectId === activeProjectId) return activeSession;
     const session = createSession(activeProjectId);
     setActiveSessionId(session.id);
     updateSession(session);
@@ -972,8 +1074,257 @@ export function CodeSpaceWorkspace() {
     setActiveTabId(null);
   }, [activeTab, runFileAction]);
 
+  const handleRunAgent = useCallback(async (userPrompt: string) => {
+    const project = projects.find((item) => item.id === activeProjectId);
+    if (!project || !project.rootPath) return;
+
+    const session = ensureSession();
+    const now = Date.now();
+    const userMessage: CodeSpaceMessage = {
+      id: nowId('msg'),
+      role: 'user',
+      content: userPrompt,
+      createdAt: now,
+    };
+    const sessionWithPrompt: CodeSpaceAgentSession = {
+      ...session,
+      title: session.messages.length ? session.title : userPrompt.slice(0, 56),
+      status: 'running',
+      messages: [...session.messages, userMessage],
+      toolCallCount: 0,
+      updatedAt: now,
+    };
+
+    updateSession(sessionWithPrompt);
+    setActiveSessionId(sessionWithPrompt.id);
+    runningSessionIdRef.current = sessionWithPrompt.id;
+
+    const abortCtrl = new AbortController();
+    agentAbortRef.current = abortCtrl;
+    setAgentRunning(true);
+    setTerminalStream('');
+    setPendingDiffs([]);
+
+    const openTabs = tabs.map((tab) => tab.path).filter((path): path is string => Boolean(path));
+    const model = provider.provider === 'foundry' ? (provider.customModel ?? provider.model) : provider.model;
+    const apiKey = provider.apiKey || getApiKey(provider.provider);
+    const enableThinking = provider.provider === 'anthropic';
+    const latestHistory = sessionWithPrompt.messages;
+    let liveAssistantMessageId: string | null = null;
+    const liveToolMessageIds = new Map<string, string>();
+
+    const stringifyPreview = (value: unknown) => {
+      try {
+        const serialized = JSON.stringify(value, null, 1);
+        return serialized.length > 240 ? `${serialized.slice(0, 240)}…` : serialized;
+      } catch {
+        return String(value);
+      }
+    };
+
+    try {
+      const response = await fetch('/api/code-space/agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: sessionWithPrompt.id,
+          projectRoot: project.rootPath,
+          projectName: project.name,
+          messages: latestHistory,
+          model,
+          providerId: provider.provider,
+          apiKey,
+          endpoint: provider.endpoint,
+          openTabs,
+          toolBudget: sessionWithPrompt.toolBudget,
+          enableThinking,
+        }),
+        signal: abortCtrl.signal,
+      });
+
+      if (!response.body) {
+        setAgentRunning(false);
+        return;
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const event: AgentSSEEvent = JSON.parse(line.slice(6));
+            if (event.type === 'diff_proposed') {
+              setPendingDiffs((prev) => [...prev, {
+                diffId: event.diffId,
+                filePath: event.filePath,
+                oldContent: event.oldContent,
+                newContent: event.newContent,
+              }]);
+            } else if (event.type === 'terminal_chunk') {
+              setTerminalStream((prev) => prev + event.chunk);
+            } else if (event.type === 'tool_start') {
+              const toolMessageId = nowId('msg');
+              liveToolMessageIds.set(event.toolCallId, toolMessageId);
+              appendSessionMessage(sessionWithPrompt.id, {
+                id: toolMessageId,
+                role: 'tool',
+                content: `Started ${event.tool}: ${stringifyPreview(event.input)}`,
+                createdAt: Date.now(),
+              });
+              upsertSessionToolCall(sessionWithPrompt.id, {
+                id: event.toolCallId,
+                name: event.tool,
+                status: 'running',
+                summary: 'Running…',
+                input: event.input,
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+              });
+              patchSession(sessionWithPrompt.id, (current) => ({
+                ...current,
+                toolCallCount: current.toolCallCount + 1,
+                updatedAt: Date.now(),
+              }));
+            } else if (event.type === 'tool_result') {
+              const existingMessageId = liveToolMessageIds.get(event.toolCallId);
+              const toolContent = event.error
+                ? `Error in ${event.tool}: ${event.error}`
+                : `Finished ${event.tool}: ${stringifyPreview(event.output)}`;
+              if (existingMessageId) {
+                updateSessionMessage(sessionWithPrompt.id, existingMessageId, (message) => ({
+                  ...message,
+                  content: `${message.content}\n${toolContent}`,
+                }));
+              } else {
+                appendSessionMessage(sessionWithPrompt.id, {
+                  id: nowId('msg'),
+                  role: 'tool',
+                  content: toolContent,
+                  createdAt: Date.now(),
+                });
+              }
+              upsertSessionToolCall(sessionWithPrompt.id, {
+                id: event.toolCallId,
+                name: event.tool,
+                status: event.error ? 'error' : 'success',
+                summary: event.error ? event.error : `Completed in ${event.durationMs}ms`,
+                output: event.error ? { error: event.error } : event.output,
+                error: event.error,
+                durationMs: event.durationMs,
+              });
+            } else if (event.type === 'text_delta') {
+              if (!liveAssistantMessageId) {
+                liveAssistantMessageId = nowId('msg');
+                appendSessionMessage(sessionWithPrompt.id, {
+                  id: liveAssistantMessageId,
+                  role: 'assistant',
+                  content: event.delta,
+                  createdAt: Date.now(),
+                });
+              } else {
+                updateSessionMessage(sessionWithPrompt.id, liveAssistantMessageId, (message) => ({
+                  ...message,
+                  content: `${message.content}${event.delta}`,
+                }));
+              }
+            } else if (event.type === 'agent_done') {
+              const summary = event.summary.trim();
+              if (summary) {
+                if (!liveAssistantMessageId) {
+                  appendSessionMessage(sessionWithPrompt.id, {
+                    id: nowId('msg'),
+                    role: 'assistant',
+                    content: summary,
+                    createdAt: Date.now(),
+                  });
+                } else {
+                  updateSessionMessage(sessionWithPrompt.id, liveAssistantMessageId, (message) => ({
+                    ...message,
+                    content: summary,
+                  }));
+                }
+              }
+              patchSession(sessionWithPrompt.id, (current) => ({
+                ...current,
+                status: 'finalized',
+                updatedAt: Date.now(),
+              }));
+            } else if (event.type === 'agent_error') {
+              appendSessionMessage(sessionWithPrompt.id, {
+                id: nowId('msg'),
+                role: 'system',
+                content: `⚠ ${event.message}`,
+                createdAt: Date.now(),
+              });
+              patchSession(sessionWithPrompt.id, (current) => ({
+                ...current,
+                status: 'blocked',
+                updatedAt: Date.now(),
+              }));
+            }
+          } catch {
+            // Ignore malformed SSE chunks.
+          }
+        }
+      }
+    } catch (err) {
+      if (err instanceof Error && err.name !== 'AbortError') {
+        appendSessionMessage(sessionWithPrompt.id, {
+          id: nowId('msg'),
+          role: 'system',
+          content: `⚠ ${err.message}`,
+          createdAt: Date.now(),
+        });
+        patchSession(sessionWithPrompt.id, (current) => ({
+          ...current,
+          status: 'blocked',
+          updatedAt: Date.now(),
+        }));
+      }
+    } finally {
+      setAgentRunning(false);
+      agentAbortRef.current = null;
+      runningSessionIdRef.current = null;
+    }
+  }, [
+    activeProjectId,
+    appendSessionMessage,
+    ensureSession,
+    patchSession,
+    projects,
+    provider.apiKey,
+    provider.customModel,
+    provider.endpoint,
+    provider.model,
+    provider.provider,
+    tabs,
+    updateSession,
+    updateSessionMessage,
+    upsertSessionToolCall,
+  ]);
+
+  const handleCancelRun = useCallback(() => {
+    agentAbortRef.current?.abort();
+    setAgentRunning(false);
+    if (runningSessionIdRef.current) {
+      patchSession(runningSessionIdRef.current, (session) => ({
+        ...session,
+        status: 'blocked',
+        updatedAt: Date.now(),
+      }));
+    }
+  }, [patchSession]);
+
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
       const mod = event.metaKey || event.ctrlKey;
       if (!mod) {
         if (event.key === 'Escape') setModalOpen(false);
@@ -1017,58 +1368,6 @@ export function CodeSpaceWorkspace() {
     }));
     setTabs((current) => current.map((tab) => (tab.id === activeTab.id ? { ...tab, dirty: content !== fileContents[activeTab.id]?.content || tab.dirty } : tab)));
   };
-
-  const submitPrompt = useCallback(() => {
-    if (!prompt.trim()) return;
-    const session = ensureSession();
-    const intents = classifyCodeSpaceIntent(prompt);
-    const lifecycle = ['Plan', 'Apply', 'Review Diff', 'Run Checks', 'Finalize'];
-    const ts = Date.now();
-    const next: CodeSpaceAgentSession = {
-      ...session,
-      title: session.messages.length ? session.title : prompt.slice(0, 56),
-      status: intents.includes('answer/question') || intents.includes('repository_explanation') ? 'planning' : 'planning',
-      messages: [
-        ...session.messages,
-        { id: nowId('msg'), role: 'user', content: prompt, createdAt: ts },
-        {
-          id: nowId('msg'),
-          role: 'assistant',
-          content: `I classified this as ${intents.join(', ')}. I will inspect project context, prepare a plan, show reviewable diffs before risky changes, and run the safest discovered checks before finalizing.`,
-          createdAt: ts + 1,
-        },
-      ],
-      plan: [
-        `Gather context from ${activeProject?.name ?? 'the active project'}, open files, manifests, docs, tests, and current git diff.`,
-        'Produce a short implementation plan with acceptance criteria.',
-        'Apply changes as a reversible session changeset and show the diff.',
-        'Run relevant checks from package manifests or project config, then iterate on failures.',
-      ],
-      todos: lifecycle.map((text, index) => ({ id: `todo:${index}`, text, done: index === 0 })),
-      toolCalls: [
-        ...session.toolCalls,
-        {
-          id: nowId('tool'),
-          name: 'classify_task',
-          status: 'success',
-          summary: `Detected ${intents.length} intent${intents.length === 1 ? '' : 's'}: ${intents.join(', ')}`,
-          input: { prompt },
-          output: { intents },
-          createdAt: ts,
-          updatedAt: ts,
-        },
-      ],
-      updatedAt: ts,
-    };
-    updateSession(next);
-    setPrompt('');
-
-    if (intents.includes('system_diagram')) {
-      writeUiPreference('repoPath', activeProject?.rootPath ?? '');
-      writeUiPreference('repoSourceType', activeProject?.sourceType === 'github' ? 'github' : 'local');
-      setMode('multi-layer');
-    }
-  }, [activeProject, ensureSession, prompt, setMode, updateSession]);
 
   const routeToSystemDiagram = () => {
     if (!activeProject?.rootPath) return;
@@ -1170,15 +1469,6 @@ export function CodeSpaceWorkspace() {
 
   const activeContent = activeTab ? fileContents[activeTab.id]?.content ?? '' : '';
   const breadcrumbs = activeProject && activeTab ? [activeProject.name, ...activeTab.path.split('/').filter(Boolean)] : [];
-  const filteredSessions = sessions.filter((session) => {
-    if (session.projectId && activeProjectId && session.projectId !== activeProjectId) return false;
-    if (!sessionSearch) return true;
-    return `${session.title} ${session.messages.map((message) => message.content).join(' ')}`
-      .toLowerCase()
-      .includes(sessionSearch.toLowerCase());
-  });
-  const recentSessions = filteredSessions.filter((session) => !session.archived);
-  const archivedSessions = filteredSessions.filter((session) => session.archived);
   // Motivation vs Logic: showing a quick snapshot of the root entries keeps the preview actionable before any file is opened.
   const activeProjectPreviewKey = activeProject ? `${activeProject.id}:` : '';
   const activeProjectPreviewNodes = activeProjectPreviewKey ? treeChildren[activeProjectPreviewKey] ?? [] : [];
@@ -1466,61 +1756,23 @@ export function CodeSpaceWorkspace() {
 
       {rightVisible && (
         <aside className="flex min-h-0 shrink-0 flex-col border-l border-[#2a2a2a] bg-[#181818]" style={{ width: rightWidth }}>
-          <div className="flex h-11 items-center justify-between border-b border-[#2a2a2a] px-3">
-            <div className="flex items-center gap-2 text-sm font-semibold"><Bot size={16} className="text-accent" /> Agent Sessions</div>
-            <button type="button" onClick={() => { const session = createSession(activeProjectId); setActiveSessionId(session.id); updateSession(session); }} className="flex items-center gap-1 rounded border border-accent/40 bg-accent/15 px-2 py-1 text-[11px] text-accent">
-              <Plus size={13} /> New Session
-            </button>
-          </div>
-          <div className="space-y-3 border-b border-[#2a2a2a] p-3">
-            <div className="relative">
-              <Search size={13} className="absolute left-2 top-2.5 text-[#8b8b8b]" />
-              <input value={sessionSearch} onChange={(e) => setSessionSearch(e.target.value)} placeholder="Search sessions and agents" className="h-8 w-full rounded border border-[#2a2a2a] bg-[#151515] pl-7 pr-2 text-[12px]" />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <button type="button" onClick={() => setModalOpen(true)} className="rounded border border-[#2a2a2a] bg-[#252526] px-2 py-2 text-[12px] font-semibold hover:bg-[#2a2d2e]"><Sparkles className="mr-1 inline" size={13} /> Fresh Start</button>
-              <button type="button" disabled={!activeProject} onClick={routeToSystemDiagram} title={activeProject ? 'Route active project to Multi Layer' : 'Open, clone, or select a project first'} className="rounded border border-[#2a2a2a] bg-[#252526] px-2 py-2 text-[12px] font-semibold hover:bg-[#2a2d2e] disabled:cursor-not-allowed disabled:opacity-40"><Layers3 className="mr-1 inline" size={13} /> Generate Diagram</button>
-            </div>
-          </div>
-          <div className="min-h-0 flex-1 overflow-auto p-3">
-            <div className="mb-2 text-[11px] uppercase tracking-wider text-[#8b8b8b]">Recent</div>
-            {recentSessions.length ? recentSessions.map((session) => (
-              <SessionRow key={session.id} session={session} selectable />
-            )) : <div className="rounded border border-dashed border-[#37373d] p-3 text-[12px] text-[#8b8b8b]">No sessions yet.</div>}
-            <div className="mb-2 mt-5 text-[11px] uppercase tracking-wider text-[#8b8b8b]">Archived</div>
-            {archivedSessions.length ? archivedSessions.map((session) => (
-              <SessionRow key={session.id} session={session} />
-            )) : <div className="text-[12px] text-[#555]">Nothing archived.</div>}
-          </div>
-          <div className="border-t border-[#2a2a2a] p-3">
-            {!activeSession?.messages.length && (
-              <div className="mb-2 flex flex-wrap gap-1">
-                {DEFAULT_SESSION_EXAMPLES.map((example) => <button key={example} type="button" onClick={() => setPrompt(example)} className="rounded border border-[#2a2a2a] px-2 py-1 text-[10px] text-[#8b8b8b] hover:bg-[#252526]">{example}</button>)}
-              </div>
-            )}
-            {activeSession?.plan.length ? (
-              <div className="mb-3 rounded border border-[#2a2a2a] bg-[#151515] p-2 text-[11px]">
-                <div className="mb-1 font-semibold text-[#cccccc]">Lifecycle</div>
-                {activeSession.todos.map((todo) => <div key={todo.id} className={todo.done ? 'text-green-300' : 'text-[#8b8b8b]'}>{todo.done ? '✓' : '○'} {todo.text}</div>)}
-              </div>
-            ) : null}
-            <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Ask Code Space to plan, edit, debug, refactor, test, or explain…" className="h-24 w-full resize-none rounded border border-[#2a2a2a] bg-[#151515] p-2 text-[12px] outline-none focus:border-accent/60" />
-            <div className="mt-2 flex items-center justify-between">
-              <span className="text-[10px] text-[#8b8b8b]">Plan → Apply → Review Diff → Run Checks → Finalize</span>
-              <button type="button" onClick={submitPrompt} className="flex items-center gap-1 rounded border border-accent/40 bg-accent/20 px-3 py-1.5 text-[12px] font-semibold text-accent"><Play size={13} /> Send</button>
-            </div>
-            {/* Motivation vs Logic: Surfacing the config link right here keeps model/provider tweaks close to the prompt context so sessions stay uninterrupted. */}
-            <div className="mt-1 text-[10px]">
-            <button
-              type="button"
-              onClick={() => setProviderConfigOpen(true)}
-              className="text-accent underline decoration-[1px] underline-offset-2 hover:text-[#d4d4d4] focus-visible:outline-accent/70"
-            >
-                Open Model Configs
-              </button>
-            </div>
-          </div>
-        </aside>
+          <AgentPanel
+            session={activeSession}
+            sessions={sessions.filter((session) => !session.projectId || session.projectId === activeProjectId)}
+            isRunning={agentRunning}
+            toolBudget={activeSession?.toolBudget ?? 50}
+            providerSummary={`${provider.provider}/${provider.provider === 'foundry' ? provider.customModel ?? provider.model : provider.model}`}
+            onOpenModelConfig={() => setProviderConfigOpen(true)}
+            onGenerateDiagram={routeToSystemDiagram}
+            onOpenAppPlanner={() => setMode('custom-prompt')}
+            canGenerateDiagram={!!activeProject}
+            onSelectSession={(sessionId) => setActiveSessionId((current) => (current === sessionId ? null : sessionId))}
+            onRenameSession={renameSession}
+            onDeleteSession={(session) => void deleteSession(session)}
+            onSubmitPrompt={handleRunAgent}
+            onCancelRun={handleCancelRun}
+          />
+          </aside>
       )}
 
       {folderBrowserOpen && (
