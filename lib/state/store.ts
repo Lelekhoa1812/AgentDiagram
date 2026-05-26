@@ -115,7 +115,7 @@ export async function flushDraftSave(): Promise<void> {
   }
 }
 
-export type Mode = 'editor' | 'agent' | 'multi-layer' | 'custom-prompt';
+export type Mode = 'editor' | 'code-space' | 'agent' | 'multi-layer' | 'custom-prompt';
 export type ThemeMode = 'dark' | 'light';
 
 export type SelectionKind = 'node' | 'group' | 'edge' | null;

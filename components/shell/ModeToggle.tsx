@@ -1,20 +1,21 @@
 'use client';
 
-import { Bot, Code2, Layers3, Sparkles } from 'lucide-react';
+import { Bot, Code2, GalleryVerticalEnd, Layers3, Sparkles } from 'lucide-react';
 import { useDiagramStore, type Mode } from '@/lib/state/store';
 
 const MODES: Array<{ id: Mode; label: string; hint: string; icon: typeof Code2 }> = [
-  { id: 'editor', label: 'Code Editor', hint: 'DSL → diagram', icon: Code2 },
-  { id: 'agent', label: 'Agentic Repo', hint: 'Repo → diagram', icon: Bot },
+  { id: 'editor', label: 'Diagram Editor', hint: 'DSL → diagram', icon: Code2 },
+  { id: 'code-space', label: 'Code Space', hint: 'Agentic coding workspace', icon: GalleryVerticalEnd },
+  { id: 'agent', label: 'Single Layer', hint: 'Repo → single layer diagram', icon: Bot },
   { id: 'multi-layer', label: 'Multi Layer', hint: 'Repo → layered diagrams', icon: Layers3 },
-  { id: 'custom-prompt', label: 'Custom App', hint: 'Describe → ask → diagram', icon: Sparkles },
+  { id: 'custom-prompt', label: 'App Planner', hint: 'Describe → ask → diagram', icon: Sparkles },
 ];
 
 export function ModeToggle() {
   const mode = useDiagramStore((s) => s.mode);
   const setMode = useDiagramStore((s) => s.setMode);
   const activeIdx = MODES.findIndex((m) => m.id === mode);
-  const segmentWidth = 138;
+  const segmentWidth = 132;
   const offset = activeIdx * segmentWidth;
 
   return (
@@ -31,7 +32,7 @@ export function ModeToggle() {
             key={m.id}
             type="button"
             onClick={() => setMode(m.id)}
-            className={`surface-transition relative z-10 flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-[11px] uppercase tracking-wider ${
+            className={`surface-transition relative z-10 flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-[11px] uppercase tracking-wider whitespace-nowrap ${
               active ? 'text-ink-100' : 'text-ink-400 hover:text-ink-200'
             }`}
             style={{ width: segmentWidth }}

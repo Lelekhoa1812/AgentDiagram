@@ -5,7 +5,7 @@ import type { ProviderId } from '@/lib/agent/providers/types';
 
 const UI_PREFERENCES_KEY = 'agentdiagram:ui-preferences:v1';
 
-export type PersistedMode = 'editor' | 'agent' | 'multi-layer' | 'custom-prompt';
+export type PersistedMode = 'editor' | 'code-space' | 'agent' | 'multi-layer' | 'custom-prompt';
 export type PersistedTheme = 'dark' | 'light';
 export type PersistedDiagramType = 'architecture' | 'sequence' | 'class' | 'data-flow' | 'deployment';
 export type PersistedEditorTab = 'dsl' | 'ir' | 'diagnostics' | 'fix';
@@ -42,7 +42,7 @@ export interface UiPreferences {
   isInstructionVisible?: boolean;
 }
 
-const MODES = new Set<PersistedMode>(['editor', 'agent', 'multi-layer', 'custom-prompt']);
+const MODES = new Set<PersistedMode>(['editor', 'code-space', 'agent', 'multi-layer', 'custom-prompt']);
 const THEMES = new Set<PersistedTheme>(['dark', 'light']);
 const DIAGRAM_TYPES = new Set<PersistedDiagramType>(['architecture', 'sequence', 'class', 'data-flow', 'deployment']);
 const EDITOR_TABS = new Set<PersistedEditorTab>(['dsl', 'ir', 'diagnostics', 'fix']);
