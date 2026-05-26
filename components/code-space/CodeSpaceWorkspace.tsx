@@ -224,6 +224,8 @@ export function CodeSpaceWorkspace() {
   const [treeChildren, setTreeChildren] = useState<Record<string, CodeSpaceTreeNode[]>>({});
 
   // Derive a flat list of all known file paths for the @ mention feature.
+  // Note: only directories the user has expanded are loaded into treeChildren,
+  // so files inside collapsed directories will not appear in mention suggestions.
   const flatFilePaths = useMemo(() => {
     const paths: string[] = [];
     function collect(nodes: CodeSpaceTreeNode[]) {
