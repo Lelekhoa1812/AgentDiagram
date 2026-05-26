@@ -30,7 +30,7 @@ export function CollapsibleSection({
       >
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
           {open ? <ChevronDown size={11} className="text-[#8b8b8b]" /> : <ChevronRight size={11} className="text-[#8b8b8b]" />}
-          <span className="truncate text-[9px] font-semibold uppercase tracking-wider text-[#cccccc]">{title}</span>
+          <span className="truncate text-[10px] font-semibold uppercase tracking-wider text-[#cccccc]">{title}</span>
         </span>
         {rightSlot}
       </button>
