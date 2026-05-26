@@ -26,11 +26,11 @@ export function CollapsibleSection({
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-2 rounded border border-[#2a2a2a] bg-[#151515] px-3 py-2 text-left hover:bg-[#1b1b1b]"
+        className="flex w-full items-center gap-1.5 rounded border border-[#2a2a2a] bg-[#151515] px-2 py-1 text-left hover:bg-[#1b1b1b]"
       >
-        <span className="flex min-w-0 flex-1 items-center gap-2">
-          {open ? <ChevronDown size={14} className="text-[#8b8b8b]" /> : <ChevronRight size={14} className="text-[#8b8b8b]" />}
-          <span className="truncate text-[11px] font-semibold uppercase tracking-wider text-[#cccccc]">{title}</span>
+        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+          {open ? <ChevronDown size={11} className="text-[#8b8b8b]" /> : <ChevronRight size={11} className="text-[#8b8b8b]" />}
+          <span className="truncate text-[9px] font-semibold uppercase tracking-wider text-[#cccccc]">{title}</span>
         </span>
         {rightSlot}
       </button>

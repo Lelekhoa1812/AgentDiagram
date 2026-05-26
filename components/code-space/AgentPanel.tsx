@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Bot, CheckCircle2, Loader2, XCircle, Zap } from 'lucide-react';
 import type { CodeSpaceAgentSession, CodeSpaceMessage } from '@/lib/code-space/core';
+import type { CodeSpaceAgentMode } from '@/lib/code-space/agentModes';
+import { AgentModeSelector } from './AgentModeSelector';
 import { CollapsibleSection } from './CollapsibleSection';
 import { SessionListSection } from './SessionListSection';
 
@@ -20,9 +22,11 @@ interface AgentPanelProps {
     unifiedDiff?: string;
   }>;
   providerSummary: string;
+  agentMode: CodeSpaceAgentMode;
   onOpenModelConfig: () => void;
   onGenerateDiagram: () => void;
   onOpenAppPlanner: () => void;
+  onAgentModeChange: (mode: CodeSpaceAgentMode) => void;
   canGenerateDiagram: boolean;
   onSelectSession: (sessionId: string | null) => void;
   onRenameSession: (session: CodeSpaceAgentSession) => void;
@@ -53,9 +57,11 @@ export function AgentPanel({
   toolBudget,
   pendingDiffs,
   providerSummary,
+  agentMode,
   onOpenModelConfig,
   onGenerateDiagram,
   onOpenAppPlanner,
+  onAgentModeChange,
   canGenerateDiagram,
   onSelectSession,
   onRenameSession,
@@ -195,7 +201,7 @@ export function AgentPanel({
         </CollapsibleSection>
 
         <CollapsibleSection
-          title="Patch Review"
+          title="Review"
           rightSlot={<span className="text-[10px] text-[#6d6d6d]">{pendingDiffs.length}</span>}
         >
           <div className="space-y-2 rounded border border-[#2a2a2a] bg-[#111111] p-2">
@@ -368,6 +374,9 @@ export function AgentPanel({
           >
             App Planner
           </button>
+          <div>
+            <AgentModeSelector mode={agentMode} disabled={isRunning} onChange={onAgentModeChange} />
+          </div>
         </div>
       </form>
     </div>
