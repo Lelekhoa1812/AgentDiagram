@@ -169,7 +169,9 @@ export function AgentPanel({
 
         <CollapsibleSection
           title="Plan"
-          rightSlot={<span className="text-[10px] text-[#6d6d6d]">{session?.plan.length ?? 0}</span>}
+          defaultOpen={false}
+          compact
+          rightSlot={<span className="text-[9px] text-[#6d6d6d]">{session?.plan.length ?? 0}</span>}
         >
           <div className="space-y-1 rounded border border-[#2a2a2a] bg-[#111111] p-2">
             {session?.plan.length ? (
@@ -187,7 +189,9 @@ export function AgentPanel({
 
         <CollapsibleSection
           title="TODO"
-          rightSlot={<span className="text-[10px] text-[#6d6d6d]">{session?.todos.filter((todo) => todo.done).length ?? 0}/{session?.todos.length ?? 0}</span>}
+          defaultOpen={false}
+          compact
+          rightSlot={<span className="text-[9px] text-[#6d6d6d]">{session?.todos.filter((todo) => todo.done).length ?? 0}/{session?.todos.length ?? 0}</span>}
         >
           <div className="space-y-1 rounded border border-[#2a2a2a] bg-[#111111] p-2">
             {session?.todos.length ? (
@@ -205,7 +209,9 @@ export function AgentPanel({
 
         <CollapsibleSection
           title="Review"
-          rightSlot={<span className="text-[10px] text-[#6d6d6d]">{pendingDiffs.length}</span>}
+          defaultOpen={false}
+          compact
+          rightSlot={<span className="text-[9px] text-[#6d6d6d]">{pendingDiffs.length}</span>}
         >
           <div className="space-y-2 rounded border border-[#2a2a2a] bg-[#111111] p-2">
             {pendingDiffs.length ? (
@@ -237,7 +243,9 @@ export function AgentPanel({
 
         <CollapsibleSection
           title="Validation"
-          rightSlot={<span className="text-[10px] text-[#6d6d6d]">{session?.verificationResults.length ?? 0}</span>}
+          defaultOpen={false}
+          compact
+          rightSlot={<span className="text-[9px] text-[#6d6d6d]">{session?.verificationResults.length ?? 0}</span>}
         >
           <div className="space-y-1 rounded border border-[#2a2a2a] bg-[#111111] p-2">
             {session?.verificationResults.length ? (
@@ -260,7 +268,9 @@ export function AgentPanel({
 
         <CollapsibleSection
           title="Tool"
-          rightSlot={<span className="text-[10px] text-[#6d6d6d]">{toolCallCount}/{toolBudget}</span>}
+          defaultOpen={false}
+          compact
+          rightSlot={<span className="text-[9px] text-[#6d6d6d]">{toolCallCount}/{toolBudget}</span>}
         >
           <div className="rounded border border-[#2a2a2a] bg-[#111111] p-2">
             <div className="mb-2 rounded bg-[#21262d]">
@@ -366,26 +376,26 @@ export function AgentPanel({
             </button>
           )}
         </div>
-        <div className="mt-2 flex items-center gap-3 px-1 text-[10px]">
-          <button
-            type="button"
-            onClick={onGenerateDiagram}
-            disabled={!canGenerateDiagram || isRunning}
-            title={canGenerateDiagram ? 'Open the current project in Multi Layer mode' : 'Open a project first'}
-            className="text-[#58a6ff] underline underline-offset-2 hover:text-[#79b8ff] disabled:cursor-not-allowed disabled:text-[#6e7681] disabled:no-underline"
-          >
-            Generate Diagram
-          </button>
-          <button
-            type="button"
-            onClick={onOpenAppPlanner}
-            className="text-[#58a6ff] underline underline-offset-2 hover:text-[#79b8ff]"
-          >
-            App Planner
-          </button>
-          <div>
-            <AgentModeSelector mode={agentMode} disabled={isRunning} onChange={onAgentModeChange} />
+        <div className="mt-1 flex items-center justify-between px-0.5">
+          <div className="flex items-center gap-3 text-[10px]">
+            <button
+              type="button"
+              onClick={onGenerateDiagram}
+              disabled={!canGenerateDiagram || isRunning}
+              title={canGenerateDiagram ? 'Open the current project in Multi Layer mode' : 'Open a project first'}
+              className="text-[#58a6ff] underline underline-offset-2 hover:text-[#79b8ff] disabled:cursor-not-allowed disabled:text-[#6e7681] disabled:no-underline"
+            >
+              Generate Diagram
+            </button>
+            <button
+              type="button"
+              onClick={onOpenAppPlanner}
+              className="text-[#58a6ff] underline underline-offset-2 hover:text-[#79b8ff]"
+            >
+              App Planner
+            </button>
           </div>
+          <AgentModeSelector mode={agentMode} disabled={isRunning} onChange={onAgentModeChange} />
         </div>
       </form>
     </div>
