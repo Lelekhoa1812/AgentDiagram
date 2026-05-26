@@ -355,7 +355,12 @@ export function AgentPanel({
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
-                handleSubmit(event as unknown as FormEvent);
+                const value = prompt.trim();
+                if (value && !isRunning) {
+                  onSubmitPrompt(value);
+                  setPrompt('');
+                  if (textareaRef.current) textareaRef.current.style.height = 'auto';
+                }
               }
             }}
             placeholder="Describe a task..."
