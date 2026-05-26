@@ -1,0 +1,21 @@
+import { describe, expect, it } from 'vitest';
+import { createDefaultToolRegistry } from '../toolRegistry';
+
+describe('createDefaultToolRegistry', () => {
+  it('registers safe read tools and approval-gated risky tools', () => {
+    const registry = createDefaultToolRegistry();
+
+    expect(registry.get('read_file')?.riskLevel).toBe('safe');
+    expect(registry.get('search_text')?.permission).toBe('auto');
+    expect(registry.get('apply_patch')?.riskLevel).toBe('medium');
+    expect(registry.get('run_command')?.permission).toBe('approval_required');
+  });
+
+  it('exposes JSON schemas for model/tool callers', () => {
+    const registry = createDefaultToolRegistry();
+    const schemas = registry.list().map((tool) => tool.inputSchema);
+
+    expect(schemas.length).toBeGreaterThan(4);
+    expect(schemas.every((schema) => schema.type === 'object')).toBe(true);
+  });
+});

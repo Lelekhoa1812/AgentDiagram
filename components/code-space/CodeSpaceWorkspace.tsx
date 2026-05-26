@@ -262,6 +262,8 @@ export function CodeSpaceWorkspace() {
     filePath: string;
     oldContent: string;
     newContent: string;
+    explanation?: string;
+    unifiedDiff?: string;
   }>>([]);
   const [terminalStream, setTerminalStream] = useState('');
   const [agentChangesets, setAgentChangesets] = useState<Array<{
@@ -1167,9 +1169,45 @@ export function CodeSpaceWorkspace() {
                 filePath: event.filePath,
                 oldContent: event.oldContent,
                 newContent: event.newContent,
+                explanation: event.explanation,
+                unifiedDiff: event.unifiedDiff,
               }]);
             } else if (event.type === 'terminal_chunk') {
               setTerminalStream((prev) => prev + event.chunk);
+            } else if (event.type === 'plan_created') {
+              patchSession(sessionWithPrompt.id, (current) => ({
+                ...current,
+                plan: event.items,
+                updatedAt: Date.now(),
+              }));
+            } else if (event.type === 'todo_created') {
+              patchSession(sessionWithPrompt.id, (current) => ({
+                ...current,
+                todos: current.todos.some((todo) => todo.id === event.todo.id)
+                  ? current.todos
+                  : [...current.todos, event.todo],
+                updatedAt: Date.now(),
+              }));
+            } else if (event.type === 'todo_updated') {
+              patchSession(sessionWithPrompt.id, (current) => ({
+                ...current,
+                todos: current.todos.map((todo) => (todo.id === event.todoId ? { ...todo, done: event.done } : todo)),
+                updatedAt: Date.now(),
+              }));
+            } else if (event.type === 'validation_result') {
+              patchSession(sessionWithPrompt.id, (current) => ({
+                ...current,
+                verificationResults: [
+                  ...current.verificationResults.filter((result) => result.id !== event.id),
+                  {
+                    id: event.id,
+                    command: event.command,
+                    status: event.status,
+                    output: event.output,
+                  },
+                ],
+                updatedAt: Date.now(),
+              }));
             } else if (event.type === 'tool_start') {
               const toolMessageId = nowId('msg');
               liveToolMessageIds.set(event.toolCallId, toolMessageId);
@@ -1322,6 +1360,69 @@ export function CodeSpaceWorkspace() {
       }));
     }
   }, [patchSession]);
+
+  const acceptPendingDiff = useCallback(
+    async (diffId: string) => {
+      const diff = pendingDiffs.find((item) => item.diffId === diffId);
+      if (!diff || !activeProject?.rootPath) return;
+      const session = activeSession ?? ensureSession();
+      try {
+        const response = await fetch('/api/code-space/patches', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'apply',
+            rootPath: activeProject.rootPath,
+            projectId: activeProject.id,
+            runId: session.id,
+            patchId: diff.diffId,
+            files: [
+              {
+                path: diff.filePath,
+                beforeContent: diff.oldContent,
+                afterContent: diff.newContent,
+              },
+            ],
+          }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error ?? 'Patch apply failed');
+        const acceptedAt = Date.now();
+        setPendingDiffs((current) => current.filter((item) => item.diffId !== diffId));
+        setAgentChangesets((current) => [
+          ...current,
+          {
+            filePath: diff.filePath,
+            beforeContent: diff.oldContent,
+            afterContent: diff.newContent,
+            acceptedAt,
+          },
+        ]);
+        patchSession(session.id, (current) => ({
+          ...current,
+          filesChanged: Array.from(new Set([...current.filesChanged, diff.filePath])),
+          agentChangesets: [
+            ...current.agentChangesets,
+            {
+              filePath: diff.filePath,
+              beforeContent: diff.oldContent,
+              afterContent: diff.newContent,
+              acceptedAt,
+            },
+          ],
+          updatedAt: Date.now(),
+        }));
+        await refreshGitStatus(activeProject);
+      } catch (error) {
+        setError(error instanceof Error ? error.message : String(error));
+      }
+    },
+    [activeProject, activeSession, ensureSession, patchSession, pendingDiffs, refreshGitStatus],
+  );
+
+  const rejectPendingDiff = useCallback((diffId: string) => {
+    setPendingDiffs((current) => current.filter((item) => item.diffId !== diffId));
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -1761,6 +1862,7 @@ export function CodeSpaceWorkspace() {
             sessions={sessions.filter((session) => !session.projectId || session.projectId === activeProjectId)}
             isRunning={agentRunning}
             toolBudget={activeSession?.toolBudget ?? 50}
+            pendingDiffs={pendingDiffs}
             providerSummary={`${provider.provider}/${provider.provider === 'foundry' ? provider.customModel ?? provider.model : provider.model}`}
             onOpenModelConfig={() => setProviderConfigOpen(true)}
             onGenerateDiagram={routeToSystemDiagram}
@@ -1771,6 +1873,8 @@ export function CodeSpaceWorkspace() {
             onDeleteSession={(session) => void deleteSession(session)}
             onSubmitPrompt={handleRunAgent}
             onCancelRun={handleCancelRun}
+            onAcceptDiff={(diffId) => void acceptPendingDiff(diffId)}
+            onRejectDiff={rejectPendingDiff}
           />
           </aside>
       )}

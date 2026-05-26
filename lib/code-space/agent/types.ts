@@ -1,9 +1,14 @@
 export type AgentSSEEvent =
   | { type: 'text_delta'; delta: string }
+  | { type: 'structured_event'; event: import('@/lib/code-space/runtime').AgentEvent }
+  | { type: 'plan_created'; items: string[] }
+  | { type: 'todo_created'; todo: { id: string; text: string; done: boolean } }
+  | { type: 'todo_updated'; todoId: string; done: boolean }
   | { type: 'tool_start'; toolCallId: string; tool: string; input: unknown }
   | { type: 'tool_result'; toolCallId: string; tool: string; output: unknown; durationMs: number; error?: string }
-  | { type: 'diff_proposed'; diffId: string; filePath: string; oldContent: string; newContent: string }
+  | { type: 'diff_proposed'; diffId: string; filePath: string; oldContent: string; newContent: string; explanation?: string; unifiedDiff?: string }
   | { type: 'terminal_chunk'; chunk: string }
+  | { type: 'validation_result'; id: string; command: string; status: 'passed' | 'failed' | 'skipped'; output: string }
   | { type: 'lint_errors'; filePath: string; errors: Array<{ file: string; line: number; col: number; severity: 'error' | 'warning'; message: string; rule?: string }> }
   | { type: 'agent_done'; summary: string; filesChanged: string[] }
   | { type: 'agent_error'; message: string; recoverable: boolean }

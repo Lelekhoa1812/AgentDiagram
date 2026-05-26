@@ -11,6 +11,14 @@ interface AgentPanelProps {
   sessions: CodeSpaceAgentSession[];
   isRunning: boolean;
   toolBudget: number;
+  pendingDiffs: Array<{
+    diffId: string;
+    filePath: string;
+    oldContent: string;
+    newContent: string;
+    explanation?: string;
+    unifiedDiff?: string;
+  }>;
   providerSummary: string;
   onOpenModelConfig: () => void;
   onGenerateDiagram: () => void;
@@ -21,6 +29,8 @@ interface AgentPanelProps {
   onDeleteSession: (session: CodeSpaceAgentSession) => void;
   onSubmitPrompt: (prompt: string) => void;
   onCancelRun: () => void;
+  onAcceptDiff: (diffId: string) => void;
+  onRejectDiff: (diffId: string) => void;
 }
 
 function renderMessageText(message: CodeSpaceMessage) {
@@ -41,6 +51,7 @@ export function AgentPanel({
   sessions,
   isRunning,
   toolBudget,
+  pendingDiffs,
   providerSummary,
   onOpenModelConfig,
   onGenerateDiagram,
@@ -51,6 +62,8 @@ export function AgentPanel({
   onDeleteSession,
   onSubmitPrompt,
   onCancelRun,
+  onAcceptDiff,
+  onRejectDiff,
 }: AgentPanelProps) {
   const [prompt, setPrompt] = useState('');
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
@@ -144,6 +157,97 @@ export function AgentPanel({
           )}
           <div ref={chatEndRef} />
         </div>
+
+        <CollapsibleSection
+          title="Plan"
+          rightSlot={<span className="text-[10px] text-[#6d6d6d]">{session?.plan.length ?? 0}</span>}
+        >
+          <div className="space-y-1 rounded border border-[#2a2a2a] bg-[#111111] p-2">
+            {session?.plan.length ? (
+              session.plan.map((item, index) => (
+                <div key={`${item}:${index}`} className="flex gap-2 text-[10px] leading-4 text-[#c9d1d9]">
+                  <span className="text-[#6e7681]">{index + 1}.</span>
+                  <span>{item}</span>
+                </div>
+              ))
+            ) : (
+              <p className="text-[10px] text-[#6e7681]">No visible plan yet</p>
+            )}
+          </div>
+        </CollapsibleSection>
+
+        <CollapsibleSection
+          title="TODO"
+          rightSlot={<span className="text-[10px] text-[#6d6d6d]">{session?.todos.filter((todo) => todo.done).length ?? 0}/{session?.todos.length ?? 0}</span>}
+        >
+          <div className="space-y-1 rounded border border-[#2a2a2a] bg-[#111111] p-2">
+            {session?.todos.length ? (
+              session.todos.map((todo) => (
+                <div key={todo.id} className="flex items-start gap-2 text-[10px] leading-4">
+                  <span className={todo.done ? 'text-[#3fb950]' : 'text-[#8b949e]'}>{todo.done ? '✓' : '○'}</span>
+                  <span className={todo.done ? 'text-[#8b949e] line-through' : 'text-[#c9d1d9]'}>{todo.text}</span>
+                </div>
+              ))
+            ) : (
+              <p className="text-[10px] text-[#6e7681]">TODOs appear after planning starts</p>
+            )}
+          </div>
+        </CollapsibleSection>
+
+        <CollapsibleSection
+          title="Patch Review"
+          rightSlot={<span className="text-[10px] text-[#6d6d6d]">{pendingDiffs.length}</span>}
+        >
+          <div className="space-y-2 rounded border border-[#2a2a2a] bg-[#111111] p-2">
+            {pendingDiffs.length ? (
+              pendingDiffs.map((diff) => (
+                <div key={diff.diffId} className="rounded border border-[#30363d] bg-[#0f1114]">
+                  <div className="flex items-center gap-2 border-b border-[#1f1f1f] px-2 py-1">
+                    <span className="truncate text-[10px] text-[#e6edf3]">{diff.filePath}</span>
+                    <span className="ml-auto text-[9px] uppercase tracking-wider text-[#f0883e]">approval required</span>
+                  </div>
+                  {diff.explanation && <p className="px-2 pt-2 text-[10px] leading-4 text-[#8b949e]">{diff.explanation}</p>}
+                  <pre className="max-h-48 overflow-auto px-2 py-2 text-[9px] leading-4 text-[#c9d1d9]">
+                    {diff.unifiedDiff ?? `${diff.oldContent}\n---\n${diff.newContent}`}
+                  </pre>
+                  <div className="flex justify-end gap-2 border-t border-[#1f1f1f] px-2 py-1.5">
+                    <button type="button" onClick={() => onRejectDiff(diff.diffId)} className="rounded border border-[#30363d] px-2 py-1 text-[10px] text-[#f85149] hover:bg-[#2d1517]">
+                      Reject
+                    </button>
+                    <button type="button" onClick={() => onAcceptDiff(diff.diffId)} className="rounded bg-[#238636] px-2 py-1 text-[10px] text-white hover:bg-[#2ea043]">
+                      Apply
+                    </button>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <p className="text-[10px] text-[#6e7681]">Patch proposals will require approval here</p>
+            )}
+          </div>
+        </CollapsibleSection>
+
+        <CollapsibleSection
+          title="Validation"
+          rightSlot={<span className="text-[10px] text-[#6d6d6d]">{session?.verificationResults.length ?? 0}</span>}
+        >
+          <div className="space-y-1 rounded border border-[#2a2a2a] bg-[#111111] p-2">
+            {session?.verificationResults.length ? (
+              session.verificationResults.map((result) => (
+                <div key={result.id} className="rounded border border-[#1f1f1f] bg-[#0f1114] px-2 py-1">
+                  <div className="flex items-center gap-2 text-[10px]">
+                    <span className={result.status === 'passed' ? 'text-[#3fb950]' : result.status === 'failed' ? 'text-[#f85149]' : 'text-[#f0883e]'}>
+                      {result.status}
+                    </span>
+                    <span className="truncate text-[#c9d1d9]">{result.command}</span>
+                  </div>
+                  {result.output && <pre className="mt-1 max-h-24 overflow-auto text-[9px] leading-4 text-[#8b949e]">{result.output}</pre>}
+                </div>
+              ))
+            ) : (
+              <p className="text-[10px] text-[#6e7681]">Validation output will stream here</p>
+            )}
+          </div>
+        </CollapsibleSection>
 
         <CollapsibleSection
           title="Tool"
