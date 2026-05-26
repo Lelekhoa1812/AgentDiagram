@@ -11,6 +11,9 @@ import type { Diagram } from '../ir/types';
 import type { LayoutOptions, LayoutResult } from './elk';
 
 const MAX_ENTRIES = 20;
+// Bump when cacheable routing behavior changes so refreshes do not replay
+// stale edge geometry from a previous routing strategy.
+const ROUTING_CACHE_VERSION = 2;
 
 // The cache — plain Map used as an LRU (Map insertion order is stable in V8).
 const cache = new Map<string, LayoutResult>();
@@ -33,6 +36,7 @@ function djb2(s: string): number {
  */
 export function diagramHash(diagram: Diagram, opts: LayoutOptions): string {
   const structural = {
+    routingCacheVersion: ROUTING_CACHE_VERSION,
     nodes: diagram.nodes.map((n) => ({
       id: n.id,
       parentId: n.parentId,

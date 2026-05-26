@@ -9,13 +9,13 @@ import {
   useRef,
   useState,
 } from 'react';
-import { useDiagramStore } from '@/lib/state/store';
+import { flushDraftSave, useDiagramStore } from '@/lib/state/store';
 import { compile } from '@/lib/dsl/compiler';
 import { runLayout } from '@/lib/layout/strategies';
 import { buildScene, type SceneResult } from '@/lib/render/svgScene';
 import type { LayoutResult } from '@/lib/layout/elk';
 import type { Point } from '@/lib/ir/types';
-import { edgeLaneOffsets, routeEdgePath } from '@/lib/render/edgePath';
+import { edgeLaneOffsets, hasNodeGroupOverrides, routeEdgePath } from '@/lib/render/edgePath';
 import { routeEdgesProgressively, type RoutedEdgePath } from '@/lib/render/edgeRouter';
 import { getCachedLayout, cacheLayoutResult } from '@/lib/cache/indexdbCache';
 import { diagramHash } from '@/lib/layout/layoutCache';
@@ -437,11 +437,20 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
     // Without this, handles are positioned on the prerouted path while drag
     // operates on the re-computed routeEdgePath — they use different point arrays
     // and the segment index becomes invalid, causing the edge to jump on first drag.
+    // Root Cause vs Logic: worker-routed paths were being reused after unrelated
+    // component moves, so edge handles could anchor to a stale route that still
+    // cut through the current layout. Once any node or group override exists, we
+    // recompute the live route from the current geometry before starting a drag.
     const hasConnectedOverride =
       !!(overrides.nodes[edge.source] || overrides.nodes[edge.target] ||
          overrides.groups[edge.source] || overrides.groups[edge.target]);
     const hasEdgeBendOverride = !!(overrides.edges[edgeId]?.bends?.length);
-    if (!hasConnectedOverride && !hasEdgeBendOverride && preRoutedEdges) {
+    if (
+      !hasNodeGroupOverrides(overrides) &&
+      !hasConnectedOverride &&
+      !hasEdgeBendOverride &&
+      preRoutedEdges
+    ) {
       const prerouted = preRoutedEdges.get(edgeId);
       if (prerouted) return prerouted.points;
     }
@@ -747,6 +756,12 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle>(function DiagramCan
   };
 
   const onPointerUp = () => {
+    if (drag.current) {
+      // Root Cause vs Logic: drag movement streams a burst of override updates,
+      // so we flush on pointer-up to make sure the final geometry lands in the
+      // same persisted snapshot the user sees on screen.
+      void flushDraftSave();
+    }
     drag.current = null;
     // Restore the default CSS cursor after any drag type (edge-segment drag
     // sets an inline cursor to override .diagram-canvas.dragging).

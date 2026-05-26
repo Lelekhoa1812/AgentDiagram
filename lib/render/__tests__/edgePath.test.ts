@@ -129,6 +129,50 @@ describe('routeEdgePath', () => {
     expect(pathAvoidsRect(routed!.points, obstacle)).toBe(true);
   });
 
+  it('keeps obstacle-aware routing in large diagrams', () => {
+    const layout = layoutResult();
+    const obstacle = { x: 120, y: -20, width: 60, height: 80 };
+    layout.nodes.set('c', obstacle);
+
+    for (let i = 0; i < 61; i++) {
+      layout.nodes.set(`extra-${i}`, {
+        x: 500 + i * 20,
+        y: 500 + (i % 4) * 20,
+        width: 16,
+        height: 16,
+      });
+    }
+
+    const routed = routeEdgePath(edge(), layout);
+
+    expect(routed).not.toBeNull();
+    expect(segmentsAreOrthogonal(routed!.points)).toBe(true);
+    expect(pathAvoidsRect(routed!.points, obstacle)).toBe(true);
+  });
+
+  it('routes around the nearest blocker even with many decoys', () => {
+    const layout = {
+      ...layoutResult(),
+      nodes: new Map(layoutResult().nodes),
+    };
+    layout.nodes.set('c', { x: 180, y: -20, width: 60, height: 80 });
+
+    for (let i = 0; i < 30; i++) {
+      layout.nodes.set(`decoy-${i}`, {
+        x: 20 + i * 10,
+        y: i % 2 === 0 ? 140 : -120,
+        width: 18,
+        height: 18,
+      });
+    }
+
+    const routed = routeEdgePath(edge(), layout);
+
+    expect(routed).not.toBeNull();
+    expect(segmentsAreOrthogonal(routed!.points)).toBe(true);
+    expect(pathAvoidsRect(routed!.points, { x: 180, y: -20, width: 60, height: 80 })).toBe(true);
+  });
+
   it('routes fractional ELK layouts without exploding grid search', async () => {
     const dsl = `Core Inventory [color: blue] {
   Asset Master

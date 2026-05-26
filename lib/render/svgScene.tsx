@@ -19,7 +19,18 @@ import { paletteFor, themeFor, type RenderThemeMode } from './theme';
 import { getIcon } from '../icons/registry';
 import { ARROW_FWD_ID, ARROW_BWD_ID, ARROW_THICK_ID, MARKER_DEFS } from './markers';
 import { edgeLabelSize, groupTitleSize } from '../layout/measure';
-import { edgeLaneOffsets, routeEdgePath, type RoutedEdgePath } from './edgePath';
+import {
+  collectLabelObstacles,
+  placeEdgeLabel,
+  rectAtCenter,
+  type RectLike,
+} from './labelPlacement';
+import {
+  edgeLaneOffsets,
+  hasNodeGroupOverrides,
+  routeEdgePath,
+  type RoutedEdgePath,
+} from './edgePath';
 
 export interface SceneOptions {
   selectedId?: string | null;
@@ -86,6 +97,8 @@ export function buildScene(
   const theme = themeFor(opts.theme);
   const groupsById = new Map(diagram.groups.map((g) => [g.id, g]));
   const edgeOffsets = edgeLaneOffsets(diagram.edges);
+  const labelObstacles = collectLabelObstacles(layout, opts.overrides);
+  const edgeLabelRects: RectLike[] = [];
 
   // ── Viewport culling ─────────────────────────────────────────────────────
   // When the caller provides a viewport, compute the visible rect in scene
@@ -274,18 +287,19 @@ export function buildScene(
   function renderEdge(edge: IREdge): React.ReactElement | null {
     if (!isEdgeVisible(edge.id)) return null; // viewport culling (fast check before routing)
 
-    // Use the worker pre-routed path when the edge and its connected nodes have
-    // not been moved by the user.  As soon as any position override is present
-    // we recompute synchronously via routeEdgePath so arrows always connect to
-    // the nodes' current (overridden) positions instead of their layout-time
-    // positions.
+    // Root Cause vs Logic: worker-routed edges were being reused after node or
+    // group overrides changed, so arrows could keep following the pristine
+    // layout and cut straight through moved components. Only reuse the cached
+    // worker path when the geometry is still pristine; any dragged component
+    // forces a fresh obstacle-aware route from the current layout state.
     const hasConnectedOverride =
       !!(opts.overrides?.nodes?.[edge.source] ||
          opts.overrides?.nodes?.[edge.target] ||
          opts.overrides?.groups?.[edge.source] ||
          opts.overrides?.groups?.[edge.target]);
     const hasEdgeBendOverride = !!(opts.overrides?.edges?.[edge.id]?.bends?.length);
-    const shouldUsePrerouted = !hasConnectedOverride && !hasEdgeBendOverride;
+    const shouldUsePrerouted =
+      !hasNodeGroupOverrides(opts.overrides) && !hasConnectedOverride && !hasEdgeBendOverride;
     const prerouted = shouldUsePrerouted ? opts.preRoutedEdges?.get(edge.id) : undefined;
 
     if (
@@ -307,6 +321,43 @@ export function buildScene(
       edge.kind === 'bwd' || edge.kind === 'bi' ? `url(#${ARROW_BWD_ID})` : undefined;
     const dash = edge.kind === 'dashed' ? '4 4' : undefined;
     const strokeWidth = edge.kind === 'thick' ? 2 : 1.1;
+    let label: React.ReactElement | null = null;
+    if (edge.label) {
+      const labelSize = edgeLabelSize(edge.label);
+      // Motivation vs Logic: labels are placed greedily so each new annotation
+      // treats earlier labels and nearby components as already occupied space.
+      const labelCenter = placeEdgeLabel(routed.points, labelSize, edgeLabelRects, labelObstacles);
+      const labelRect = rectAtCenter(labelCenter, labelSize);
+      edgeLabelRects.push(labelRect);
+      label = (
+        <g data-kind="edge-label" transform={`translate(${labelCenter.x}, ${labelCenter.y})`}>
+          <rect
+            x={-labelSize.width / 2}
+            y={-labelSize.height / 2}
+            width={labelSize.width}
+            height={labelSize.height}
+            rx={5}
+            ry={5}
+            fill={theme.background}
+            fillOpacity={0.86}
+            stroke={isSelected ? theme.edgeHover : theme.edgeStroke}
+            strokeOpacity={0.35}
+            strokeWidth={0.8}
+          />
+          <text
+            x={0}
+            y={0}
+            fill={theme.labelFill}
+            fontSize={9.5}
+            fontFamily="Inter, sans-serif"
+            textAnchor="middle"
+            dominantBaseline="middle"
+          >
+            {edge.label}
+          </text>
+        </g>
+      );
+    }
 
     return (
       <g key={`e-${edge.id}`} data-id={edge.id} data-kind="edge">
@@ -391,48 +442,7 @@ export function buildScene(
               </g>
             );
           })}
-        {edge.label &&
-          (() => {
-            const labelSize = edgeLabelSize(edge.label);
-            const selfRect = edge.source === edge.target ? rectFor(edge.source) : null;
-            const labelPoint = selfRect
-              ? {
-                  x: selfRect.x + selfRect.width + labelSize.width / 2 + 14,
-                  y: selfRect.y + selfRect.height / 2,
-                }
-              : routed.labelPoint;
-            return (
-              <g
-                data-kind="edge-label"
-                transform={`translate(${labelPoint.x}, ${labelPoint.y - 4})`}
-              >
-                <rect
-                  x={-labelSize.width / 2}
-                  y={-labelSize.height / 2}
-                  width={labelSize.width}
-                  height={labelSize.height}
-                  rx={5}
-                  ry={5}
-                  fill={theme.background}
-                  fillOpacity={0.86}
-                  stroke={isSelected ? theme.edgeHover : theme.edgeStroke}
-                  strokeOpacity={0.35}
-                  strokeWidth={0.8}
-                />
-                <text
-                  x={0}
-                  y={0}
-                  fill={theme.labelFill}
-                  fontSize={9.5}
-                  fontFamily="Inter, sans-serif"
-                  textAnchor="middle"
-                  dominantBaseline="middle"
-                >
-                  {edge.label}
-                </text>
-              </g>
-            );
-          })()}
+        {label}
       </g>
     );
   }

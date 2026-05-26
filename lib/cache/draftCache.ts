@@ -5,8 +5,8 @@
  * so changes survive page refreshes even when localStorage runs out of quota.
  *
  * Each draft is keyed by the active project ID, or "scratch" when no
- * project tab is open. Writes are debounced at the store level (800 ms) so
- * rapid keystrokes and drag events are batched into a single IDB write.
+ * project tab is open. Writes are coalesced by the store so rapid keystrokes
+ * and drag events collapse into the latest IndexedDB snapshot.
  *
  * This is intentionally a separate database from `diagram-cache` (layout
  * results) so the two caches can be cleared independently and a schema

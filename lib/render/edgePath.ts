@@ -7,6 +7,13 @@ interface EdgeOverrides {
   edges?: Record<string, { bends: Point[] }>;
 }
 
+export function hasNodeGroupOverrides(overrides?: EdgeOverrides): boolean {
+  return (
+    Object.keys(overrides?.nodes ?? {}).length > 0 ||
+    Object.keys(overrides?.groups ?? {}).length > 0
+  );
+}
+
 export interface RoutedEdgePath {
   path: string;
   points: Point[];
@@ -20,14 +27,8 @@ const EDGE_CLEARANCE = 18;
 const OBSTACLE_PADDING = 8;
 const TURN_PENALTY = 36;
 const LOCAL_OBSTACLE_MARGIN = 180;
-const ROUTING_OBSTACLE_LIMIT = 12;
 const ROUTING_OBSTACLE_CAP = 24;
 const GRID_ROUTE_STATE_LIMIT = 4_000;
-// Above this element count (nodes + groups + edges) the router switches to
-// fast Manhattan paths instead of obstacle-aware A* to keep the main thread
-// responsive. The example "bridge server" diagram has ~80 elements, so 60 is
-// the threshold that catches it while leaving smaller diagrams with A* routing.
-const ROUTING_FAST_ROUTE_THRESHOLD = 60;
 
 interface Bounds {
   minX: number;
@@ -107,6 +108,21 @@ function expandedRect(rect: LayoutRect, padding: number): LayoutRect {
     width: rect.width + padding * 2,
     height: rect.height + padding * 2,
   };
+}
+
+function pointToSegmentDistance(point: Point, start: Point, end: Point): number {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const len2 = dx * dx + dy * dy;
+  if (len2 < EPSILON * EPSILON) {
+    return Math.hypot(point.x - start.x, point.y - start.y);
+  }
+  const t = Math.max(
+    0,
+    Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / len2),
+  );
+  const proj = { x: start.x + t * dx, y: start.y + t * dy };
+  return Math.hypot(point.x - proj.x, point.y - proj.y);
 }
 
 function segmentAxis(from: Point | undefined, to: Point | undefined): Axis | null {
@@ -342,77 +358,46 @@ function collectObstacles(
   start: Point,
   end: Point,
 ): Obstacle[] {
-  const out: Obstacle[] = [];
+  const out: Array<Obstacle & { score: number }> = [];
   // Root Cause vs Logic: checking every node/group for every edge blew up for huge diagrams, so we clamp obstacles to the local corridor before routing.
   const localBounds = boundsBetween(start, end);
-  const addNode = (id: string, rect: LayoutRect): boolean => {
-    if (id === sourceId || id === targetId) return false;
+  const addNode = (id: string, rect: LayoutRect): void => {
+    if (id === sourceId || id === targetId) return;
     const padded = expandedRect(rect, OBSTACLE_PADDING);
-    if (!rectIntersectsBounds(padded, localBounds)) return false;
-    out.push({ id, rect: padded });
-    return out.length >= ROUTING_OBSTACLE_CAP;
+    if (!rectIntersectsBounds(padded, localBounds)) return;
+    const score = pointToSegmentDistance(center(padded), start, end) - Math.min(padded.width, padded.height) * 0.05;
+    out.push({ id, rect: padded, score });
   };
-  const addGroup = (id: string, rect: LayoutRect): boolean => {
-    if (id === sourceId || id === targetId) return false;
+  const addGroup = (id: string, rect: LayoutRect): void => {
+    if (id === sourceId || id === targetId) return;
     const padded = expandedRect(rect, OBSTACLE_PADDING);
-    if (!rectIntersectsBounds(padded, localBounds)) return false;
-    if (insideRect(start, padded) || insideRect(end, padded)) return false;
-    out.push({ id, rect: padded });
-    return out.length >= ROUTING_OBSTACLE_CAP;
+    if (!rectIntersectsBounds(padded, localBounds)) return;
+    if (insideRect(start, padded) || insideRect(end, padded)) return;
+    const score = pointToSegmentDistance(center(padded), start, end) - Math.min(padded.width, padded.height) * 0.05;
+    out.push({ id, rect: padded, score });
   };
 
   for (const [id, base] of layout.nodes) {
     const ov = overrides?.nodes?.[id];
-    const capped = addNode(id, {
+    addNode(id, {
       x: ov?.x ?? base.x,
       y: ov?.y ?? base.y,
       width: ov?.width ?? base.width,
       height: ov?.height ?? base.height,
     });
-    if (capped) {
-      break;
-    }
   }
   for (const [id, base] of layout.groups) {
     const ov = overrides?.groups?.[id];
-    const capped = addGroup(id, {
+    addGroup(id, {
       x: ov?.x ?? base.x,
       y: ov?.y ?? base.y,
       width: ov?.width ?? base.width,
       height: ov?.height ?? base.height,
     });
-    if (capped) {
-      break;
-    }
   }
 
-  return out;
-}
-
-function fastRoute(
-  start: Point,
-  end: Point,
-  preferredAxis: Axis,
-  laneOffset: number,
-): Point[] {
-  const lane = Math.abs(laneOffset) < EPSILON ? 0 : laneOffset;
-  if (preferredAxis === 'horizontal') {
-    const bendX = (start.x + end.x) / 2 + lane;
-    return orthogonalizePolyline([
-      start,
-      { x: bendX, y: start.y },
-      { x: bendX, y: end.y },
-      end,
-    ]);
-  }
-
-  const bendY = (start.y + end.y) / 2 + lane;
-  return orthogonalizePolyline([
-    start,
-    { x: start.x, y: bendY },
-    { x: end.x, y: bendY },
-    end,
-  ]);
+  out.sort((a, b) => a.score - b.score);
+  return out.slice(0, ROUTING_OBSTACLE_CAP).map(({ score: _score, ...obstacle }) => obstacle);
 }
 
 function sideNormal(side: Side): Point {
@@ -792,9 +777,6 @@ function automaticRoute(
   const sourceCenter = center(sourceRect);
   const targetCenter = center(targetRect);
   const preferredAxis = directAxis(sourceCenter, targetCenter);
-  // Root Cause vs Logic: obstacle-aware search is great for small diagrams but turns into a per-edge CPU sink on dense graphs, so the router switches to a deterministic Manhattan fallback once the layout is large enough to threaten responsiveness.
-  const largeDiagram =
-    layout.nodes.size + layout.groups.size + layout.edges.size >= ROUTING_FAST_ROUTE_THRESHOLD;
   let best: { points: Point[]; score: number } | null = null;
 
   for (const [[sourceSide, targetSide], sideRank] of sidePairs(sourceRect, targetRect).map(
@@ -802,21 +784,9 @@ function automaticRoute(
   )) {
     const start = sideAnchor(sourceRect, sourceSide, targetCenter);
     const end = sideAnchor(targetRect, targetSide, sourceCenter);
-    if (largeDiagram) {
-      const points = fastRoute(start, end, preferredAxis, laneOffset);
-      const score = scorePath(points, [], preferredAxis, sideRank);
-      if (!best || score < best.score) best = { points, score };
-      continue;
-    }
     const startOut = outPoint(start, sourceSide);
     const endOut = outPoint(end, targetSide);
     const obstacles = collectObstacles(layout, overrides, sourceId, targetId, startOut, endOut);
-    if (obstacles.length >= ROUTING_OBSTACLE_LIMIT) {
-      const points = fastRoute(start, end, preferredAxis, laneOffset);
-      const score = scorePath(points, obstacles, preferredAxis, sideRank);
-      if (!best || score < best.score) best = { points, score };
-      continue;
-    }
     const simple = simpleRoute(startOut, endOut, obstacles);
     const grid =
       simple.intersections > 0 && obstacles.length <= 28

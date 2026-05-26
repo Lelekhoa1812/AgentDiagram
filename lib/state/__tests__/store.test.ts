@@ -1,4 +1,16 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+const { saveDraft, deleteDraft, loadDraft } = vi.hoisted(() => ({
+  saveDraft: vi.fn(async () => undefined),
+  deleteDraft: vi.fn(async () => undefined),
+  loadDraft: vi.fn(async () => null),
+}));
+
+vi.mock('../../cache/draftCache', () => ({
+  deleteDraft,
+  loadDraft,
+  saveDraft,
+}));
+
 import { useDiagramStore, type MultiLayerOutput } from '../store';
 import {
   addStoredProject,
@@ -49,6 +61,9 @@ describe('project tab loading', () => {
   };
 
   beforeEach(() => {
+    saveDraft.mockClear();
+    deleteDraft.mockClear();
+    loadDraft.mockClear();
     installLocalStorageMock();
     writeStoredProjects([]);
     useDiagramStore.setState({

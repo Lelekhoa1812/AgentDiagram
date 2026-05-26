@@ -1,6 +1,6 @@
 'use client';
 
-import { useDiagramStore } from '@/lib/state/store';
+import { flushDraftSave, useDiagramStore } from '@/lib/state/store';
 import type { IREdge } from '@/lib/ir/types';
 
 export function EdgeInspector({ edge }: { edge: IREdge }) {
@@ -37,7 +37,10 @@ export function EdgeInspector({ edge }: { edge: IREdge }) {
       <button
         className="rounded border border-ink-700 bg-ink-900 px-2 py-1 hover:bg-ink-800"
         disabled={!hasOverride}
-        onClick={() => setOverride('edges', edge.id, { bends: [] })}
+        onClick={() => {
+          setOverride('edges', edge.id, { bends: [] });
+          void flushDraftSave();
+        }}
       >
         Clear bend points
       </button>

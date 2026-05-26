@@ -10,10 +10,11 @@ import { AgentPanel } from '@/components/agent/AgentPanel';
 import { CustomPromptPanel } from '@/components/agent/CustomPromptPanel';
 import { MultiLayerPanel } from '@/components/multilayer/MultiLayerPanel';
 import { LayerNavigator } from '@/components/multilayer/LayerNavigator';
-import { useDiagramStore } from '@/lib/state/store';
+import { flushDraftSave, useDiagramStore } from '@/lib/state/store';
 import { readUiPreferences, writeUiPreference } from '@/lib/state/uiPreferences';
 import { downloadPng } from '@/lib/export/png';
 import { downloadSvg } from '@/lib/export/svg';
+import { printSvgDiagram } from '@/lib/export/print';
 import flowExample from '../examples/flow.txt';
 
 export default function Page() {
@@ -24,6 +25,7 @@ export default function Page() {
   const hydrateUiPreferences = useDiagramStore((s) => s.hydrateUiPreferences);
   const applyDraft = useDiagramStore((s) => s.applyDraft);
   const canvasRef = useRef<DiagramCanvasHandle>(null);
+  const [draftHydrated, setDraftHydrated] = useState(false);
   const [isEditorVisible, setIsEditorVisible] = useState(true);
   const [isInspectorVisible, setIsInspectorVisible] = useState(true);
   const [isCompactShell, setIsCompactShell] = useState(false);
@@ -35,6 +37,16 @@ export default function Page() {
     if (typeof preferences.isEditorVisible === 'boolean') setIsEditorVisible(preferences.isEditorVisible);
     if (typeof preferences.isInspectorVisible === 'boolean') setIsInspectorVisible(preferences.isInspectorVisible);
   }, [hydrateUiPreferences]);
+
+  const onHardSave = useCallback(() => {
+    void flushDraftSave();
+  }, []);
+
+  const onPrintDiagram = useCallback(() => {
+    const svg = canvasRef.current?.getSvg();
+    if (!svg) return;
+    void printSvgDiagram(svg, { title: 'AgentDiagram' });
+  }, []);
 
   // Global undo / redo keyboard shortcut.
   // • Cmd+Z / Ctrl+Z  → undo the last diagram change (DSL edit or node drag)
@@ -49,20 +61,53 @@ export default function Page() {
       const modKey = e.metaKey || e.ctrlKey;
       if (!modKey) return;
 
-      // Let Monaco handle its own undo/redo when the editor has keyboard focus.
-      if ((document.activeElement as Element | null)?.closest('.monaco-editor')) return;
+      const key = e.key.toLowerCase();
+      const activeElement = document.activeElement as Element | null;
 
-      if (e.key === 'z' && !e.shiftKey) {
+      // Let Monaco handle its own undo/redo when the editor has keyboard focus,
+      // but still intercept save/print so the browser never falls back to the
+      // page shell's default print/save actions.
+      if (activeElement?.closest('.monaco-editor') && key !== 's' && key !== 'p') {
+        return;
+      }
+
+      if (key === 's') {
+        e.preventDefault();
+        onHardSave();
+      } else if (key === 'p') {
+        e.preventDefault();
+        onPrintDiagram();
+      } else if (activeElement?.closest('.monaco-editor')) {
+        return;
+      } else if (key === 'z' && !e.shiftKey) {
         e.preventDefault();
         useDiagramStore.temporal.getState().undo();
-      } else if ((e.key === 'z' && e.shiftKey) || (e.key === 'y' && !e.metaKey)) {
+      } else if ((key === 'z' && e.shiftKey) || (key === 'y' && !e.metaKey)) {
         // Cmd+Shift+Z (Mac redo) and Ctrl+Y (Windows redo)
         e.preventDefault();
         useDiagramStore.temporal.getState().redo();
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [onHardSave, onPrintDiagram]);
+
+  // Root Cause vs Logic: a browser refresh can still interrupt the last async
+  // write, so we flush the draft one more time as the page is being hidden.
+  useEffect(() => {
+    const handlePageExit = () => {
+      if (document.visibilityState !== 'hidden') return;
+      void flushDraftSave();
+    };
+
+    window.addEventListener('beforeunload', handlePageExit);
+    window.addEventListener('pagehide', handlePageExit);
+    document.addEventListener('visibilitychange', handlePageExit);
+    return () => {
+      window.removeEventListener('beforeunload', handlePageExit);
+      window.removeEventListener('pagehide', handlePageExit);
+      document.removeEventListener('visibilitychange', handlePageExit);
+    };
   }, []);
 
   // Async: after the fast synchronous localStorage hydration above, load the
@@ -98,20 +143,24 @@ export default function Page() {
         }
       } catch {
         // Draft hydration is best-effort — never block the editor.
+      } finally {
+        setDraftHydrated(true);
       }
     }
     hydrateDraft();
   }, [applyDraft]);
 
-  // Seed with the flow example only when there is truly no saved content.
-  // Reading directly from localStorage avoids the closure-stale-value trap:
-  // hydrateUiPreferences() (in the preceding effect) updates the Zustand store
-  // but React hasn't re-rendered yet, so we read the persisted preference
-  // directly instead of relying on the stale `dsl` value from the first render.
+  // Root Cause vs Logic: the starter example could win the race before the
+  // IndexedDB draft had finished hydrating, which let a blank reload mask the
+  // user's saved diagram. Wait for draft hydration to settle before seeding the
+  // fallback example, and only seed it when there is still no persisted DSL.
   useEffect(() => {
-    if (!readUiPreferences().dslText) setDsl(flowExample as unknown as string);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (!draftHydrated) return;
+    const preferences = readUiPreferences();
+    const state = useDiagramStore.getState();
+    if (preferences.dslText || state.dslText) return;
+    setDsl(flowExample as unknown as string);
+  }, [draftHydrated, setDsl]);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia('(max-width: 1535px)');

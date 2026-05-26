@@ -13,6 +13,7 @@ import { paletteFor, THEME } from './theme';
 import { getIcon } from '../icons/registry';
 import { ARROW_FWD_ID, ARROW_BWD_ID, ARROW_THICK_ID, MARKER_DEFS } from './markers';
 import { edgeLabelSize, groupTitleSize } from '../layout/measure';
+import { collectLabelObstacles, placeEdgeLabel, rectAtCenter, type RectLike } from './labelPlacement';
 import { edgeLaneOffsets, routeEdgePath } from './edgePath';
 
 const ICON_SIZE = 14;
@@ -137,7 +138,14 @@ function renderNode(n: IRNode, layout: LayoutResult, opts: RenderOptions, groups
     </g>`;
 }
 
-function renderEdge(edge: IREdge, layout: LayoutResult, opts: RenderOptions, edgeOffsets: Map<string, number>): string {
+function renderEdge(
+  edge: IREdge,
+  layout: LayoutResult,
+  opts: RenderOptions,
+  edgeOffsets: Map<string, number>,
+  edgeLabelRects: RectLike[],
+  labelObstacles: RectLike[],
+): string {
   const routed = routeEdgePath(edge, layout, opts.overrides, edgeOffsets.get(edge.id) ?? 0);
   if (!routed?.path) return '';
   const fwdMarker = edge.kind === 'thick' ? ARROW_THICK_ID : ARROW_FWD_ID;
@@ -147,16 +155,15 @@ function renderEdge(edge: IREdge, layout: LayoutResult, opts: RenderOptions, edg
   const dash = edge.kind === 'dashed' ? ' stroke-dasharray="4 4"' : '';
   const strokeWidth = edge.kind === 'thick' ? 2 : 1.1;
 
-  const labelSize = edge.label ? edgeLabelSize(edge.label) : null;
-  const selfRect = edge.source === edge.target ? rectFor(edge.source, layout, opts.overrides) : null;
-  const labelPoint = selfRect && labelSize
-    ? {
-        x: selfRect.x + selfRect.width + labelSize.width / 2 + 14,
-        y: selfRect.y + selfRect.height / 2,
-      }
-    : routed.labelPoint;
-  const label = edge.label && labelSize
-    ? `<g data-kind="edge-label" transform="translate(${labelPoint.x}, ${labelPoint.y - 4})">
+  let label = '';
+  if (edge.label) {
+    const labelSize = edgeLabelSize(edge.label);
+    // Motivation vs Logic: labels are placed greedily so each new annotation
+    // treats earlier labels and nearby components as already occupied space.
+    const labelCenter = placeEdgeLabel(routed.points, labelSize, edgeLabelRects, labelObstacles);
+    const labelRect = rectAtCenter(labelCenter, labelSize);
+    edgeLabelRects.push(labelRect);
+    label = `<g data-kind="edge-label" transform="translate(${labelCenter.x}, ${labelCenter.y})">
         <rect x="${-labelSize.width / 2}" y="${-labelSize.height / 2}"
               width="${labelSize.width}" height="${labelSize.height}"
               rx="5" ry="5" fill="${THEME.background}" fill-opacity="0.86"
@@ -164,8 +171,8 @@ function renderEdge(edge: IREdge, layout: LayoutResult, opts: RenderOptions, edg
         <text x="0" y="0" fill="${THEME.labelFill}" font-size="9.5"
               font-family="Inter, sans-serif" text-anchor="middle"
               dominant-baseline="middle">${escapeXml(edge.label)}</text>
-      </g>`
-    : '';
+      </g>`;
+  }
 
   return `
     <g data-id="${escapeXml(edge.id)}" data-kind="edge">
@@ -194,7 +201,11 @@ export function renderSvg(diagram: Diagram, layout: LayoutResult, opts: RenderOp
   const groupsXml = sortedGroups.map((g) => renderGroup(g, layout, opts, groupsById)).join('\n');
   const nodesXml = diagram.nodes.map((n) => renderNode(n, layout, opts, groupsById)).join('\n');
   const edgeOffsets = edgeLaneOffsets(diagram.edges);
-  const edgesXml = diagram.edges.map((e) => renderEdge(e, layout, opts, edgeOffsets)).join('\n');
+  const labelObstacles = collectLabelObstacles(layout, opts.overrides);
+  const edgeLabelRects: RectLike[] = [];
+  const edgesXml = diagram.edges
+    .map((e) => renderEdge(e, layout, opts, edgeOffsets, edgeLabelRects, labelObstacles))
+    .join('\n');
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"

@@ -30,27 +30,69 @@ export type { LayerDiagram, MultiLayerOutput } from './projectStorage';
 // ---------------------------------------------------------------------------
 // IndexedDB draft autosave
 // ---------------------------------------------------------------------------
-// Rapid keystrokes and drag events call setDsl / setOverride many times per
-// second. Debouncing at 800 ms means we batch all of those into a single IDB
-// write that fires shortly after the user pauses — cheap enough to ignore.
+// Motivation vs Logic: autosave must survive a fast refresh, so we capture the
+// current editor snapshot immediately and coalesce writes in a microtask queue
+// instead of waiting for an arbitrary debounce window.
 //
 // _getState is populated the moment the Zustand creator runs (before any
-// action can be dispatched), so the timer callback always finds it ready.
+// action can be dispatched), so the snapshot helper can always read the latest
+// store values without reaching through the store export itself.
 // ---------------------------------------------------------------------------
-let _draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
-const DRAFT_DEBOUNCE_MS = 800;
+type DraftSnapshot = {
+  key: string;
+  dslText: string;
+  overrides: Overrides;
+};
+
+let _pendingDraftSnapshot: DraftSnapshot | null = null;
+let _draftSaveScheduled = false;
+let _draftSaveInFlight: Promise<void> | null = null;
 let _getState: (() => State) | null = null;
 
+function snapshotDraft(state: State): DraftSnapshot {
+  return {
+    key: state.activeProjectId ?? 'scratch',
+    dslText: state.dslText,
+    overrides: state.overrides,
+  };
+}
+
+async function drainDraftSaveQueue(): Promise<void> {
+  if (_draftSaveInFlight) return _draftSaveInFlight;
+
+  _draftSaveInFlight = (async () => {
+    while (_pendingDraftSnapshot) {
+      const snapshot = _pendingDraftSnapshot;
+      _pendingDraftSnapshot = null;
+      try {
+        await saveDraft(snapshot.key, snapshot.dslText, snapshot.overrides);
+      } catch (err) {
+        // Root Cause vs Logic: refreshes were outrunning the old debounce window, so we now persist the latest snapshot immediately and keep going even if one IndexedDB write fails.
+        console.warn('[DraftCache] Failed to save draft:', err);
+      }
+    }
+  })().finally(() => {
+    _draftSaveInFlight = null;
+  });
+
+  return _draftSaveInFlight;
+}
+
 function scheduleDraftSave(): void {
-  if (typeof window === 'undefined') return; // SSR guard
-  if (_draftSaveTimer !== null) clearTimeout(_draftSaveTimer);
-  _draftSaveTimer = setTimeout(() => {
-    _draftSaveTimer = null;
-    if (!_getState) return;
-    const state = _getState();
-    const key = state.activeProjectId ?? 'scratch';
-    saveDraft(key, state.dslText, state.overrides);
-  }, DRAFT_DEBOUNCE_MS);
+  if (typeof window === 'undefined' || !_getState) return;
+  _pendingDraftSnapshot = snapshotDraft(_getState());
+  if (_draftSaveScheduled) return;
+  _draftSaveScheduled = true;
+  queueMicrotask(() => {
+    _draftSaveScheduled = false;
+    void drainDraftSaveQueue();
+  });
+}
+
+export async function flushDraftSave(): Promise<void> {
+  if (typeof window === 'undefined' || !_getState) return;
+  _pendingDraftSnapshot = snapshotDraft(_getState());
+  await drainDraftSaveQueue();
 }
 
 export type Mode = 'editor' | 'agent' | 'multi-layer' | 'custom-prompt';
@@ -197,7 +239,7 @@ interface State {
 export const useDiagramStore = create<State>()(
   temporal(
     (set, get) => {
-      // Capture Zustand's getter so the draft-save timer can always read the
+      // Capture Zustand's getter so the draft-save helper can always read the
       // latest state without holding a reference to the store export itself.
       _getState = get;
       return {
@@ -251,7 +293,6 @@ export const useDiagramStore = create<State>()(
       },
       setDsl: (text) => {
         writeUiPreference('dslText', text);
-        scheduleDraftSave(); // Also persists to IndexedDB (debounced 800 ms)
         set((state) => {
           if (state.activeProjectId) {
             let multiLayer = state.multiLayer;
@@ -273,6 +314,10 @@ export const useDiagramStore = create<State>()(
           }
           return { dslText: text };
         });
+        // Root Cause vs Logic: a fast refresh can beat the final Monaco change
+        // event, so we queue the post-update snapshot immediately instead of
+        // waiting on a long debounce window.
+        scheduleDraftSave();
       },
       setDiagram: (diagram) => set({ diagram }),
       setLayoutResult: (result) => set({ layoutResult: result }),
@@ -281,17 +326,17 @@ export const useDiagramStore = create<State>()(
         set({ layoutStrategy: strategy });
       },
       setOverride: (scope, id, value) => {
-        scheduleDraftSave(); // Persist drag-override positions to IndexedDB
         set((state) => ({
           overrides: {
             ...state.overrides,
             [scope]: { ...state.overrides[scope], [id]: value },
           },
         }));
+        scheduleDraftSave(); // Persist drag-override positions to IndexedDB
       },
       clearOverrides: () => {
-        scheduleDraftSave(); // Write empty overrides so the cleared state is persisted
         set({ overrides: { nodes: {}, groups: {}, edges: {} } });
+        scheduleDraftSave(); // Write empty overrides so the cleared state is persisted
       },
       setSelection: (sel) => set({ selection: sel }),
       setViewport: (v) => set({ viewport: v }),
