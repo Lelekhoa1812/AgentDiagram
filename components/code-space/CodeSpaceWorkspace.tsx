@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import Editor, { type OnMount } from '@monaco-editor/react';
 import type * as Monaco from 'monaco-editor';
 import {
@@ -47,6 +47,11 @@ import {
   type CodeSpaceProject,
   type CodeSpaceTreeNode,
 } from '@/lib/code-space/core';
+import {
+  DEFAULT_CODE_SPACE_AGENT_MODE,
+  normalizeCodeSpaceAgentMode,
+  type CodeSpaceAgentMode,
+} from '@/lib/code-space/agentModes';
 import { BottomPanel } from '@/components/code-space/BottomPanel';
 import {
   deleteCodeSpaceProject,
@@ -170,14 +175,14 @@ function mergeById<T extends { id: string }>(current: T[], incoming: T[]): T[] {
   return merged;
 }
 
-function createSession(projectId: string | null, title = 'New coding session', mode: CodeSpaceAgentSession['mode'] = 'agent'): CodeSpaceAgentSession {
+function createSession(projectId: string | null, title = 'New coding session', mode: CodeSpaceAgentSession['mode'] = DEFAULT_CODE_SPACE_AGENT_MODE): CodeSpaceAgentSession {
   const ts = Date.now();
   return {
     id: nowId('session'),
     projectId,
     title,
     status: 'idle',
-    mode,
+    mode: mode === 'fresh-start' ? 'fresh-start' : normalizeCodeSpaceAgentMode(mode),
     messages: [],
     toolCalls: [],
     plan: [],
@@ -214,8 +219,25 @@ export function CodeSpaceWorkspace() {
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [agentMode, setAgentMode] = useState<CodeSpaceAgentMode>(DEFAULT_CODE_SPACE_AGENT_MODE);
   const [fileContents, setFileContents] = useState<Record<string, FilePayload>>({});
   const [treeChildren, setTreeChildren] = useState<Record<string, CodeSpaceTreeNode[]>>({});
+
+  // Derive a flat list of all known file paths for the @ mention feature.
+  const flatFilePaths = useMemo(() => {
+    const paths: string[] = [];
+    function collect(nodes: CodeSpaceTreeNode[]) {
+      for (const node of nodes) {
+        if (node.type === 'file') paths.push(node.path);
+        if (node.children) collect(node.children);
+      }
+    }
+    for (const nodes of Object.values(treeChildren)) {
+      collect(nodes);
+    }
+    return paths;
+  }, [treeChildren]);
+
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [loadingTree, setLoadingTree] = useState<Record<string, boolean>>({});
   const [leftVisible, setLeftVisible] = useState(true);
@@ -284,9 +306,15 @@ export function CodeSpaceWorkspace() {
   }, [activeProject?.name]);
 
   useEffect(() => {
+    if (!activeSession || activeSession.mode === 'fresh-start') return;
+    setAgentMode(normalizeCodeSpaceAgentMode(activeSession.mode));
+  }, [activeSession]);
+
+  useEffect(() => {
     const preferences = readCodeSpacePreferences();
     setActiveProjectId(preferences.activeProjectId ?? null);
     setActiveSessionId(preferences.activeSessionId ?? null);
+    setAgentMode(normalizeCodeSpaceAgentMode(preferences.agentMode));
     setLeftVisible(preferences.leftSidebarVisible ?? true);
     setRightVisible(preferences.rightSidebarVisible ?? true);
     setLeftWidth(preferences.leftWidth ?? 304);
@@ -329,6 +357,7 @@ export function CodeSpaceWorkspace() {
     writeCodeSpacePreferences({
       activeProjectId,
       activeSessionId,
+      agentMode,
       leftSidebarVisible: leftVisible,
       rightSidebarVisible: rightVisible,
       leftWidth,
@@ -342,6 +371,7 @@ export function CodeSpaceWorkspace() {
   }, [
     activeProjectId,
     activeSessionId,
+    agentMode,
     bottomVisible,
     bottomActiveTab,
     leftVisible,
@@ -1092,6 +1122,7 @@ export function CodeSpaceWorkspace() {
       ...session,
       title: session.messages.length ? session.title : userPrompt.slice(0, 56),
       status: 'running',
+      mode: agentMode,
       messages: [...session.messages, userMessage],
       toolCallCount: 0,
       updatedAt: now,
@@ -1138,6 +1169,7 @@ export function CodeSpaceWorkspace() {
           apiKey,
           endpoint: provider.endpoint,
           openTabs,
+          mode: agentMode,
           toolBudget: sessionWithPrompt.toolBudget,
           enableThinking,
         }),
@@ -1172,6 +1204,30 @@ export function CodeSpaceWorkspace() {
                 explanation: event.explanation,
                 unifiedDiff: event.unifiedDiff,
               }]);
+            } else if (event.type === 'plan_markdown_created') {
+              appendSessionMessage(sessionWithPrompt.id, {
+                id: nowId('msg'),
+                role: 'assistant',
+                content: `Plan markdown created: ${event.filePath}\n\nOpen it in the editor to revise the strategy before coding.`,
+                createdAt: Date.now(),
+              });
+              void openFile(project, event.filePath);
+            } else if (event.type === 'clarifying_questions_created') {
+              const content = [
+                'Clarifying questions:',
+                '',
+                ...event.questions.map((question, index) => [
+                  `${index + 1}. ${question.question}`,
+                  ...question.choices.map((choice, choiceIndex) => `   ${String.fromCharCode(65 + choiceIndex)}. ${choice}`),
+                  '   Other. Type a custom answer in the prompt box.',
+                ].join('\n')),
+              ].join('\n');
+              appendSessionMessage(sessionWithPrompt.id, {
+                id: nowId('msg'),
+                role: 'assistant',
+                content,
+                createdAt: Date.now(),
+              });
             } else if (event.type === 'terminal_chunk') {
               setTerminalStream((prev) => prev + event.chunk);
             } else if (event.type === 'plan_created') {
@@ -1334,8 +1390,10 @@ export function CodeSpaceWorkspace() {
     }
   }, [
     activeProjectId,
+    agentMode,
     appendSessionMessage,
     ensureSession,
+    openFile,
     patchSession,
     projects,
     provider.apiKey,
@@ -1360,6 +1418,19 @@ export function CodeSpaceWorkspace() {
       }));
     }
   }, [patchSession]);
+
+  const handleAgentModeChange = useCallback(
+    (nextMode: CodeSpaceAgentMode) => {
+      setAgentMode(nextMode);
+      if (!activeSession) return;
+      patchSession(activeSession.id, (session) => ({
+        ...session,
+        mode: nextMode,
+        updatedAt: Date.now(),
+      }));
+    },
+    [activeSession, patchSession],
+  );
 
   const acceptPendingDiff = useCallback(
     async (diffId: string) => {
@@ -1864,9 +1935,11 @@ export function CodeSpaceWorkspace() {
             toolBudget={activeSession?.toolBudget ?? 50}
             pendingDiffs={pendingDiffs}
             providerSummary={`${provider.provider}/${provider.provider === 'foundry' ? provider.customModel ?? provider.model : provider.model}`}
+            agentMode={agentMode}
             onOpenModelConfig={() => setProviderConfigOpen(true)}
             onGenerateDiagram={routeToSystemDiagram}
             onOpenAppPlanner={() => setMode('custom-prompt')}
+            onAgentModeChange={handleAgentModeChange}
             canGenerateDiagram={!!activeProject}
             onSelectSession={(sessionId) => setActiveSessionId((current) => (current === sessionId ? null : sessionId))}
             onRenameSession={renameSession}
@@ -1875,6 +1948,7 @@ export function CodeSpaceWorkspace() {
             onCancelRun={handleCancelRun}
             onAcceptDiff={(diffId) => void acceptPendingDiff(diffId)}
             onRejectDiff={rejectPendingDiff}
+            filePaths={flatFilePaths}
           />
           </aside>
       )}

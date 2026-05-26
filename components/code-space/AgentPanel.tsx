@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, useCallback, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Bot, CheckCircle2, Loader2, XCircle, Zap } from 'lucide-react';
 import type { CodeSpaceAgentSession, CodeSpaceMessage } from '@/lib/code-space/core';
 import type { CodeSpaceAgentMode } from '@/lib/code-space/agentModes';
 import { AgentModeSelector } from './AgentModeSelector';
 import { CollapsibleSection } from './CollapsibleSection';
 import { SessionListSection } from './SessionListSection';
+import { FileMentionInput } from './FileMentionInput';
 
 interface AgentPanelProps {
   session: CodeSpaceAgentSession | null;
@@ -35,6 +36,7 @@ interface AgentPanelProps {
   onCancelRun: () => void;
   onAcceptDiff: (diffId: string) => void;
   onRejectDiff: (diffId: string) => void;
+  filePaths?: string[];
 }
 
 function renderMessageText(message: CodeSpaceMessage) {
@@ -70,19 +72,11 @@ export function AgentPanel({
   onCancelRun,
   onAcceptDiff,
   onRejectDiff,
+  filePaths = [],
 }: AgentPanelProps) {
   const [prompt, setPrompt] = useState('');
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  const adjustHeight = useCallback(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    // 5 rows × 20px line-height + 12px padding (py-1.5 top+bottom) = 112px
-    el.style.height = `${Math.min(el.scrollHeight, 112)}px`;
-  }, []);
 
   const toolCalls = session?.toolCalls ?? [];
   const toolCallCount = session?.toolCallCount ?? 0;
@@ -110,10 +104,6 @@ export function AgentPanel({
     if (!value || isRunning) return;
     onSubmitPrompt(value);
     setPrompt('');
-    // Reset textarea height after clearing
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-    }
   };
 
   return (
@@ -345,29 +335,18 @@ export function AgentPanel({
 
       <form onSubmit={handleSubmit} className="flex-shrink-0 border-t border-[#30363d] p-2">
         <div className="flex items-end gap-2">
-          <textarea
-            ref={textareaRef}
+          <FileMentionInput
             value={prompt}
-            onChange={(event) => {
-              setPrompt(event.target.value);
-              adjustHeight();
+            onChange={setPrompt}
+            onSubmit={() => {
+              const value = prompt.trim();
+              if (!value || isRunning) return;
+              onSubmitPrompt(value);
+              setPrompt('');
             }}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
-                const value = prompt.trim();
-                if (value && !isRunning) {
-                  onSubmitPrompt(value);
-                  setPrompt('');
-                  if (textareaRef.current) textareaRef.current.style.height = 'auto';
-                }
-              }
-            }}
-            placeholder="Describe a task..."
-            rows={1}
-            style={{ minHeight: '28px', maxHeight: '112px' }}
-            className="flex-1 resize-none rounded border border-[#30363d] bg-[#161b22] px-2 py-1.5 text-[11px] leading-5 text-[#e6edf3] outline-none placeholder:text-[#6e7681] focus:border-[#58a6ff] overflow-y-auto"
+            filePaths={filePaths}
             disabled={isRunning}
+            placeholder="Describe a task..."
           />
           {isRunning ? (
             <button
