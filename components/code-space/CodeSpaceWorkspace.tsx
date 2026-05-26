@@ -12,6 +12,7 @@ import {
   Code2,
   File,
   FileCode2,
+  ChevronLeft,
   Folder,
   FolderOpen,
   GitBranch,
@@ -19,13 +20,14 @@ import {
   Layers3,
   PanelLeft,
   PanelRight,
+  Pencil,
   Play,
   Plus,
   RefreshCw,
   Save,
   Search,
   Sparkles,
-  TerminalSquare,
+  Trash2,
   Upload,
   Wand2,
   X,
@@ -38,11 +40,14 @@ import {
   detectCodeSpaceLanguage,
   isCodeSpaceHiddenPath,
   type CodeSpaceAgentSession,
+  type CodeSpaceBottomTab,
   type CodeSpaceEditorTab,
   type CodeSpaceProject,
   type CodeSpaceTreeNode,
 } from '@/lib/code-space/core';
+import { BottomPanel } from '@/components/code-space/BottomPanel';
 import {
+  deleteCodeSpaceProject,
   readCodeSpacePreferences,
   readCodeSpaceProjects,
   readCodeSpaceSessions,
@@ -53,12 +58,28 @@ import {
   writeCodeSpacePreferences,
 } from '@/lib/code-space/persistence';
 import { registerDslLanguage } from '@/components/editor/dslLanguage';
+import { ProviderConfig } from '@/components/agent/ProviderConfig';
 
 interface FilePayload {
   path: string;
   content: string;
   hash: string;
   modifiedAt: number;
+}
+
+interface FolderBrowserEntry {
+  name: string;
+  path: string;
+  type: 'dir' | 'file';
+}
+
+interface FolderBrowserResponse {
+  root?: string;
+  parent?: string;
+  resolved?: string;
+  entries?: FolderBrowserEntry[];
+  directories?: Array<{ name: string; path: string }>;
+  error?: string;
 }
 
 interface TreeResponse {
@@ -89,6 +110,49 @@ function dirname(filePath: string): string {
 
 function basename(filePath: string): string {
   return filePath.split('/').pop() || filePath;
+}
+
+function normalizeToPosix(filePath: string) {
+  return filePath.replace(/\\/g, '/');
+}
+
+function parentPath(filePath: string) {
+  const normalized = normalizeToPosix(filePath).replace(/\/+$/, '');
+  const hasLeadingSlash = normalized.startsWith('/');
+  const segments = normalized.split('/').filter(Boolean);
+  if (!segments.length) {
+    return hasLeadingSlash ? '/' : '';
+  }
+  segments.pop();
+  if (!segments.length) {
+    return hasLeadingSlash ? '/' : '';
+  }
+  const joined = segments.join('/');
+  return hasLeadingSlash ? `/${joined}` : joined;
+}
+
+function joinPathSegments(parent: string, child: string) {
+  const normalizedParent = normalizeToPosix(parent).replace(/\/+$/, '');
+  const normalizedChild = normalizeToPosix(child).replace(/^\/+/, '');
+  if (!normalizedParent || normalizedParent === '.') {
+    return normalizedChild;
+  }
+  if (normalizedParent === '/') {
+    return `/${normalizedChild}`;
+  }
+  return `${normalizedParent}/${normalizedChild}`;
+}
+
+function mergeById<T extends { id: string }>(current: T[], incoming: T[]): T[] {
+  const existingIds = new Set(current.map((item) => item.id));
+  const merged = [...current];
+  for (const item of incoming) {
+    if (!existingIds.has(item.id)) {
+      merged.push(item);
+      existingIds.add(item.id);
+    }
+  }
+  return merged;
 }
 
 function createSession(projectId: string | null, title = 'New coding session', mode: CodeSpaceAgentSession['mode'] = 'agent'): CodeSpaceAgentSession {
@@ -139,6 +203,7 @@ export function CodeSpaceWorkspace() {
   const [leftWidth, setLeftWidth] = useState(304);
   const [rightWidth, setRightWidth] = useState(380);
   const [bottomVisible, setBottomVisible] = useState(true);
+  const [bottomActiveTab, setBottomActiveTab] = useState<CodeSpaceBottomTab>('output');
   const [minimapEnabled, setMinimapEnabled] = useState(false);
   const [wordWrap, setWordWrap] = useState(true);
   const [revealHidden, setRevealHidden] = useState(false);
@@ -148,11 +213,26 @@ export function CodeSpaceWorkspace() {
   const [sessionSearch, setSessionSearch] = useState('');
   const [projectSearch, setProjectSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
+  const [providerConfigOpen, setProviderConfigOpen] = useState(false);
   const [zipSummary, setZipSummary] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [projectNameInput, setProjectNameInput] = useState('');
+  const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
+  const [projectToDelete, setProjectToDelete] = useState<CodeSpaceProject | null>(null);
+  const [isDeletingProject, setIsDeletingProject] = useState(false);
+  const [folderBrowserOpen, setFolderBrowserOpen] = useState(false);
+  const [folderBrowserRoot, setFolderBrowserRoot] = useState<string>('');
+  const [folderBrowserParent, setFolderBrowserParent] = useState<string>('');
+  const [folderBrowserEntries, setFolderBrowserEntries] = useState<FolderBrowserEntry[]>([]);
+  const [folderBrowserLoading, setFolderBrowserLoading] = useState(false);
+  const [folderBrowserError, setFolderBrowserError] = useState<string | null>(null);
+  const [folderBrowserManualPath, setFolderBrowserManualPath] = useState('');
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
   const projectsRef = useRef<CodeSpaceProject[]>([]);
+  const autoDeletingProjectIds = useRef<Set<string>>(new Set());
+  // Root Cause vs Logic: Hidden-only roots (e.g. `.git`) look empty in the explorer; only run the empty-folder check once per project so we do not re-trigger loadTree in a loop.
+  const emptyAutoDeleteCheckedIds = useRef<Set<string>>(new Set());
   const activeProject = projects.find((project) => project.id === activeProjectId) ?? null;
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
@@ -160,6 +240,10 @@ export function CodeSpaceWorkspace() {
   useEffect(() => {
     projectsRef.current = projects;
   }, [projects]);
+
+  useEffect(() => {
+    setProjectNameInput(activeProject?.name ?? '');
+  }, [activeProject?.name]);
 
   useEffect(() => {
     const preferences = readCodeSpacePreferences();
@@ -170,17 +254,23 @@ export function CodeSpaceWorkspace() {
     setLeftWidth(preferences.leftWidth ?? 304);
     setRightWidth(preferences.rightWidth ?? 380);
     setBottomVisible(preferences.bottomPanelVisible ?? true);
+    setBottomActiveTab(preferences.bottomActiveTab ?? 'output');
     setMinimapEnabled(preferences.minimapEnabled ?? false);
     setWordWrap(preferences.wordWrap ?? true);
     setRevealHidden(preferences.revealHiddenFiles ?? false);
 
     void Promise.all([readCodeSpaceProjects(), readCodeSpaceSessions(), readCodeSpaceTabs()]).then(
       ([storedProjects, storedSessions, storedTabs]) => {
-        setProjects(storedProjects);
-        setSessions(storedSessions);
-        setTabs(storedTabs);
-        if (!preferences.activeProjectId && storedProjects[0]) setActiveProjectId(storedProjects[0].id);
-        if (!preferences.activeSessionId && storedSessions[0]) setActiveSessionId(storedSessions[0].id);
+        // Root Cause vs Logic: Slow preference hydration was overwriting new projects/rows before the user saw them, so keep existing entries and only append the stored metadata.
+        setProjects((current) => mergeById(current, storedProjects));
+        setSessions((current) => mergeById(current, storedSessions));
+        setTabs((current) => mergeById(current, storedTabs));
+        if (!preferences.activeProjectId && storedProjects[0]) {
+          setActiveProjectId((prev) => prev ?? storedProjects[0].id);
+        }
+        if (!preferences.activeSessionId && storedSessions[0]) {
+          setActiveSessionId((prev) => prev ?? storedSessions[0].id);
+        }
       },
     );
   }, []);
@@ -194,11 +284,24 @@ export function CodeSpaceWorkspace() {
       leftWidth,
       rightWidth,
       bottomPanelVisible: bottomVisible,
+      bottomActiveTab,
       minimapEnabled,
       wordWrap,
       revealHiddenFiles: revealHidden,
     });
-  }, [activeProjectId, activeSessionId, bottomVisible, leftVisible, leftWidth, minimapEnabled, revealHidden, rightVisible, rightWidth, wordWrap]);
+  }, [
+    activeProjectId,
+    activeSessionId,
+    bottomVisible,
+    bottomActiveTab,
+    leftVisible,
+    leftWidth,
+    minimapEnabled,
+    revealHidden,
+    rightVisible,
+    rightWidth,
+    wordWrap,
+  ]);
 
   const updateSession = useCallback((session: CodeSpaceAgentSession) => {
     setSessions((current) => [session, ...current.filter((item) => item.id !== session.id)]);
@@ -230,9 +333,85 @@ export function CodeSpaceWorkspace() {
     }
   }, []);
 
+  const finalizeProjectRemoval = useCallback((projectId: string) => {
+    emptyAutoDeleteCheckedIds.current.delete(projectId);
+    let remainingProjects: CodeSpaceProject[] = [];
+    setProjects((current) => {
+      remainingProjects = current.filter((item) => item.id !== projectId);
+      return remainingProjects;
+    });
+    setSessions((current) => {
+      const next = current.filter((session) => session.projectId !== projectId);
+      setActiveSessionId((activeId) => {
+        if (activeId && !next.some((session) => session.id === activeId)) {
+          return next[0]?.id ?? null;
+        }
+        return activeId;
+      });
+      return next;
+    });
+    setTabs((current) => {
+      const next = current.filter((tab) => tab.projectId !== projectId);
+      setActiveTabId((activeId) => {
+        if (activeId && !next.some((tab) => tab.id === activeId)) {
+          return null;
+        }
+        return activeId;
+      });
+      return next;
+    });
+    setActiveProjectId((activeId) => {
+      if (activeId !== projectId) return activeId;
+      setLocalPath('');
+      return remainingProjects[0]?.id ?? null;
+    });
+  }, []);
+
+  // Root Cause vs Logic: Helpers used in multiple callbacks must exist before those closures run; define this before `verifyAndDeleteEmptyProject` so the TDZ never fires.
+  const deleteProjectDirectory = useCallback(async (project: CodeSpaceProject) => {
+    if (!project.rootPath) throw new Error('Unable to delete a project without a root path');
+    const parent = parentPath(project.rootPath);
+    if (!parent) throw new Error('Unable to delete the root folder');
+    const targetFolder = basename(project.rootPath);
+    const res = await fetch('/api/code-space/files', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'delete', rootPath: parent, path: targetFolder }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? 'Delete failed');
+    return data;
+  }, []);
+
+  // Root Cause vs Logic: `loadTree` depends on this helper via its dependency array, so declare it before `loadTree` to avoid the temporal dead zone that caused the ReferenceError.
+  // Motivation vs Logic: An empty project folder means there is no user content to inspect, so drop the stale entry automatically instead of leaving a dead project behind.
+  const verifyAndDeleteEmptyProject = useCallback(
+    async (project: CodeSpaceProject) => {
+      if (!project.rootPath) return;
+      if (autoDeletingProjectIds.current.has(project.id)) return;
+      autoDeletingProjectIds.current.add(project.id);
+      try {
+        const params = new URLSearchParams({ rootPath: project.rootPath, path: '', revealHidden: 'true' });
+        const res = await fetch(`/api/code-space/files?${params.toString()}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? 'Unable to verify folder contents');
+        if (Array.isArray(data.entries) && data.entries.length > 0) return;
+        await deleteProjectDirectory(project);
+        finalizeProjectRemoval(project.id);
+        await deleteCodeSpaceProject(project.id);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        autoDeletingProjectIds.current.delete(project.id);
+      }
+    },
+    [deleteProjectDirectory, finalizeProjectRemoval],
+  );
+
   const loadTree = useCallback(
     async (project: CodeSpaceProject, folderPath = '') => {
       if (!project.rootPath) return;
+      if (autoDeletingProjectIds.current.has(project.id)) return;
       const key = `${project.id}:${folderPath}`;
       setLoadingTree((current) => ({ ...current, [key]: true }));
       setError(null);
@@ -246,21 +425,35 @@ export function CodeSpaceWorkspace() {
         const data = (await res.json()) as TreeResponse & { error?: string };
         if (!res.ok) throw new Error(data.error ?? 'Could not load folder');
         setTreeChildren((current) => ({ ...current, [key]: data.entries ?? [] }));
+        if (
+          !folderPath &&
+          (!data.entries || data.entries.length === 0) &&
+          !emptyAutoDeleteCheckedIds.current.has(project.id)
+        ) {
+          emptyAutoDeleteCheckedIds.current.add(project.id);
+          void verifyAndDeleteEmptyProject(project);
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       } finally {
         setLoadingTree((current) => ({ ...current, [key]: false }));
       }
     },
-    [revealHidden],
+    [revealHidden, verifyAndDeleteEmptyProject],
   );
 
+  const loadTreeRef = useRef(loadTree);
+  const refreshGitStatusRef = useRef(refreshGitStatus);
+  loadTreeRef.current = loadTree;
+  refreshGitStatusRef.current = refreshGitStatus;
+
+  // Root Cause vs Logic: Depending on `loadTree` in this effect re-ran whenever project state changed, causing a refresh loop; only react to active project / reveal-hidden changes.
   useEffect(() => {
     const project = projectsRef.current.find((item) => item.id === activeProjectId);
     if (!project) return;
-    void loadTree(project, '');
-    void refreshGitStatus(project);
-  }, [activeProjectId, loadTree, refreshGitStatus]);
+    void loadTreeRef.current(project, '');
+    void refreshGitStatusRef.current(project);
+  }, [activeProjectId, revealHidden]);
 
   const addProject = useCallback(
     async (project: CodeSpaceProject) => {
@@ -274,42 +467,220 @@ export function CodeSpaceWorkspace() {
     [loadTree, refreshGitStatus],
   );
 
-  const openLocalProject = useCallback(async () => {
-    if (!localPath.trim()) return;
-    const project = createCodeSpaceProject({
-      name: projectNameFromPath(localPath.trim()),
-      sourceType: 'local',
-      rootPath: localPath.trim(),
-      source: { sourceType: 'local', repoPath: localPath.trim(), authMode: 'none' },
-    });
-    await addProject(project);
-  }, [addProject, localPath]);
+  const openLocalProject = useCallback(
+    async (pathOverride?: string) => {
+      const candidate = (pathOverride ?? localPath).trim();
+      if (!candidate) return;
+      const project = createCodeSpaceProject({
+        name: projectNameFromPath(candidate),
+        sourceType: 'local',
+        rootPath: candidate,
+        source: { sourceType: 'local', repoPath: candidate, authMode: 'none' },
+      });
+      setLocalPath(candidate);
+      await addProject(project);
+    },
+    [addProject, localPath],
+  );
 
-  const cloneGithubProject = useCallback(async () => {
-    if (!repoUrl.trim()) return;
+  const cloneGithubProject = useCallback(
+    async (urlOverride?: string) => {
+      const candidate = (urlOverride ?? repoUrl).trim();
+      if (!candidate) return;
+      setError(null);
+      setRepoUrl(candidate);
+      try {
+        const res = await fetch('/api/repo/scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            source: { sourceType: 'github', repoPath: '', repoUrl: candidate, authMode: 'none' },
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? 'Clone failed');
+        const project = createCodeSpaceProject({
+          name: projectNameFromPath(data.resolved),
+          sourceType: 'github',
+          rootPath: data.resolved,
+          repoRef: data.clonedFrom,
+          source: { sourceType: 'github', repoPath: data.resolved, repoUrl: candidate, authMode: 'none' },
+        });
+        await addProject(project);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [addProject, repoUrl],
+  );
+
+  const promptToCloneGithub = useCallback(async () => {
+    const selection = window.prompt('Enter the GitHub repo URL');
+    if (!selection) return;
+    await cloneGithubProject(selection);
+  }, [cloneGithubProject]);
+
+  // Motivation vs Logic: Browsers can't hand the Code Space backend an absolute folder path
+  // (the `<input webkitdirectory>` API hides `file.path` outside Electron), so we delegate
+  // folder picking to the existing server-side `/api/repo/directories` endpoint. It already
+  // walks the host filesystem with the same path guard and returns absolute paths, which lets
+  // us create projects automatically without the browser's "trust this site" upload prompt.
+  const loadFolderBrowserEntries = useCallback(
+    async (root: string, parent = '') => {
+      setFolderBrowserLoading(true);
+      setFolderBrowserError(null);
+      try {
+        const res = await fetch('/api/repo/directories', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rootPath: root || undefined, parent }),
+        });
+        const data = (await res.json()) as FolderBrowserResponse;
+        if (!res.ok) {
+          setFolderBrowserError(data.error ?? 'Could not list folder');
+          setFolderBrowserEntries([]);
+          return;
+        }
+        const nextRoot = data.root ?? root;
+        const nextEntries: FolderBrowserEntry[] = Array.isArray(data.entries)
+          ? data.entries
+          : Array.isArray(data.directories)
+            ? data.directories.map((entry) => ({ ...entry, type: 'dir' as const }))
+            : [];
+        setFolderBrowserRoot(nextRoot);
+        setFolderBrowserParent(data.parent ?? parent ?? '');
+        setFolderBrowserEntries(nextEntries);
+        if (!folderBrowserManualPath || folderBrowserManualPath === root) {
+          setFolderBrowserManualPath(nextRoot);
+        }
+      } catch (err) {
+        setFolderBrowserError(err instanceof Error ? err.message : String(err));
+        setFolderBrowserEntries([]);
+      } finally {
+        setFolderBrowserLoading(false);
+      }
+    },
+    [folderBrowserManualPath],
+  );
+
+  const openFolderBrowser = useCallback(() => {
+    setError(null);
+    setFolderBrowserOpen(true);
+    const initialRoot = localPath.trim() || folderBrowserRoot || '';
+    setFolderBrowserManualPath(initialRoot);
+    void loadFolderBrowserEntries(initialRoot, '');
+  }, [folderBrowserRoot, loadFolderBrowserEntries, localPath]);
+
+  const closeFolderBrowser = useCallback(() => {
+    setFolderBrowserOpen(false);
+  }, []);
+
+  const handleFolderBrowserSelect = useCallback(
+    async (absolutePath: string) => {
+      const candidate = absolutePath.trim();
+      if (!candidate) return;
+      closeFolderBrowser();
+      await openLocalProject(candidate);
+    },
+    [closeFolderBrowser, openLocalProject],
+  );
+
+  const handleManualOpen = useCallback(() => {
+    if (!localPath.trim()) {
+      openFolderBrowser();
+      return;
+    }
+    void openLocalProject();
+  }, [localPath, openFolderBrowser, openLocalProject]);
+
+  // Motivation vs Logic: Allow project icons to trigger the same rename endpoint so the stored path and labels stay in sync.
+  const renameProjectInternal = useCallback(
+    async (project: CodeSpaceProject, nextName: string) => {
+      if (!project.rootPath) {
+        setError('Unable to rename project without a root path');
+        return;
+      }
+      const parent = parentPath(project.rootPath);
+      if (!parent) {
+        setError('Unable to rename the root folder');
+        if (project.id === activeProjectId) {
+          setProjectNameInput(project.name);
+        }
+        return;
+      }
+      const currentFolder = basename(project.rootPath);
+      setRenamingProjectId(project.id);
+      setError(null);
+      try {
+        const res = await fetch('/api/code-space/files', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'rename', rootPath: parent, path: currentFolder, nextPath: nextName }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? 'Rename failed');
+        const nextRootPath = joinPathSegments(parent, nextName);
+        const nextProject = {
+          ...project,
+          name: nextName,
+          rootPath: nextRootPath,
+          source: project.source ? { ...project.source, repoPath: nextRootPath } : undefined,
+          updatedAt: Date.now(),
+        };
+        setProjects((current) => current.map((item) => (item.id === nextProject.id ? nextProject : item)));
+        await saveCodeSpaceProject(nextProject);
+        if (project.id === activeProjectId) {
+          setLocalPath(nextRootPath);
+          setProjectNameInput(nextName);
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+        if (project.id === activeProjectId) {
+          setProjectNameInput(project.name);
+        }
+      } finally {
+        setRenamingProjectId(null);
+      }
+    },
+    [activeProjectId, saveCodeSpaceProject],
+  );
+
+  const commitProjectRename = useCallback(async () => {
+    if (!activeProject) return;
+    const nextName = projectNameInput.trim();
+    if (!nextName || nextName === activeProject.name) {
+      setProjectNameInput(activeProject.name);
+      return;
+    }
+    await renameProjectInternal(activeProject, nextName);
+  }, [activeProject, projectNameInput, renameProjectInternal]);
+
+  const promptProjectRename = useCallback(
+    (project: CodeSpaceProject) => {
+      const candidate = window.prompt('Rename project', project.name);
+      if (!candidate) return;
+      const nextName = candidate.trim();
+      if (!nextName || nextName === project.name) return;
+      void renameProjectInternal(project, nextName);
+    },
+    [renameProjectInternal],
+  );
+
+  const confirmProjectDeletion = useCallback(async () => {
+    if (!projectToDelete) return;
+    setIsDeletingProject(true);
     setError(null);
     try {
-      const res = await fetch('/api/repo/scan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          source: { sourceType: 'github', repoPath: '', repoUrl: repoUrl.trim(), authMode: 'none' },
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? 'Clone failed');
-      const project = createCodeSpaceProject({
-        name: projectNameFromPath(data.resolved),
-        sourceType: 'github',
-        rootPath: data.resolved,
-        repoRef: data.clonedFrom,
-        source: { sourceType: 'github', repoPath: data.resolved, repoUrl: repoUrl.trim(), authMode: 'none' },
-      });
-      await addProject(project);
+      await deleteProjectDirectory(projectToDelete);
+      finalizeProjectRemoval(projectToDelete.id);
+      await deleteCodeSpaceProject(projectToDelete.id);
+      setProjectToDelete(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsDeletingProject(false);
     }
-  }, [addProject, repoUrl]);
+  }, [deleteProjectDirectory, finalizeProjectRemoval, projectToDelete]);
 
   const openFile = useCallback(
     async (project: CodeSpaceProject, filePath: string) => {
@@ -547,27 +918,27 @@ export function CodeSpaceWorkspace() {
     const form = new FormData();
     form.append('file', file);
     const res = await fetch('/api/code-space/plan-zip', { method: 'POST', body: form });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error ?? 'Planning zip validation failed');
-      return;
-    }
-    const project = createCodeSpaceProject({
-      name: file.name.replace(/\.zip$/i, ''),
-      sourceType: 'zip',
-      repoRef: file.name,
-    });
-    await addProject(project);
-    const session = createSession(project.id, `Fresh start: ${project.name}`, 'fresh-start');
-    const contextList = data.contextFiles?.map((entry: { path: string }) => `- ${entry.path}`).join('\n') ?? '';
-    session.messages = [
-      {
-        id: nowId('msg'),
-        role: 'system',
-        content: `Fresh Start Planner loaded ${data.planningFiles.length} planning file(s) and ${data.dslOrCodeFiles.length} DSL/code file(s).\n${contextList}`,
-        createdAt: Date.now(),
-      },
-    ];
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? 'Planning zip validation failed');
+        return;
+      }
+      const project = createCodeSpaceProject({
+        name: file.name.replace(/\.zip$/i, ''),
+        sourceType: 'zip',
+        repoRef: file.name,
+      });
+      await addProject(project);
+      const session = createSession(project.id, `Fresh start: ${project.name}`, 'fresh-start');
+      const contextList = data.contextFiles?.map((entry: { path: string }) => `- ${entry.path}`).join('\n') ?? '';
+      session.messages = [
+        {
+          id: nowId('msg'),
+          role: 'system',
+          content: `Fresh Start upload loaded ${data.planningFiles.length} planning file(s) and ${data.dslOrCodeFiles.length} DSL/code file(s).\n${contextList}`,
+          createdAt: Date.now(),
+        },
+      ];
     session.plan = [
       'Read planning markdown first and extract acceptance criteria.',
       'Map DSL/code files to implementation tasks.',
@@ -643,6 +1014,11 @@ export function CodeSpaceWorkspace() {
   });
   const recentSessions = filteredSessions.filter((session) => !session.archived);
   const archivedSessions = filteredSessions.filter((session) => session.archived);
+  // Motivation vs Logic: showing a quick snapshot of the root entries keeps the preview actionable before any file is opened.
+  const activeProjectPreviewKey = activeProject ? `${activeProject.id}:` : '';
+  const activeProjectPreviewNodes = activeProjectPreviewKey ? treeChildren[activeProjectPreviewKey] ?? [] : [];
+  const activeProjectPreviewLoading = activeProjectPreviewKey ? Boolean(loadingTree[activeProjectPreviewKey]) : false;
+  const activeProjectPreviewSnapshot = activeProjectPreviewNodes.slice(0, 5);
 
   return (
     <main className="code-space-workbench flex min-h-0 flex-1 overflow-hidden bg-[#181818] text-[#d4d4d4]">
@@ -677,17 +1053,19 @@ export function CodeSpaceWorkspace() {
                 </button>
               </div>
             </div>
-            <div className="space-y-2 border-b border-[#2a2a2a] p-3">
+            <div className="space-y-3 border-b border-[#2a2a2a] p-3">
               <input value={projectSearch} onChange={(e) => setProjectSearch(e.target.value)} placeholder="Search in project" className="h-8 w-full rounded border border-[#2a2a2a] bg-[#1e1e1e] px-2 text-[12px] outline-none focus:border-accent/70" />
-              <div className="grid grid-cols-2 gap-2">
-                <input value={localPath} onChange={(e) => setLocalPath(e.target.value)} placeholder="/path/to/repo" className="col-span-2 h-8 rounded border border-[#2a2a2a] bg-[#1e1e1e] px-2 font-mono text-[11px]" />
-                <button type="button" onClick={openLocalProject} className="rounded border border-[#2a2a2a] bg-[#252526] px-2 py-1.5 text-[11px] hover:bg-[#2a2d2e]">Open Path</button>
-                <label className="cursor-pointer rounded border border-[#2a2a2a] bg-[#252526] px-2 py-1.5 text-center text-[11px] hover:bg-[#2a2d2e]">
-                  Import Zip
-                  <input type="file" accept=".zip" className="hidden" onChange={(e) => e.target.files?.[0] && void uploadPlanningZip(e.target.files[0])} />
-                </label>
-                <input value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} placeholder="https://github.com/org/repo" className="col-span-2 h-8 rounded border border-[#2a2a2a] bg-[#1e1e1e] px-2 font-mono text-[11px]" />
-                <button type="button" onClick={cloneGithubProject} className="col-span-2 rounded border border-accent/40 bg-accent/15 px-2 py-1.5 text-[11px] font-semibold text-accent hover:bg-accent/25">Clone GitHub using Agentic Repo flow</button>
+              <div className="space-y-3">
+                <div className="space-y-1 text-[11px] text-[#8b8b8b]">
+                  <div className="uppercase tracking-wider">Enter path manually</div>
+                  <input value={localPath} onChange={(e) => setLocalPath(e.target.value)} placeholder="/path/to/repo" className="h-8 w-full rounded border border-[#2a2a2a] bg-[#1e1e1e] px-2 font-mono text-[11px]" />
+                  <button type="button" onClick={() => void handleManualOpen()} className="w-full rounded border border-[#2a2a2a] bg-[#252526] px-2 py-1.5 text-[11px] hover:bg-[#2a2d2e]">Open Path</button>
+                </div>
+                <div className="space-y-1 text-[11px] text-[#8b8b8b]">
+                  <div className="uppercase tracking-wider">Clone GitHub</div>
+                  <input value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} placeholder="https://github.com/org/repo" className="h-8 w-full rounded border border-[#2a2a2a] bg-[#1e1e1e] px-2 font-mono text-[11px]" />
+                  <button type="button" onClick={() => void cloneGithubProject()} className="w-full rounded border border-accent/40 bg-accent/15 px-2 py-1.5 text-[11px] font-semibold text-accent hover:bg-accent/25">Clone GitHub</button>
+                </div>
               </div>
               <label className="flex items-center gap-2 text-[11px] text-[#8b8b8b]">
                 <input type="checkbox" checked={revealHidden} onChange={(e) => setRevealHidden(e.target.checked)} />
@@ -697,38 +1075,64 @@ export function CodeSpaceWorkspace() {
             <div className="min-h-0 flex-1 overflow-auto p-1">
               {projects.length === 0 ? (
                 <div className="m-3 rounded border border-dashed border-[#37373d] p-4 text-[12px] text-[#8b8b8b]">
-                  Open a local path, import a planning zip, or clone GitHub to start.
+                  Open a local path or clone GitHub to start.
                 </div>
               ) : (
                 projects.map((project) => {
                   const isActiveProject = project.id === activeProjectId;
                   const isOpen = expanded[project.id] ?? isActiveProject;
                   return (
-                    <div key={project.id} className="mb-1">
+                <div key={project.id} className="mb-1">
+                  <div className="relative group">
+                    <button
+                      type="button"
+                      aria-expanded={isOpen}
+                      onClick={() => {
+                        setActiveProjectId(project.id);
+                        setExpanded((current) => ({ ...current, [project.id]: !isOpen }));
+                      }}
+                      className={`flex h-8 w-full items-center gap-1 rounded px-2 pr-16 text-left text-[12px] ${isActiveProject ? 'bg-[#37373d] text-[#d4d4d4]' : 'text-[#cccccc] hover:bg-[#2a2d2e]'}`}
+                    >
+                      {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                      <Box size={14} className={project.sourceType === 'github' ? 'text-accent-cool' : 'text-accent-warm'} />
+                      <span className="min-w-0 flex-1 truncate font-medium">{project.name}</span>
+                      <span className="rounded bg-[#252526] px-1.5 py-0.5 text-[9px] uppercase text-[#8b8b8b]">{project.sourceType}</span>
+                    </button>
+                    <div className="absolute right-1 top-1/2 flex -translate-y-1/2 gap-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100 pointer-events-none">
                       <button
                         type="button"
-                        aria-expanded={isOpen}
-                        onClick={() => {
-                          setActiveProjectId(project.id);
-                          setExpanded((current) => ({ ...current, [project.id]: !isOpen }));
+                        title="Rename project"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          promptProjectRename(project);
                         }}
-                        className={`flex h-8 w-full items-center gap-1 rounded px-2 text-left text-[12px] ${isActiveProject ? 'bg-[#37373d] text-[#d4d4d4]' : 'text-[#cccccc] hover:bg-[#2a2d2e]'}`}
+                        className="pointer-events-auto rounded p-1 text-[#8b8b8b] hover:bg-[#2a2d2e]"
                       >
-                        {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                        <Box size={14} className={project.sourceType === 'github' ? 'text-accent-cool' : 'text-accent-warm'} />
-                        <span className="min-w-0 flex-1 truncate font-medium">{project.name}</span>
-                        <span className="rounded bg-[#252526] px-1.5 py-0.5 text-[9px] uppercase text-[#8b8b8b]">{project.sourceType}</span>
+                        <Pencil size={13} />
                       </button>
-                      {isOpen && (
-                        <>
-                          <div className="ml-7 flex gap-2 py-1 text-[10px] text-[#8b8b8b]">
-                            <span>{project.git?.branch ?? project.branch ?? 'no branch'}</span>
-                            <span>{project.git?.changedFiles ?? 0} changed</span>
-                          </div>
-                          {renderTree(project)}
-                        </>
-                      )}
+                      <button
+                        type="button"
+                        title="Delete project"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setProjectToDelete(project);
+                        }}
+                        className="pointer-events-auto rounded p-1 text-red-400 hover:bg-red-500/10"
+                      >
+                        <Trash2 size={13} />
+                      </button>
                     </div>
+                  </div>
+                  {isOpen && (
+                    <>
+                      <div className="ml-7 flex gap-2 py-1 text-[10px] text-[#8b8b8b]">
+                        <span>{project.git?.branch ?? project.branch ?? 'no branch'}</span>
+                        <span>{project.git?.changedFiles ?? 0} changed</span>
+                      </div>
+                      {renderTree(project)}
+                    </>
+                  )}
+                </div>
                   );
                 })
               )}
@@ -801,13 +1205,61 @@ export function CodeSpaceWorkspace() {
             />
           ) : activeProject ? (
             <div className="flex h-full items-center justify-center p-8">
-              <div className="max-w-xl rounded-xl border border-[#2a2a2a] bg-[#181818] p-6 text-center shadow-2xl">
-                <Code2 className="mx-auto mb-3 text-accent" size={30} />
-                <h2 className="text-lg font-semibold text-[#d4d4d4]">{activeProject.name}</h2>
-                <p className="mt-2 text-sm text-[#8b8b8b]">Select a file from Explorer, generate a system diagram, or ask the agent to explain the repo.</p>
-                <div className="mt-4 flex justify-center gap-2">
-                  <button type="button" onClick={routeToSystemDiagram} className="rounded border border-accent/40 bg-accent/15 px-3 py-2 text-sm text-accent">Generate System Diagram</button>
-                  <button type="button" onClick={() => setPrompt('Explain this repo')} className="rounded border border-[#2a2a2a] bg-[#252526] px-3 py-2 text-sm">Explain Repo</button>
+              <div className="max-w-3xl rounded-xl border border-[#2a2a2a] bg-[#181818] p-6 shadow-2xl">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <Code2 className="text-accent" size={30} />
+                    <h2 className="text-lg font-semibold text-[#d4d4d4]">Project Preview</h2>
+                    <p className="text-sm text-[#8b8b8b]">Preview the root folder before opening files or running tasks.</p>
+                  </div>
+                  <div className="text-xs uppercase tracking-wider text-[#6b6b6b]">{basename(activeProject.rootPath ?? activeProject.name)}</div>
+                </div>
+                <div className="mt-4 space-y-4 text-left">
+                  <div className="space-y-1">
+                    <label className="text-[12px] font-semibold text-[#bfbfbf]">Root folder name</label>
+                    <input
+                      value={projectNameInput}
+                      onChange={(e) => setProjectNameInput(e.target.value)}
+                      onBlur={() => void commitProjectRename()}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          void commitProjectRename();
+                        }
+                      }}
+                    disabled={renamingProjectId === activeProject?.id}
+                      className="w-full rounded border border-[#2a2a2a] bg-[#121212] px-3 py-2 text-sm outline-none transition focus:border-accent/60"
+                    />
+                    <p className="text-[11px] text-[#6b6b6b]">Press Enter or leave the field to rename the folder on disk.</p>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="text-[11px] uppercase tracking-wider text-[#8b8b8b]">Preview</div>
+                    {activeProjectPreviewLoading ? (
+                      <div className="text-[12px] text-[#8b8b8b]">Loading preview…</div>
+                    ) : activeProjectPreviewSnapshot.length ? (
+                      <div className="space-y-1">
+                        {activeProjectPreviewSnapshot.map((node) => (
+                          <div key={node.path} className="flex items-center gap-2 rounded border border-[#2a2a2a] bg-[#1e1e1e] px-3 py-1 text-[12px] text-[#d4d4d4]">
+                            {node.type === 'dir' ? <Folder size={14} className="text-accent-warm" /> : <File size={14} className="text-ink-400" />}
+                            <span className="flex-1 truncate">{node.name}</span>
+                            <span className="text-[10px] text-[#6d6d6d]">{node.type}</span>
+                          </div>
+                        ))}
+                        {activeProjectPreviewNodes.length > activeProjectPreviewSnapshot.length && (
+                          <div className="text-[11px] text-[#8b8b8b]">And {activeProjectPreviewNodes.length - activeProjectPreviewSnapshot.length} more item(s)…</div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-[#8b8b8b]">The folder looks empty—add files to see them here.</div>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-[#8b8b8b]">
+                    Root path: <span className="font-mono text-[11px] text-[#d4d4d4]">{activeProject.rootPath ?? 'Unknown'}</span>
+                  </div>
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <button type="button" onClick={() => setLeftVisible(true)} className="rounded border border-[#2a2a2a] bg-[#252526] px-3 py-1.5 text-[11px] text-[#d4d4d4]">Show Explorer</button>
+                    <button type="button" onClick={() => activeProject && void loadTree(activeProject, '')} className="rounded border border-accent/40 bg-accent/15 px-3 py-1.5 text-[11px] font-semibold text-accent hover:bg-accent/25">Refresh Preview</button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -816,27 +1268,31 @@ export function CodeSpaceWorkspace() {
               <div className="max-w-2xl rounded-xl border border-[#2a2a2a] bg-[#181818] p-7 text-center">
                 <Wand2 className="mx-auto mb-3 text-accent" size={34} />
                 <h2 className="text-xl font-semibold">Open a project to enter Code Space</h2>
-                <p className="mt-2 text-sm text-[#8b8b8b]">Use Explorer to open a local folder, clone from GitHub, import a zip, or start from Fresh Start Planner.</p>
-                <button type="button" onClick={() => setModalOpen(true)} className="mt-5 rounded border border-accent/40 bg-accent/15 px-4 py-2 text-sm font-semibold text-accent">Fresh Start Planner</button>
+                <p className="mt-2 text-sm text-[#8b8b8b]">Use Explorer to open a local folder, clone from GitHub, or start from Fresh Start.</p>
+                <div className="mt-5 flex flex-wrap justify-center gap-2">
+                  <button type="button" onClick={() => setModalOpen(true)} className="rounded border border-accent/40 bg-accent/15 px-4 py-2 text-sm font-semibold text-accent">Fresh Start</button>
+                  <button type="button" onClick={openFolderBrowser} className="rounded border border-[#2a2a2a] bg-[#252526] px-4 py-2 text-sm">Open Path</button>
+                  <button type="button" onClick={() => void promptToCloneGithub()} className="rounded border border-[#2a2a2a] bg-[#252526] px-4 py-2 text-sm">Clone GitHub</button>
+                </div>
               </div>
             </div>
           )}
         </div>
 
         {bottomVisible && (
-          <div className="h-40 border-t border-[#2a2a2a] bg-[#181818]">
-            <div className="flex h-8 items-center justify-between border-b border-[#2a2a2a] px-3 text-[11px] uppercase tracking-wider text-[#cccccc]">
-              <span className="flex items-center gap-2"><TerminalSquare size={14} /> Output / Problems / Agent Checks</span>
-              <div className="flex gap-2 normal-case tracking-normal">
-                <button type="button" onClick={() => setMinimapEnabled((value) => !value)} className="text-[#8b8b8b] hover:text-[#d4d4d4]">Minimap {minimapEnabled ? 'On' : 'Off'}</button>
-                <button type="button" onClick={() => setWordWrap((value) => !value)} className="text-[#8b8b8b] hover:text-[#d4d4d4]">Wrap {wordWrap ? 'On' : 'Off'}</button>
-                <button type="button" onClick={() => setBottomVisible(false)} className="text-[#8b8b8b] hover:text-[#d4d4d4]">Hide</button>
-              </div>
-            </div>
-            <div className="h-[calc(100%-2rem)] overflow-auto p-3 font-mono text-[11px] text-[#8b8b8b]">
-              {error ? <div className="text-red-300">{error}</div> : activeSession?.toolCalls.length ? activeSession.toolCalls.map((tool) => <div key={tool.id}>[{tool.status}] {tool.name}: {tool.summary}</div>) : 'No output yet. Agent verification steps, logs, and problems will appear here.'}
-            </div>
-          </div>
+          <BottomPanel
+            activeSession={activeSession}
+            bottomActiveTab={bottomActiveTab}
+            error={error}
+            minimapEnabled={minimapEnabled}
+            onToggleMinimap={() => setMinimapEnabled((value) => !value)}
+            wordWrap={wordWrap}
+            onToggleWordWrap={() => setWordWrap((value) => !value)}
+            onTabChange={(tab) => setBottomActiveTab(tab)}
+            onHide={() => setBottomVisible(false)}
+            projectName={activeProject?.name ?? 'No project'}
+            projectRoot={activeProject?.rootPath ?? undefined}
+          />
         )}
       </section>
 
@@ -886,16 +1342,157 @@ export function CodeSpaceWorkspace() {
               <span className="text-[10px] text-[#8b8b8b]">Plan → Apply → Review Diff → Run Checks → Finalize</span>
               <button type="button" onClick={submitPrompt} className="flex items-center gap-1 rounded border border-accent/40 bg-accent/20 px-3 py-1.5 text-[12px] font-semibold text-accent"><Play size={13} /> Send</button>
             </div>
+            {/* Motivation vs Logic: Surfacing the config link right here keeps model/provider tweaks close to the prompt context so sessions stay uninterrupted. */}
+            <div className="mt-1 text-[10px]">
+            <button
+              type="button"
+              onClick={() => setProviderConfigOpen(true)}
+              className="text-accent underline decoration-[1px] underline-offset-2 hover:text-[#d4d4d4] focus-visible:outline-accent/70"
+            >
+                Open Model Configs
+              </button>
+            </div>
           </div>
         </aside>
       )}
 
+      {folderBrowserOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeFolderBrowser();
+          }}
+        >
+          <div className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-xl border border-[#2a2a2a] bg-[#181818] p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold">Open local folder</h2>
+                <p className="mt-1 text-[12px] text-[#8b8b8b]">
+                  Browse your machine&apos;s filesystem and pick a project root. The selected absolute path is used directly—no upload prompt required.
+                </p>
+              </div>
+              <button type="button" onClick={closeFolderBrowser} className="rounded p-1 text-[#8b8b8b] hover:bg-[#2a2d2e]">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="mt-3 flex items-center gap-2">
+              <button
+                type="button"
+                title="Up one level"
+                onClick={() => {
+                  const next = folderBrowserParent.split('/').slice(0, -1).filter(Boolean).join('/');
+                  void loadFolderBrowserEntries(folderBrowserRoot, next);
+                }}
+                disabled={folderBrowserLoading || !folderBrowserParent}
+                className="rounded border border-[#2a2a2a] bg-[#252526] p-1.5 text-[#d4d4d4] hover:bg-[#2a2d2e] disabled:opacity-40"
+              >
+                <ChevronLeft size={14} />
+              </button>
+              <input
+                value={folderBrowserManualPath}
+                onChange={(event) => setFolderBrowserManualPath(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    const next = folderBrowserManualPath.trim();
+                    if (!next) return;
+                    void loadFolderBrowserEntries(next, '');
+                  }
+                }}
+                placeholder="/absolute/path/to/folder"
+                className="h-8 w-full rounded border border-[#2a2a2a] bg-[#1e1e1e] px-2 font-mono text-[11px] outline-none focus:border-accent/70"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const next = folderBrowserManualPath.trim();
+                  if (!next) return;
+                  void loadFolderBrowserEntries(next, '');
+                }}
+                className="rounded border border-[#2a2a2a] bg-[#252526] px-3 py-1.5 text-[11px] hover:bg-[#2a2d2e]"
+              >
+                Go
+              </button>
+            </div>
+            <div className="mt-2 flex items-center gap-1 text-[11px] text-[#8b8b8b]">
+              <span className="uppercase tracking-wider">Root</span>
+              <span className="font-mono text-[11px] text-[#d4d4d4]">{folderBrowserRoot || '—'}</span>
+              {folderBrowserParent && (
+                <>
+                  <span className="text-[#555]">/</span>
+                  <span className="font-mono text-[11px] text-[#d4d4d4]">{folderBrowserParent}</span>
+                </>
+              )}
+            </div>
+            <div className="mt-3 min-h-[200px] flex-1 overflow-y-auto rounded border border-[#2a2a2a] bg-[#0f0f0f]">
+              {folderBrowserLoading ? (
+                <div className="p-4 text-[12px] text-[#8b8b8b]">Loading…</div>
+              ) : folderBrowserError ? (
+                <div className="p-4 text-[12px] text-red-300">{folderBrowserError}</div>
+              ) : folderBrowserEntries.length === 0 ? (
+                <div className="p-4 text-[12px] text-[#8b8b8b]">This folder is empty.</div>
+              ) : (
+                <ul className="divide-y divide-[#1f1f1f]">
+                  {folderBrowserEntries.map((entry) => (
+                    <li key={`${entry.type}:${entry.path}`}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (entry.type !== 'dir') return;
+                          void loadFolderBrowserEntries(folderBrowserRoot, entry.path);
+                        }}
+                        disabled={entry.type !== 'dir'}
+                        className={`flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] hover:bg-[#1a1a1a] ${entry.type === 'dir' ? 'text-[#d4d4d4]' : 'cursor-default text-[#8b8b8b]'}`}
+                      >
+                        {entry.type === 'dir' ? (
+                          <Folder size={14} className="text-accent-warm" />
+                        ) : (
+                          <File size={14} className="text-ink-400" />
+                        )}
+                        <span className="flex-1 truncate">{entry.name}</span>
+                        <span className="text-[10px] uppercase tracking-wider text-[#6d6d6d]">{entry.type}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+              <span className="mr-auto text-[11px] text-[#8b8b8b]">
+                Opens the folder currently shown above as a Code Space project.
+              </span>
+              <button
+                type="button"
+                onClick={closeFolderBrowser}
+                className="rounded border border-[#2a2a2a] bg-[#252526] px-3 py-1.5 text-[12px] hover:bg-[#2a2d2e]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const root = folderBrowserRoot;
+                  const parent = folderBrowserParent;
+                  const absolute = parent ? `${root.replace(/\/+$/, '')}/${parent}` : root;
+                  void handleFolderBrowserSelect(absolute);
+                }}
+                disabled={folderBrowserLoading || (!folderBrowserRoot && !folderBrowserParent)}
+                className="rounded border border-accent/40 bg-accent/20 px-3 py-1.5 text-[12px] font-semibold text-accent hover:bg-accent/30 disabled:opacity-40"
+              >
+                Open this folder
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {modalOpen && (
         <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) setModalOpen(false); }}>
           <div className="w-full max-w-lg rounded-xl border border-[#2a2a2a] bg-[#181818] p-5 shadow-2xl">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h2 className="text-lg font-semibold">Fresh Start Planner</h2>
+                <h2 className="text-lg font-semibold">Fresh Start</h2>
                 <p className="mt-1 text-sm text-[#8b8b8b]">Upload the planning zip generated from Custom App, or brainstorm a new app there first.</p>
               </div>
               <button type="button" onClick={() => setModalOpen(false)} className="rounded p-1 text-[#8b8b8b] hover:bg-[#2a2d2e]"><X size={16} /></button>
@@ -915,6 +1512,70 @@ export function CodeSpaceWorkspace() {
             </div>
             {zipSummary && <div className="mt-4 rounded border border-green-400/40 bg-green-400/10 p-3 text-sm text-green-200">{zipSummary}</div>}
             {error && <details className="mt-4 rounded border border-red-400/40 bg-red-400/10 p-3 text-sm text-red-200"><summary>Upload or workspace error</summary><div className="mt-2 whitespace-pre-wrap font-mono text-xs">{error}</div></details>}
+          </div>
+        </div>
+      )}
+      {projectToDelete && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setProjectToDelete(null);
+          }}
+        >
+          <div className="w-full max-w-md rounded-xl border border-[#2a2a2a] bg-[#181818] p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold">Delete project</h2>
+                <p className="mt-1 text-sm text-[#8b8b8b]">
+                  This removes <span className="font-semibold text-[#d4d4d4]">{projectToDelete.name}</span> from disk permanently.
+                </p>
+              </div>
+              <button type="button" onClick={() => setProjectToDelete(null)} className="rounded p-1 text-[#8b8b8b] hover:bg-[#2a2d2e]">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="mt-4 text-[11px] text-[#8b8b8b]">
+              <div>Project root:</div>
+              <div className="font-mono text-[11px] text-[#d4d4d4]">{projectToDelete.rootPath ?? 'Unknown'}</div>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={() => setProjectToDelete(null)} className="rounded border border-[#2a2a2a] bg-[#252526] px-4 py-2 text-sm hover:bg-[#2a2d2e]">
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmProjectDeletion}
+                disabled={isDeletingProject}
+                className="rounded bg-red-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {isDeletingProject ? 'Deleting…' : 'Delete project'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {providerConfigOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setProviderConfigOpen(false);
+          }}
+        >
+          <div className="w-full max-w-md rounded-xl border border-[#2a2a2a] bg-[#181818] p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold">Model Configs</h2>
+                <p className="mt-1 text-sm text-[#8b8b8b]">Choose or validate the AI provider you want this session to use.</p>
+              </div>
+              <button type="button" onClick={() => setProviderConfigOpen(false)} className="rounded p-1 text-[#8b8b8b] hover:bg-[#2a2d2e]"><X size={16} /></button>
+            </div>
+            <div className="mt-4">
+              <ProviderConfig />
+            </div>
           </div>
         </div>
       )}

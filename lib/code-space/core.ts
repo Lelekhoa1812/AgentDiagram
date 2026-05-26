@@ -138,6 +138,8 @@ export interface CodeSpaceAgentSession {
   localCacheVersion: number;
 }
 
+export type CodeSpaceBottomTab = 'problems' | 'output' | 'debug' | 'terminal';
+
 const EXTENSION_LANGUAGE_MAP: Record<string, string> = {
   '.ts': 'typescript',
   '.tsx': 'typescript',

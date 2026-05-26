@@ -1,6 +1,6 @@
 'use client';
 
-import type { CodeSpaceAgentSession, CodeSpaceEditorTab, CodeSpaceProject } from './core';
+import type { CodeSpaceAgentSession, CodeSpaceBottomTab, CodeSpaceEditorTab, CodeSpaceProject } from './core';
 
 const DB_NAME = 'agentdiagram-code-space';
 const DB_VERSION = 1;
@@ -20,6 +20,7 @@ export interface CodeSpaceLayoutPreferences {
   minimapEnabled?: boolean;
   wordWrap?: boolean;
   revealHiddenFiles?: boolean;
+  bottomActiveTab?: CodeSpaceBottomTab;
 }
 
 function canUseIndexedDb(): boolean {
@@ -98,6 +99,16 @@ export async function readCodeSpaceProjects(): Promise<CodeSpaceProject[]> {
 
 export async function saveCodeSpaceProject(project: CodeSpaceProject): Promise<void> {
   await putInStore(PROJECT_STORE, project);
+}
+
+export async function deleteCodeSpaceProject(projectId: string): Promise<void> {
+  const db = await openCodeSpaceDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction([PROJECT_STORE], 'readwrite');
+    const request = tx.objectStore(PROJECT_STORE).delete(projectId);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
 }
 
 export async function readCodeSpaceSessions(): Promise<CodeSpaceAgentSession[]> {
