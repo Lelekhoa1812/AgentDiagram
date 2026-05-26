@@ -37,7 +37,9 @@ import { writeUiPreference } from '@/lib/state/uiPreferences';
 import {
   classifyCodeSpaceIntent,
   createCodeSpaceProject,
+  dedupeCodeSpaceProjects,
   detectCodeSpaceLanguage,
+  getCodeSpaceProjectDedupKey,
   isCodeSpaceHiddenPath,
   type CodeSpaceAgentSession,
   type CodeSpaceBottomTab,
@@ -262,7 +264,17 @@ export function CodeSpaceWorkspace() {
     void Promise.all([readCodeSpaceProjects(), readCodeSpaceSessions(), readCodeSpaceTabs()]).then(
       ([storedProjects, storedSessions, storedTabs]) => {
         // Root Cause vs Logic: Slow preference hydration was overwriting new projects/rows before the user saw them, so keep existing entries and only append the stored metadata.
-        setProjects((current) => mergeById(current, storedProjects));
+        // Motivation vs Logic: Older storage can hold two rows that resolve to the same folder (different ids generated before path normalization, or duplicates from re-adds). Dedupe after merge and purge the stale rows from IndexedDB so the sidebar matches what we persist.
+        setProjects((current) => {
+          const merged = mergeById(current, storedProjects);
+          const { kept, removed } = dedupeCodeSpaceProjects(merged);
+          const keptIds = new Set(kept.map((project) => project.id));
+          for (const stale of removed) {
+            if (keptIds.has(stale.id)) continue;
+            void deleteCodeSpaceProject(stale.id);
+          }
+          return kept;
+        });
         setSessions((current) => mergeById(current, storedSessions));
         setTabs((current) => mergeById(current, storedTabs));
         if (!preferences.activeProjectId && storedProjects[0]) {
@@ -384,7 +396,11 @@ export function CodeSpaceWorkspace() {
   }, []);
 
   // Root Cause vs Logic: `loadTree` depends on this helper via its dependency array, so declare it before `loadTree` to avoid the temporal dead zone that caused the ReferenceError.
-  // Motivation vs Logic: An empty project folder means there is no user content to inspect, so drop the stale entry automatically instead of leaving a dead project behind.
+  // Motivation vs Logic: A sidebar entry that resolves to an empty directory (or to a path that no
+  // longer exists on disk) is dead weight—e.g. a half-finished `git clone` that produced just a
+  // bare folder. We confirm the directory is genuinely empty by listing it with revealHidden=true
+  // and only then drop it from the sidebar and IndexedDB. We intentionally do NOT remove the
+  // directory on disk: the user explicitly added that path and may want to populate it later.
   const verifyAndDeleteEmptyProject = useCallback(
     async (project: CodeSpaceProject) => {
       if (!project.rootPath) return;
@@ -394,9 +410,12 @@ export function CodeSpaceWorkspace() {
         const params = new URLSearchParams({ rootPath: project.rootPath, path: '', revealHidden: 'true' });
         const res = await fetch(`/api/code-space/files?${params.toString()}`);
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error ?? 'Unable to verify folder contents');
-        if (Array.isArray(data.entries) && data.entries.length > 0) return;
-        await deleteProjectDirectory(project);
+        const missingOnDisk = !res.ok && /ENOENT|no such file|not found/i.test(data.error ?? '');
+        if (!res.ok && !missingOnDisk) {
+          throw new Error(data.error ?? 'Unable to verify folder contents');
+        }
+        const hasEntries = res.ok && Array.isArray(data.entries) && data.entries.length > 0;
+        if (hasEntries) return;
         finalizeProjectRemoval(project.id);
         await deleteCodeSpaceProject(project.id);
       } catch (err) {
@@ -405,7 +424,7 @@ export function CodeSpaceWorkspace() {
         autoDeletingProjectIds.current.delete(project.id);
       }
     },
-    [deleteProjectDirectory, finalizeProjectRemoval],
+    [finalizeProjectRemoval],
   );
 
   const loadTree = useCallback(
@@ -444,8 +463,10 @@ export function CodeSpaceWorkspace() {
 
   const loadTreeRef = useRef(loadTree);
   const refreshGitStatusRef = useRef(refreshGitStatus);
+  const verifyAndDeleteEmptyProjectRef = useRef(verifyAndDeleteEmptyProject);
   loadTreeRef.current = loadTree;
   refreshGitStatusRef.current = refreshGitStatus;
+  verifyAndDeleteEmptyProjectRef.current = verifyAndDeleteEmptyProject;
 
   // Root Cause vs Logic: Depending on `loadTree` in this effect re-ran whenever project state changed, causing a refresh loop; only react to active project / reveal-hidden changes.
   useEffect(() => {
@@ -455,10 +476,46 @@ export function CodeSpaceWorkspace() {
     void refreshGitStatusRef.current(project);
   }, [activeProjectId, revealHidden]);
 
+  // Motivation vs Logic: `loadTree` only sweeps the active project, so a non-active dead row (for
+  // example, a half-finished `git clone` that produced an empty folder named "triage") would sit
+  // in the sidebar until the user clicked it. Whenever the project list changes, check any
+  // projects we have not yet verified once in the background so empty entries fall off on their
+  // own. `emptyAutoDeleteCheckedIds` prevents duplicate checks per project per session.
+  useEffect(() => {
+    if (!projects.length) return;
+    const pending = projects.filter(
+      (project) =>
+        project.rootPath &&
+        !emptyAutoDeleteCheckedIds.current.has(project.id) &&
+        !autoDeletingProjectIds.current.has(project.id),
+    );
+    if (!pending.length) return;
+    for (const project of pending) {
+      emptyAutoDeleteCheckedIds.current.add(project.id);
+      void verifyAndDeleteEmptyProjectRef.current(project);
+    }
+  }, [projects]);
+
   const addProject = useCallback(
     async (project: CodeSpaceProject) => {
       const nextProject = { ...project, active: true };
-      setProjects((current) => [nextProject, ...current.map((item) => ({ ...item, active: false }))]);
+      // Motivation vs Logic: If the user re-opens a folder (or re-pastes the same GitHub URL) we
+      // want to refresh the existing sidebar row instead of stacking a second duplicate. Dedup by
+      // the normalized rootPath/repoUrl so two rows pointing at the same project collapse into
+      // one, and purge any stale IndexedDB rows whose ids differ from the surviving entry.
+      const nextDedupKey = getCodeSpaceProjectDedupKey(nextProject);
+      let staleIdsToDelete: string[] = [];
+      setProjects((current) => {
+        const merged = [nextProject, ...current.map((item) => ({ ...item, active: false }))];
+        const { kept, removed } = dedupeCodeSpaceProjects(merged);
+        staleIdsToDelete = removed
+          .filter((item) => item.id !== nextProject.id && getCodeSpaceProjectDedupKey(item) === nextDedupKey)
+          .map((item) => item.id);
+        return kept;
+      });
+      for (const staleId of staleIdsToDelete) {
+        void deleteCodeSpaceProject(staleId);
+      }
       setActiveProjectId(nextProject.id);
       await saveCodeSpaceProject(nextProject);
       void loadTree(nextProject, '');

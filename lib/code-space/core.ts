@@ -259,6 +259,60 @@ export function validateFreshStartManifest(filePaths: readonly string[]): {
   };
 }
 
+// Motivation vs Logic: Two saved projects that resolve to the same folder (or the same remote
+// clone URL) represent a single user intent—even if their generated IDs diverge slightly. We
+// expose a normalized key so the sidebar can dedupe entries that point at the same project.
+export function getCodeSpaceProjectDedupKey(
+  project: Pick<CodeSpaceProject, 'id' | 'rootPath' | 'source' | 'repoRef'>,
+): string {
+  const normalizedRoot = project.rootPath
+    ?.replace(/\\/g, '/')
+    .replace(/\/+$/, '')
+    .trim()
+    .toLowerCase();
+  if (normalizedRoot) return `root:${normalizedRoot}`;
+  const repoUrl = project.source?.repoUrl?.trim().toLowerCase();
+  if (repoUrl) return `repo:${repoUrl}`;
+  const repoRef = project.repoRef?.trim().toLowerCase();
+  if (repoRef) return `ref:${repoRef}`;
+  return `id:${project.id}`;
+}
+
+// Motivation vs Logic: Re-adding the same folder (or hydrating older storage that still has a
+// stale duplicate) used to leave the user with two identical sidebar rows. Dedupe by the shared
+// key, prefer the most recently touched (or currently active) entry, and report which rows can be
+// purged from IndexedDB so storage stays consistent with the rendered list.
+export function dedupeCodeSpaceProjects(projects: CodeSpaceProject[]): {
+  kept: CodeSpaceProject[];
+  removed: CodeSpaceProject[];
+} {
+  const byKey = new Map<string, CodeSpaceProject>();
+  const removed: CodeSpaceProject[] = [];
+
+  for (const project of projects) {
+    const key = getCodeSpaceProjectDedupKey(project);
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, project);
+      continue;
+    }
+    const preferProject =
+      project.updatedAt > existing.updatedAt ||
+      (project.updatedAt === existing.updatedAt && project.active && !existing.active);
+    if (preferProject) {
+      removed.push(existing);
+      byKey.set(key, { ...project, active: project.active || existing.active });
+    } else {
+      removed.push(project);
+      if (project.active && !existing.active) {
+        byKey.set(key, { ...existing, active: true });
+      }
+    }
+  }
+
+  return { kept: Array.from(byKey.values()), removed };
+}
+
 export function createCodeSpaceProject(input: {
   name: string;
   sourceType: CodeSpaceProjectSourceType;
