@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback, type FormEvent } from 'react';
 import { Bot, CheckCircle2, Loader2, XCircle, Zap } from 'lucide-react';
 import type { CodeSpaceAgentSession, CodeSpaceMessage } from '@/lib/code-space/core';
 import type { CodeSpaceAgentMode } from '@/lib/code-space/agentModes';
@@ -74,6 +74,15 @@ export function AgentPanel({
   const [prompt, setPrompt] = useState('');
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const adjustHeight = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    // 5 rows × 20px line-height + 12px padding (py-1.5 top+bottom) = 112px
+    el.style.height = `${Math.min(el.scrollHeight, 112)}px`;
+  }, []);
 
   const toolCalls = session?.toolCalls ?? [];
   const toolCallCount = session?.toolCallCount ?? 0;
@@ -101,6 +110,10 @@ export function AgentPanel({
     if (!value || isRunning) return;
     onSubmitPrompt(value);
     setPrompt('');
+    // Reset textarea height after clearing
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
   };
 
   return (
@@ -331,12 +344,24 @@ export function AgentPanel({
       </div>
 
       <form onSubmit={handleSubmit} className="flex-shrink-0 border-t border-[#30363d] p-2">
-        <div className="flex gap-2">
-          <input
+        <div className="flex items-end gap-2">
+          <textarea
+            ref={textareaRef}
             value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
+            onChange={(event) => {
+              setPrompt(event.target.value);
+              adjustHeight();
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                handleSubmit(event as unknown as FormEvent);
+              }
+            }}
             placeholder="Describe a task..."
-            className="flex-1 rounded border border-[#30363d] bg-[#161b22] px-2 py-1 text-[11px] text-[#e6edf3] outline-none placeholder:text-[#6e7681] focus:border-[#58a6ff]"
+            rows={1}
+            style={{ minHeight: '28px', maxHeight: '112px' }}
+            className="flex-1 resize-none rounded border border-[#30363d] bg-[#161b22] px-2 py-1.5 text-[11px] leading-5 text-[#e6edf3] outline-none placeholder:text-[#6e7681] focus:border-[#58a6ff] overflow-y-auto"
             disabled={isRunning}
           />
           {isRunning ? (
