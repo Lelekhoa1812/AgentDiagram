@@ -147,10 +147,20 @@ export function FileMentionInput({
   );
 
   // -------------------------------------------------------------------------
+  // Mirror scroll sync
+  // -------------------------------------------------------------------------
+  const handleScroll = useCallback(() => {
+    if (mirrorRef.current && textareaRef.current) {
+      mirrorRef.current.scrollTop = textareaRef.current.scrollTop;
+    }
+  }, []);
+
+  // -------------------------------------------------------------------------
   // Keyboard navigation inside textarea
   // -------------------------------------------------------------------------
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (disabled) return;
       const dropdownOpen = mentionQuery !== null && matchedFiles.length > 0;
 
       if (dropdownOpen) {
@@ -184,7 +194,7 @@ export function FileMentionInput({
         if (value.trim()) onSubmit();
       }
     },
-    [mentionQuery, matchedFiles, activeIndex, insertMention, value, onSubmit]
+    [disabled, mentionQuery, matchedFiles, activeIndex, insertMention, value, onSubmit]
   );
 
   // -------------------------------------------------------------------------
@@ -204,22 +214,6 @@ export function FileMentionInput({
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [mentionQuery]);
-
-  // Sync dropdown when value prop changes externally and contains an @ trigger
-  useEffect(() => {
-    const match = value.match(/@(\S*)$/);
-    if (match) {
-      const query = match[1] ?? '';
-      const filtered = fuzzyFilter(filePaths, query);
-      if (filtered.length > 0 && mentionQuery === null) {
-        setMentionQuery(query);
-        setMatchedFiles(filtered);
-        setActiveIndex(0);
-      }
-    }
-    // Only run when value or filePaths changes — not mentionQuery to avoid loops
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value, filePaths]);
 
   const dropdownOpen = mentionQuery !== null && matchedFiles.length > 0;
 
@@ -294,13 +288,14 @@ export function FileMentionInput({
           value={value}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
+          onScroll={handleScroll}
           placeholder={placeholder}
           disabled={disabled}
           rows={1}
           className="relative w-full resize-none bg-transparent px-2 py-1.5 font-mono text-[11px] leading-5 outline-none placeholder:text-[#6e7681] overflow-y-auto"
           style={{
             minHeight: '28px',
-            maxHeight: '112px',
+            maxHeight: `${MAX_HEIGHT}px`,
             color: 'transparent',   // hide textarea text — mirror renders it
             caretColor: '#e6edf3',  // caret stays visible
           }}
