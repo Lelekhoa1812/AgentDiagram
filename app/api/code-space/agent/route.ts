@@ -149,28 +149,31 @@ export async function POST(req: NextRequest) {
         await emitRuntime('run.created', { mode, toolBudget });
         await emitRuntime('run.started', { projectName });
 
-        const plan = buildPlan(mode, intents, promptForContext);
-        emit({ type: 'plan_created', items: plan });
-        await emitRuntime('plan.created', { items: plan });
-        plan.forEach((text, index) => emit({ type: 'todo_created', todo: { id: `todo:${runId}:${index}`, text, done: false } }));
-
         await emitTool('classify_task', { prompt: promptForContext, intents, mode }, async () => ({ intents, mode, modeContract: describeModeContract(mode) }));
-        emit({ type: 'todo_updated', todoId: `todo:${runId}:0`, done: true });
 
         const context = await emitTool('context_search', { openTabs, attachments, tools: registry.list().map((tool) => tool.name) }, async () =>
           collectProjectContext(guarded.resolved, promptForContext, openTabs, attachments),
         );
         await emitRuntime('context.search.completed', { selectedFiles: context.files.map((file) => file.path), summaries: context.files.map((file) => ({ path: file.path, summary: file.summary })), terms: context.terms, attachments });
-        emit({ type: 'todo_updated', todoId: `todo:${runId}:1`, done: true });
+
+        // Motivation vs Logic: Plan/todo scaffolds are user-visible commitments. Emit them only after repository
+        // evidence has been gathered and code-intelligence expansion has run, so the agent never appears to plan,
+        // ask MCQs, or implement from prompt text alone.
+        const plan = buildPlan(mode, intents, promptForContext);
+        emit({ type: 'plan_created', items: plan });
+        await emitRuntime('plan.created', { items: plan, evidenceFiles: context.files.map((file) => file.path) });
+        plan.forEach((text, index) => emit({ type: 'todo_created', todo: { id: `todo:${runId}:${index}`, text, done: false } }));
+        if (plan[0]) emit({ type: 'todo_updated', todoId: `todo:${runId}:0`, done: true });
+        if (plan[1]) emit({ type: 'todo_updated', todoId: `todo:${runId}:1`, done: true });
 
         const validation = await emitTool('validation_strategy', { mode, changedPaths: context.files.map((file) => file.path) }, async () => detectValidationCommands(guarded.resolved));
-        emit({ type: 'todo_updated', todoId: `todo:${runId}:2`, done: true });
 
         let filesChanged: string[] = [];
         let answer = '';
 
         if (mode === 'ask') {
           answer = await buildAskResponse(guarded.resolved, projectName, latestUserMessage.content, context, validation, body.data);
+          emit({ type: 'todo_updated', todoId: `todo:${runId}:2`, done: true });
         } else if (mode === 'plan') {
           const clarificationAnswers = extractPlanClarificationAnswers(messages);
           const questions = buildClarifyingQuestions(planningPrompt, intents, context);
@@ -179,6 +182,7 @@ export async function POST(req: NextRequest) {
             emit({ type: 'clarifying_questions_created', questions });
             await emitRuntime('plan.updated', { phase: 'clarification', questions: questions.map((question) => question.question) });
             answer = buildPlanClarificationResponse(projectName, context, questions);
+            emit({ type: 'todo_updated', todoId: `todo:${runId}:2`, done: true });
           } else {
             const planArtifact = await emitTool('write_plan_artifact', { projectName, prompt: planningPrompt, inspectedFiles: context.files.map((file) => file.path), answers: clarificationAnswers }, async () =>
               writePlanArtifact(guarded.resolved, sessionId, projectName, planningPrompt, context, validation, clarificationAnswers, body.data),
@@ -186,6 +190,8 @@ export async function POST(req: NextRequest) {
             filesChanged = [planArtifact.filePath];
             emit({ type: 'plan_markdown_created', filePath: planArtifact.filePath, content: planArtifact.content });
             answer = buildPlanResponse(projectName, planArtifact.filePath, context, validation);
+            emit({ type: 'todo_updated', todoId: `todo:${runId}:2`, done: true });
+            emit({ type: 'todo_updated', todoId: `todo:${runId}:3`, done: true });
           }
         } else {
           const proposal = await emitTool('autonomous_patch_planner', { provider: body.data.providerId, model: body.data.model, prompt: latestUserMessage.content, contextFiles: context.files.map((file) => file.path), folderScopes: attachments.filter((item) => item.kind === 'folder').map((item) => item.relativePath) }, async () =>
@@ -204,6 +210,8 @@ export async function POST(req: NextRequest) {
           }
           filesChanged = proposal.files.map((file) => file.path);
           answer = buildCodeResponse(projectName, proposal.files, validation, proposal.summary, applied.checkpoint?.snapshotRef);
+          emit({ type: 'todo_updated', todoId: `todo:${runId}:2`, done: true });
+          emit({ type: 'todo_updated', todoId: `todo:${runId}:3`, done: true });
         }
 
         for (const chunk of chunkText(answer)) {
@@ -239,14 +247,16 @@ export async function POST(req: NextRequest) {
 }
 
 export function buildPlan(mode: CodeSpaceAgentMode, intents: string[], prompt: string): string[] {
-  if (mode === 'ask') return ['Understand the question', 'Gather relevant project context', 'Answer directly'];
-  if (mode === 'plan') return ['Map request intent and planning depth', 'Run multi-perspective repository exploration', 'Ask detailed MCQ decisions when execution strategy is ambiguous', 'Write an operator-ready implementation plan artifact'];
-  if (isRefactorTask(prompt, intents)) return ['Inspect the current file, imports, exports, and references', 'Move or rename files on disk with shell-native operations instead of duplicating them', 'Search and repair every affected importer, export, and test', 'Run validation commands to confirm the refactor compiles cleanly'];
+  if (mode === 'ask') return ['Gather comprehensive repository evidence', 'Trace relevant symbols and references', 'Answer directly from inspected context'];
+  if (mode === 'plan') return ['Gather comprehensive repository evidence', 'Expand related files with symbol and reference context', 'Ask MCQ decisions only after inspected evidence reveals ambiguity', 'Write an operator-ready implementation plan artifact'];
+  if (isRefactorTask(prompt, intents)) return ['Gather comprehensive repository evidence', 'Inspect the current file, imports, exports, and references', 'Move or rename files on disk with shell-native operations instead of duplicating them', 'Search and repair every affected importer, export, and test', 'Run validation commands to confirm the refactor compiles cleanly'];
   const complex = shouldUseMultiAgent(prompt, intents);
-  return ['Understand the requested change', complex ? 'Explore likely implementation paths' : 'Inspect relevant source and tests', 'Apply the smallest safe change', 'Report changed files and validation'];
+  return ['Gather comprehensive repository evidence', complex ? 'Explore likely implementation paths from inspected files' : 'Inspect relevant source and tests', 'Apply the smallest safe change', 'Report changed files and validation'];
 }
 
 export function buildClarifyingQuestions(prompt = '', intents: string[] = [], context?: ContextSearchResult): CodeSpaceClarifyingQuestion[] {
+  if (!context?.files.length) return [];
+
   const text = prompt.toLowerCase();
   const questions: CodeSpaceClarifyingQuestion[] = [];
   const files = context?.files.map((file) => file.path) ?? [];
@@ -254,41 +264,47 @@ export function buildClarifyingQuestions(prompt = '', intents: string[] = [], co
   const hasFrontend = files.some((file) => /component|page|app|ui|style|css|tsx$/i.test(file));
   const featureLike = intents.some((intent) => ['feature_build', 'refactor', 'dependency/setup', 'styling/ui_change'].includes(intent));
 
-  if (featureLike || /plan|implement|build|improve|agent|workflow/i.test(text)) {
+  if (featureLike && (hasBackend || hasFrontend)) {
     questions.push({
-      id: 'planning-depth',
-      question: 'How deep should Plan mode go before it writes the final plan artifact?',
+      id: 'application-architecture',
+      question: 'Should this be implemented as a cohesive monolith/module inside the existing app, or split into micro-services?',
       choices: [
-        'Max-depth exploration (Recommended) — inspect broad context, summarize multiple implementation lanes, include risks, tests, and execution checkpoints.',
-        'Balanced product pass — inspect key files and write a practical implementation plan without exhaustive alternatives.',
-        'Fast tactical plan — focus only on the most likely files and keep the plan short.',
+        'Modular monolith inside the existing app (Recommended) — reuse current routing, state, auth/config, and validation boundaries.',
+        'Micro-services split — introduce separately deployed services with explicit network contracts and operational ownership.',
+        'Hybrid boundary — keep the UI/workflow in-app while isolating the highest-risk capability behind a service interface.',
       ],
     });
     questions.push({
-      id: 'build-execution',
-      question: 'What should the Build button do after a plan is approved?',
+      id: 'service-boundary',
+      question: 'If new API behavior is needed, should the REST API be served by a new dedicated service or merged into existing services?',
       choices: [
-        'Implement from the plan immediately in Code mode (Recommended) — read the plan artifact, edit files, and validate.',
-        'Create a checkpointed patch proposal first — show diffs for review before applying.',
-        'Re-open planning only if the plan is stale — otherwise proceed to implementation.',
+        'Merge into existing services/routes (Recommended) — preserve current service boundaries unless scaling or ownership requires a split.',
+        'Create a dedicated API service — use when lifecycle, deployment, security, or traffic profile should be independently managed.',
+        'Define an internal adapter first — keep callers stable while deciding later whether the implementation moves out-of-process.',
       ],
     });
+  }
+
+  if (featureLike && /agent|ai|llm|planner|planning|workflow|orchestration|tool|search|retrieval|evidence/i.test(text)) {
     questions.push({
-      id: 'agent-review-loop',
-      question: 'Which review loop should be represented in the plan before coding starts?',
+      id: 'agent-orchestration-boundary',
+      question: 'Where should agent/planner intelligence live in the architecture?',
       choices: [
-        'Explorer → planner → reviewer → implementer (Recommended) — separate context gathering, execution design, risk review, and coding checkpoints.',
-        'Planner → implementer — keep the workflow lean while preserving validation steps.',
-        'Reviewer-heavy — emphasize pre-build critique, edge cases, and rollback criteria before code changes.',
+        'Backend/runtime orchestrator (Recommended) — keep strategy, tool use, context loading, and implementation handoff close to execution state.',
+        'Frontend-guided workflow — let the UI collect design choices while backend services remain mostly deterministic.',
+        'Dedicated agent service — isolate model orchestration, traces, and long-running planning from the main app runtime.',
       ],
     });
+  }
+
+  if (featureLike && /data|database|schema|state|persist|cache|session|history|artifact|plan/i.test(text)) {
     questions.push({
-      id: 'validation-gate',
-      question: 'What validation gate should Code mode treat as acceptance?',
+      id: 'state-persistence',
+      question: 'How should durable planning/build state be stored?',
       choices: [
-        'Detected tests plus typecheck/build where available (Recommended) — run the strongest local checks discovered from the repo.',
-        'Focused tests only — prefer fast targeted checks around changed files.',
-        'Manual validation notes are acceptable — use when automated checks are missing or too expensive.',
+        'Reuse the existing session/artifact store (Recommended) — keep plan, build, and trace state in one recoverable workflow.',
+        'Introduce a dedicated planning table/collection — use if plans need independent lifecycle, permissions, or analytics.',
+        'Store only file artifacts — keep runtime state minimal and treat markdown/checkpoints as the source of truth.',
       ],
     });
   }
@@ -375,7 +391,7 @@ function normalizeRelativePath(filePath: string): string {
   return filePath.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '');
 }
 
-async function collectProjectContext(root: string, prompt: string, openTabs: string[], attachments: AgentAttachment[] = []): Promise<ContextSearchResult> {
+export async function collectProjectContext(root: string, prompt: string, openTabs: string[], attachments: AgentAttachment[] = []): Promise<ContextSearchResult> {
   const discoveredCandidates = await fg(CONTEXT_GLOBS, { cwd: root, onlyFiles: true, dot: true, absolute: false, unique: true });
   const candidates = [...discoveredCandidates];
   const buildPlanPath = extractBuildPlanPath(prompt);
@@ -412,8 +428,9 @@ async function collectProjectContext(root: string, prompt: string, openTabs: str
     .filter((item, index, arr) => arr.findIndex((other) => other.file === item.file) === index)
     .filter((item) => item.score > 0 || item.reasons.length > 0)
     .slice(0, 40);
+  const expanded = await expandContextWithCodeIntelligence(root, candidates, selected);
   const files: ContextFile[] = [];
-  for (const item of selected) {
+  for (const item of expanded) {
     const absolute = path.resolve(root, item.file);
     if (absolute !== root && !absolute.startsWith(`${root}${path.sep}`)) continue;
     try {
@@ -432,6 +449,107 @@ async function collectProjectContext(root: string, prompt: string, openTabs: str
     } catch {}
   }
   return { filesConsidered: discoveredCandidates.length, files, terms, omittedRelevantFiles: [] };
+}
+
+async function expandContextWithCodeIntelligence(
+  root: string,
+  candidates: string[],
+  selected: Array<{ file: string; score: number; reasons: string[] }>,
+): Promise<Array<{ file: string; score: number; reasons: string[] }>> {
+  const byFile = new Map(selected.map((item) => [item.file, { ...item, reasons: [...item.reasons] }]));
+  const selectedFiles = new Set(selected.map((item) => item.file));
+  const contentCache = new Map<string, string>();
+  const readCandidate = async (file: string) => {
+    const normalized = normalizeRelativePath(file);
+    if (contentCache.has(normalized)) return contentCache.get(normalized) ?? '';
+    const absolute = path.resolve(root, normalized);
+    if (absolute !== root && !absolute.startsWith(`${root}${path.sep}`)) return '';
+    try {
+      const content = await fs.readFile(absolute, 'utf8');
+      contentCache.set(normalized, content);
+      return content;
+    } catch {
+      contentCache.set(normalized, '');
+      return '';
+    }
+  };
+
+  const candidateSet = new Set(candidates.map(normalizeRelativePath));
+  const addExpanded = (file: string, score: number, reason: string) => {
+    const normalized = normalizeRelativePath(file);
+    if (!candidateSet.has(normalized) && !selectedFiles.has(normalized)) return;
+    const existing = byFile.get(normalized);
+    if (existing) {
+      existing.score = Math.max(existing.score, score);
+      if (!existing.reasons.includes(reason)) existing.reasons.push(reason);
+      return;
+    }
+    byFile.set(normalized, { file: normalized, score, reasons: [reason] });
+  };
+
+  // Motivation vs Logic: Code Space may not have a live language-server process, but planning still needs LSP-like
+  // evidence before asking questions or editing. This pass follows local imports and reverse importers so the agent
+  // sees nearby definitions/callers instead of relying on prompt terms alone.
+  for (const item of selected) {
+    const content = await readCandidate(item.file);
+    for (const specifier of extractLocalImportSpecifiers(content)) {
+      const resolved = resolveLocalImport(item.file, specifier, candidateSet);
+      if (resolved) addExpanded(resolved, item.score - 1, `code-intelligence dependency of ${item.file}`);
+    }
+  }
+
+  const selectedAfterDeps = Array.from(byFile.keys());
+  for (const candidate of candidates.map(normalizeRelativePath)) {
+    if (byFile.has(candidate)) continue;
+    const content = await readCandidate(candidate);
+    if (!content) continue;
+    for (const specifier of extractLocalImportSpecifiers(content)) {
+      const resolved = resolveLocalImport(candidate, specifier, candidateSet);
+      if (resolved && selectedAfterDeps.includes(resolved)) {
+        addExpanded(candidate, 28, `code-intelligence importer of ${resolved}`);
+        break;
+      }
+    }
+  }
+
+  return Array.from(byFile.values())
+    .sort((a, b) => b.score - a.score || a.file.localeCompare(b.file))
+    .slice(0, 48);
+}
+
+function extractLocalImportSpecifiers(content: string): string[] {
+  const specifiers = new Set<string>();
+  const patterns = [
+    /import\s+(?:type\s+)?(?:[^'"]+\s+from\s+)?['"](\.{1,2}\/[^'"]+)['"]/g,
+    /export\s+(?:type\s+)?(?:[^'"]+\s+from\s+)?['"](\.{1,2}\/[^'"]+)['"]/g,
+    /require\(\s*['"](\.{1,2}\/[^'"]+)['"]\s*\)/g,
+    /import\(\s*['"](\.{1,2}\/[^'"]+)['"]\s*\)/g,
+  ];
+  for (const pattern of patterns) {
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(content))) {
+      if (match[1]) specifiers.add(match[1]);
+    }
+  }
+  return Array.from(specifiers);
+}
+
+function resolveLocalImport(fromFile: string, specifier: string, candidateSet: Set<string>): string | null {
+  const baseDir = path.posix.dirname(normalizeRelativePath(fromFile));
+  const raw = normalizeRelativePath(path.posix.normalize(path.posix.join(baseDir, specifier)));
+  const possible = [
+    raw,
+    `${raw}.ts`,
+    `${raw}.tsx`,
+    `${raw}.js`,
+    `${raw}.jsx`,
+    `${raw}.json`,
+    `${raw}/index.ts`,
+    `${raw}/index.tsx`,
+    `${raw}/index.js`,
+    `${raw}/index.jsx`,
+  ];
+  return possible.find((candidate) => candidateSet.has(candidate)) ?? null;
 }
 
 function lowerContentHint(filePath: string): string {

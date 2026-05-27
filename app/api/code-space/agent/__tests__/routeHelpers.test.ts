@@ -1,21 +1,30 @@
 import { describe, expect, it } from 'vitest';
-import { buildClarifyingQuestions, buildPlan, buildPlanImplementationPrompt, extractBuildPlanPath } from '../route';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import {
+  buildClarifyingQuestions,
+  buildPlan,
+  buildPlanImplementationPrompt,
+  collectProjectContext,
+  extractBuildPlanPath,
+} from '../route';
 
 describe('Code Space agent route mode helpers', () => {
   it('builds a read-only Ask plan', () => {
     expect(buildPlan('ask', ['repository_explanation'], 'explain this repo')).toEqual([
-      'Understand the question',
-      'Gather relevant project context',
-      'Answer directly',
+      'Gather comprehensive repository evidence',
+      'Trace relevant symbols and references',
+      'Answer directly from inspected context',
     ]);
   });
 
   it('builds a deep Plan workflow and asks architecture/design MCQ clarifiers for ambiguous implementation prompts', () => {
     const plan = buildPlan('plan', ['feature_build'], 'make this better');
     expect(plan).toEqual([
-      'Map request intent and planning depth',
-      'Run multi-perspective repository exploration',
-      'Ask detailed MCQ decisions when execution strategy is ambiguous',
+      'Gather comprehensive repository evidence',
+      'Expand related files with symbol and reference context',
+      'Ask MCQ decisions only after inspected evidence reveals ambiguity',
       'Write an operator-ready implementation plan artifact',
     ]);
 
@@ -56,9 +65,39 @@ describe('Code Space agent route mode helpers', () => {
     expect(questions.map((question) => question.question).join('\n')).toMatch(/monolith|micro-services|dedicated service|existing service/i);
   });
 
+  it('does not ask planning MCQs before repository evidence has been inspected', () => {
+    expect(buildClarifyingQuestions('build a better planning workflow', ['feature_build'])).toEqual([]);
+    expect(
+      buildClarifyingQuestions('build a better planning workflow', ['feature_build'], {
+        filesConsidered: 12,
+        terms: [],
+        omittedRelevantFiles: [],
+        files: [],
+      }),
+    ).toEqual([]);
+  });
+
+  it('expands context with local imports and importers so planning starts from code evidence', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'code-space-context-'));
+    try {
+      await writeFile(path.join(root, 'feature.ts'), "import { helper } from './helper';\nexport function runFeature() { return helper(); }\n");
+      await writeFile(path.join(root, 'helper.ts'), 'export function helper() { return "ok"; }\n');
+      await writeFile(path.join(root, 'caller.ts'), "import { runFeature } from './feature';\nexport const value = runFeature();\n");
+
+      const context = await collectProjectContext(root, 'change feature.ts runFeature behavior', [], []);
+      const paths = context.files.map((file) => file.path);
+
+      expect(paths).toContain('feature.ts');
+      expect(paths).toContain('helper.ts');
+      expect(paths).toContain('caller.ts');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('keeps Code mode implementation-oriented without clarifying questions', () => {
     expect(buildPlan('code', ['bug_fix'], 'fix the failing build and run tests')).toEqual([
-      'Understand the requested change',
+      'Gather comprehensive repository evidence',
       'Inspect relevant source and tests',
       'Apply the smallest safe change',
       'Report changed files and validation',
@@ -70,6 +109,7 @@ describe('Code Space agent route mode helpers', () => {
     const plan = buildPlan('code', ['refactor'], 'rename the widgets folder and update imports');
 
     expect(plan).toEqual([
+      'Gather comprehensive repository evidence',
       'Inspect the current file, imports, exports, and references',
       'Move or rename files on disk with shell-native operations instead of duplicating them',
       'Search and repair every affected importer, export, and test',
