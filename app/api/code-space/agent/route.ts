@@ -40,6 +40,8 @@ const BodySchema = z.object({
   attachments: z.array(AttachmentSchema).optional().default([]),
 });
 
+type AgentRequest = z.infer<typeof BodySchema>;
+
 interface AgentAttachment {
   kind: 'file' | 'folder';
   relativePath: string;
@@ -68,6 +70,13 @@ interface ProposedPatchFile {
   afterContent: string;
   explanation: string;
   unifiedDiff: string;
+}
+
+interface PatchModelResult {
+  summary: string;
+  files: Array<{ path: string; afterContent: string; explanation: string }>;
+  validationCommands?: string[];
+  unableReason?: string;
 }
 
 export async function POST(req: NextRequest) {
@@ -99,13 +108,7 @@ export async function POST(req: NextRequest) {
       };
       const emitRuntime = async (type: AgentEventType, payload: unknown) => {
         const event = await eventStore.append(
-          createAgentEvent({
-            type,
-            sessionId,
-            runId,
-            projectId: projectName,
-            payload,
-          }),
+          createAgentEvent({ type, sessionId, runId, projectId: projectName, payload }),
         );
         emit({ type: 'structured_event', event });
       };
@@ -142,7 +145,7 @@ export async function POST(req: NextRequest) {
         const context = await emitTool('context_search', { openTabs, attachments, tools: registry.list().map((tool) => tool.name) }, async () =>
           collectProjectContext(guarded.resolved, latestUserMessage.content, openTabs, attachments),
         );
-        await emitRuntime('context.search.completed', { selectedFiles: context.files.map((file) => file.path), terms: context.terms });
+        await emitRuntime('context.search.completed', { selectedFiles: context.files.map((file) => file.path), terms: context.terms, attachments });
         emit({ type: 'todo_updated', todoId: `todo:${runId}:1`, done: true });
 
         const validation = await emitTool('validation_strategy', { mode, changedPaths: context.files.map((file) => file.path) }, async () => detectValidationCommands(guarded.resolved));
@@ -159,8 +162,8 @@ export async function POST(req: NextRequest) {
           emit({ type: 'plan_markdown_created', filePath: planArtifact.filePath, content: planArtifact.content });
           answer = buildPlanResponse(projectName, planArtifact.filePath, context, validation);
         } else {
-          const proposal = await emitTool('propose_patch', { prompt: latestUserMessage.content, contextFiles: context.files.map((file) => file.path) }, async () =>
-            proposeConservativePatch(guarded.resolved, latestUserMessage.content, context),
+          const proposal = await emitTool('autonomous_patch_planner', { prompt: latestUserMessage.content, contextFiles: context.files.map((file) => file.path), folderScopes: attachments.filter((item) => item.kind === 'folder').map((item) => item.relativePath) }, async () =>
+            proposeAutonomousPatch(guarded.resolved, latestUserMessage.content, context, body.data),
           );
           if (proposal.files.length) {
             for (const file of proposal.files) {
@@ -176,9 +179,9 @@ export async function POST(req: NextRequest) {
               await emitRuntime('patch.proposed', { path: file.path, explanation: file.explanation });
             }
             filesChanged = proposal.files.map((file) => file.path);
-            answer = buildCodeResponse(projectName, proposal.files, validation);
+            answer = buildCodeResponse(projectName, proposal.files, validation, proposal.summary);
           } else {
-            answer = buildNoPatchResponse(projectName, latestUserMessage.content, context, validation);
+            answer = buildNoPatchResponse(projectName, latestUserMessage.content, context, validation, proposal.summary);
           }
         }
 
@@ -223,18 +226,18 @@ export async function POST(req: NextRequest) {
 
 export function buildPlan(mode: CodeSpaceAgentMode, intents: string[], prompt: string): string[] {
   if (mode === 'ask') {
-    return ['Classify read-only request', 'Discover relevant context dynamically', 'Answer with evidence and no file mutation'];
+    return ['Classify read-only request', 'Autonomously discover relevant context', 'Answer with evidence and no file mutation'];
   }
 
   if (mode === 'plan') {
-    return ['Classify implementation intent', 'Discover relevant context and validation surfaces', 'Write a reusable planning artifact'];
+    return ['Classify implementation intent', 'Autonomously discover files, folders, and validation surfaces', 'Write a reusable planning artifact'];
   }
 
   const complex = shouldUseMultiAgent(prompt, intents);
   return [
     'Classify implementation request and blast radius',
-    complex ? 'Run multi-agent style exploration checklist' : 'Discover relevant source and validation context',
-    'Prepare the smallest reviewable code patch',
+    complex ? 'Run multi-agent style exploration checklist' : 'Autonomously explore source, tests, configs, and mentioned folders',
+    'Let the agent choose target files and prepare the smallest reviewable patch',
     'Defer disk mutation until the user accepts the diff',
   ];
 }
@@ -246,40 +249,51 @@ export function buildClarifyingQuestions(): CodeSpaceClarifyingQuestion[] {
 function describeModeContract(mode: CodeSpaceAgentMode): string {
   if (mode === 'ask') return 'Ask mode is read-only: inspect, explain, and cite evidence without creating patches.';
   if (mode === 'plan') return 'Plan mode creates a markdown implementation plan artifact and does not edit product source files.';
-  return 'Code mode proposes reviewable diffs and relies on checkpointed apply for mutation.';
+  return 'Code mode autonomously explores context, chooses target files, proposes reviewable diffs, and relies on checkpointed apply for mutation.';
 }
 
 function promptTerms(prompt: string): string[] {
-  return Array.from(new Set(prompt.toLowerCase().split(/[^a-z0-9_/-]+/).filter((term) => term.length > 2 && !STOP_WORDS.has(term)))).slice(0, 32);
+  return Array.from(new Set(prompt.toLowerCase().split(/[^a-z0-9_/-]+/).filter((term) => term.length > 2 && !STOP_WORDS.has(term)))).slice(0, 48);
 }
 
-const STOP_WORDS = new Set(['the', 'and', 'for', 'with', 'this', 'that', 'you', 'your', 'are', 'can', 'into', 'from', 'mode', 'code']);
-const CONTEXT_GLOBS = ['**/*.{ts,tsx,js,jsx,json,md,css,scss,py,go,rs,yml,yaml,toml}', '!node_modules/**', '!.git/**', '!dist/**', '!build/**', '!.next/**'];
+const STOP_WORDS = new Set(['the', 'and', 'for', 'with', 'this', 'that', 'you', 'your', 'are', 'can', 'into', 'from', 'mode', 'code', 'make', 'please', 'need']);
+const CONTEXT_GLOBS = ['**/*.{ts,tsx,js,jsx,json,md,css,scss,py,go,rs,java,kt,php,rb,sh,yml,yaml,toml}', '!node_modules/**', '!.git/**', '!dist/**', '!build/**', '!.next/**', '!coverage/**', '!__pycache__/**'];
+
+function normalizeRelativePath(filePath: string): string {
+  return filePath.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '');
+}
 
 async function collectProjectContext(root: string, prompt: string, openTabs: string[], attachments: AgentAttachment[] = []): Promise<ContextSearchResult> {
   const candidates = await fg(CONTEXT_GLOBS, { cwd: root, onlyFiles: true, dot: true, absolute: false, unique: true });
   const terms = promptTerms(prompt);
-  const attachedFiles = new Set(attachments.filter((item) => item.kind === 'file').map((item) => item.relativePath));
-  const attachedFolders = attachments.filter((item) => item.kind === 'folder').map((item) => item.relativePath.replace(/\/+$/, ''));
-  const selected = candidates
-    .map((file) => {
-      const lower = file.toLowerCase();
-      const reasons: string[] = [];
-      let score = 0;
-      const add = (amount: number, reason: string) => {
-        if (!amount) return;
-        score += amount;
-        reasons.push(reason);
-      };
-      add(attachedFiles.has(file) ? 80 : 0, '@ mentioned file');
-      add(attachedFolders.some((folder) => folder && file.startsWith(`${folder}/`)) ? 40 : 0, '@ mentioned folder');
-      add(openTabs.includes(file) ? 28 : 0, 'open tab');
-      add(/package\.json|tsconfig|next\.config|readme|agent|code-space|runtime|route|test/i.test(file) ? 8 : 0, 'high-signal project file');
-      add(terms.reduce((sum, term) => sum + (lower.includes(term) ? 5 : 0), 0), 'prompt/path overlap');
-      return { file, score, reasons };
-    })
-    .sort((a, b) => b.score - a.score || a.file.localeCompare(b.file))
-    .slice(0, 16);
+  const attachedFiles = new Set(attachments.filter((item) => item.kind === 'file').map((item) => normalizeRelativePath(item.relativePath)));
+  const attachedFolders = attachments.filter((item) => item.kind === 'folder').map((item) => normalizeRelativePath(item.relativePath));
+  const normalizedOpenTabs = new Set(openTabs.map(normalizeRelativePath));
+
+  const scored = candidates.map((file) => {
+    const normalizedFile = normalizeRelativePath(file);
+    const lower = normalizedFile.toLowerCase();
+    const reasons: string[] = [];
+    let score = 0;
+    const add = (amount: number, reason: string) => {
+      if (!amount) return;
+      score += amount;
+      reasons.push(reason);
+    };
+    add(attachedFiles.has(normalizedFile) ? 150 : 0, '@File exact scope');
+    const folderScope = attachedFolders.find((folder) => normalizedFile === folder || normalizedFile.startsWith(`${folder}/`));
+    add(folderScope ? 120 - Math.min(normalizedFile.split('/').length, 12) : 0, folderScope ? `@Folder scope: ${folderScope}` : '');
+    add(normalizedOpenTabs.has(normalizedFile) ? 60 : 0, 'open tab');
+    add(/package\.json|requirements\.txt|pyproject\.toml|tsconfig|next\.config|readme|agent|code-space|runtime|route|test|spec/i.test(normalizedFile) ? 18 : 0, 'high-signal project file');
+    add(terms.reduce((sum, term) => sum + (lower.includes(term) ? 8 : 0), 0), 'prompt/path overlap');
+    add(/(__tests__|\.test\.|\.spec\.|tests?\/)/i.test(normalizedFile) ? 10 : 0, 'test surface');
+    return { file: normalizedFile, score, reasons };
+  });
+
+  const explicitFolderFiles = scored.filter((item) => item.reasons.some((reason) => reason.startsWith('@Folder scope'))).slice(0, 40);
+  const selected = [...explicitFolderFiles, ...scored.sort((a, b) => b.score - a.score || a.file.localeCompare(b.file))]
+    .filter((item, index, arr) => arr.findIndex((other) => other.file === item.file) === index)
+    .slice(0, 32);
 
   const files: ContextFile[] = [];
   for (const item of selected) {
@@ -287,7 +301,7 @@ async function collectProjectContext(root: string, prompt: string, openTabs: str
     if (absolute !== root && !absolute.startsWith(`${root}${path.sep}`)) continue;
     try {
       const content = await fs.readFile(absolute, 'utf8');
-      files.push({ path: item.file, content: content.slice(0, 12_000), truncated: content.length > 12_000, lineCount: content.split('\n').length, score: item.score, reasons: item.reasons });
+      files.push({ path: item.file, content: content.slice(0, 18_000), truncated: content.length > 18_000, lineCount: content.split('\n').length, score: item.score, reasons: item.reasons });
     } catch {}
   }
 
@@ -295,19 +309,57 @@ async function collectProjectContext(root: string, prompt: string, openTabs: str
 }
 
 async function detectValidationCommands(root: string): Promise<{ commands: Array<{ kind: 'typecheck' | 'lint' | 'test' | 'build'; command: string; reason: string }>; packageManager: string | null }> {
-  try {
-    const pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8')) as { scripts?: Record<string, string>; packageManager?: string };
-    const packageManager = await detectPackageManager(root, pkg.packageManager);
-    const scripts = pkg.scripts ?? {};
-    const commands: Array<{ kind: 'typecheck' | 'lint' | 'test' | 'build'; command: string; reason: string }> = [];
-    if (scripts.typecheck) commands.push({ kind: 'typecheck', command: `${packageManager} run typecheck`, reason: 'TypeScript/no-emit validation is available.' });
-    if (scripts.lint) commands.push({ kind: 'lint', command: `${packageManager} run lint`, reason: 'Lint validation is available.' });
-    if (scripts.test) commands.push({ kind: 'test', command: `${packageManager} run test`, reason: 'Automated tests are available.' });
-    if (scripts.build) commands.push({ kind: 'build', command: `${packageManager} run build`, reason: 'Production build validation is available.' });
-    return { commands, packageManager };
-  } catch {
-    return { commands: [], packageManager: null };
+  const commands: Array<{ kind: 'typecheck' | 'lint' | 'test' | 'build'; command: string; reason: string }> = [];
+  let packageManager: string | null = null;
+
+  const packageJsonPath = await findFirst(root, ['package.json', 'frontend/package.json', 'client/package.json', 'app/package.json', 'web/package.json']);
+  if (packageJsonPath) {
+    try {
+      const pkg = JSON.parse(await fs.readFile(path.join(root, packageJsonPath), 'utf8')) as { scripts?: Record<string, string>; packageManager?: string };
+      const packageRoot = path.dirname(packageJsonPath);
+      packageManager = await detectPackageManager(path.join(root, packageRoot), pkg.packageManager);
+      const prefix = packageRoot === '.' ? '' : `cd ${packageRoot} && `;
+      const scripts = pkg.scripts ?? {};
+      if (scripts.typecheck) commands.push({ kind: 'typecheck', command: `${prefix}${packageManager} run typecheck`, reason: 'TypeScript/no-emit validation is available.' });
+      if (scripts.lint) commands.push({ kind: 'lint', command: `${prefix}${packageManager} run lint`, reason: 'Lint validation is available.' });
+      if (scripts.test) commands.push({ kind: 'test', command: `${prefix}${packageManager} run test`, reason: 'Automated tests are available.' });
+      if (scripts.build) commands.push({ kind: 'build', command: `${prefix}${packageManager} run build`, reason: 'Production build validation is available.' });
+    } catch {}
   }
+
+  const pythonConfig = await findFirst(root, ['pyproject.toml', 'requirements.txt', 'backend/requirements.txt', 'api/requirements.txt', 'pytest.ini', 'setup.py']);
+  if (pythonConfig) {
+    const pythonRoot = path.dirname(pythonConfig);
+    const prefix = pythonRoot === '.' ? '' : `cd ${pythonRoot} && `;
+    commands.push({ kind: 'typecheck', command: `${prefix}python -m compileall .`, reason: 'Python syntax compilation is available.' });
+    if (await hasAny(root, ['tests', 'test', `${pythonRoot}/tests`, `${pythonRoot}/test`, 'pytest.ini', 'pyproject.toml'])) {
+      commands.push({ kind: 'test', command: `${prefix}python -m pytest`, reason: 'Python pytest validation appears available.' });
+    }
+  }
+
+  if (!commands.length && (await hasAny(root, ['go.mod']))) {
+    commands.push({ kind: 'test', command: 'go test ./...', reason: 'Go module validation is available.' });
+  }
+
+  if (!commands.length) {
+    commands.push({ kind: 'typecheck', command: 'manual review', reason: 'No project-specific validation command was detected; review the proposed diff manually.' });
+  }
+
+  return { commands, packageManager };
+}
+
+async function findFirst(root: string, relativePaths: string[]): Promise<string | null> {
+  for (const relativePath of relativePaths) {
+    if (await exists(path.join(root, relativePath))) return relativePath.includes('/') ? relativePath : `./${relativePath}`.replace(/^\.\//, '');
+  }
+  return null;
+}
+
+async function hasAny(root: string, relativePaths: string[]): Promise<boolean> {
+  for (const relativePath of relativePaths) {
+    if (await exists(path.join(root, relativePath))) return true;
+  }
+  return false;
 }
 
 async function detectPackageManager(root: string, packageManager?: string): Promise<string> {
@@ -329,36 +381,29 @@ async function exists(filePath: string): Promise<boolean> {
   }
 }
 
-async function writePlanArtifact(
-  root: string,
-  sessionId: string,
-  projectName: string,
-  prompt: string,
-  context: ContextSearchResult,
-  validation: Awaited<ReturnType<typeof detectValidationCommands>>,
-): Promise<{ filePath: string; content: string }> {
+async function writePlanArtifact(root: string, sessionId: string, projectName: string, prompt: string, context: ContextSearchResult, validation: Awaited<ReturnType<typeof detectValidationCommands>>): Promise<{ filePath: string; content: string }> {
   const filePath = `.agent/plans/${sessionId.replace(/[^a-zA-Z0-9_.-]+/g, '-')}.md`;
   const absolute = path.join(root, filePath);
   const content = [
     `# Code Space Plan — ${projectName}`,
     '',
-    `## User request`,
+    '## User request',
     prompt,
     '',
     '## Definition of Done',
-    '- The implementation is represented as the smallest reviewable patch set.',
+    '- The agent chooses implementation files autonomously from repository evidence; users may narrow scope with @File or @Folder, but are not required to.',
     '- Every edited file is read before patch proposal.',
     '- Syntax pre-validation passes before disk write.',
     '- Checkpoint is created before apply, with restore available.',
     '- Typecheck, lint, tests, and build are run when available after acceptance.',
     '',
     '## Evidence reviewed',
-    ...(context.files.length ? context.files.map((file) => `- ${file.path} (${file.lineCount} lines${file.truncated ? ', truncated' : ''})`) : ['- No source files selected.']),
+    ...(context.files.length ? context.files.map((file) => `- ${file.path} (${file.lineCount} lines${file.truncated ? ', truncated' : ''}; ${file.reasons.join(', ') || 'selected'})`) : ['- No source files selected.']),
     '',
     '## Implementation sequence',
-    '1. Confirm exact files to mutate via @Files/@Folder/open tabs or semantic search.',
-    '2. Read target files and related tests/usages.',
-    '3. Generate exact SEARCH/REPLACE edit blocks.',
+    '1. Explore @Folder scopes, @File scopes, open tabs, tests, configs, and prompt-matching files.',
+    '2. Let the model choose the mutation targets from the discovered evidence.',
+    '3. Generate exact reviewable diffs.',
     '4. Preview patch and run syntax pre-validation.',
     '5. Request user diff approval.',
     '6. Apply with checkpoint and run validation commands.',
@@ -380,10 +425,10 @@ function buildAskResponse(projectName: string, prompt: string, context: ContextS
   return [
     'Mode: Ask',
     '',
-    `For ${projectName}, I inspected relevant project context without mutating files.`,
+    `For ${projectName}, I autonomously inspected relevant project context without mutating files.`,
     '',
     'Evidence reviewed:',
-    ...(context.files.length ? context.files.slice(0, 10).map((file) => `- ${file.path}`) : ['- No readable source files were selected.']),
+    ...(context.files.length ? context.files.slice(0, 12).map((file) => `- ${file.path}`) : ['- No readable source files were selected.']),
     '',
     `Request interpreted as: ${prompt}`,
     '',
@@ -400,18 +445,18 @@ function buildPlanResponse(projectName: string, planPath: string, context: Conte
     `Created an implementation plan for ${projectName}:`,
     `- ${planPath}`,
     '',
-    'The plan includes DoDs, implementation sequence, validation gates, and rollback expectations.',
+    'The plan includes autonomous context discovery, DoDs, implementation sequence, validation gates, and rollback expectations.',
     '',
     `Context files considered: ${context.files.length}. Validation commands: ${validation.commands.length}.`,
   ].join('\n');
 }
 
-function buildCodeResponse(projectName: string, files: ProposedPatchFile[], validation: Awaited<ReturnType<typeof detectValidationCommands>>): string {
+function buildCodeResponse(projectName: string, files: ProposedPatchFile[], validation: Awaited<ReturnType<typeof detectValidationCommands>>, summary?: string): string {
   return [
     'Mode: Code',
     '',
-    `Prepared ${files.length} reviewable patch proposal(s) for ${projectName}.`,
-    '',
+    `Prepared ${files.length} autonomous, reviewable patch proposal(s) for ${projectName}.`,
+    summary ? `\nPlanner summary: ${summary}\n` : '',
     'Proposed files:',
     ...files.map((file) => `- ${file.path}: ${file.explanation}`),
     '',
@@ -421,89 +466,132 @@ function buildCodeResponse(projectName: string, files: ProposedPatchFile[], vali
   ].join('\n');
 }
 
-function buildNoPatchResponse(projectName: string, prompt: string, context: ContextSearchResult, validation: Awaited<ReturnType<typeof detectValidationCommands>>): string {
+function buildNoPatchResponse(projectName: string, prompt: string, context: ContextSearchResult, validation: Awaited<ReturnType<typeof detectValidationCommands>>, summary?: string): string {
   return [
     'Mode: Code',
     '',
-    `For ${projectName}, I could not safely infer a concrete source edit from the available context.`,
+    `For ${projectName}, I explored the codebase autonomously but did not produce a safe patch proposal.`,
+    summary ? `Planner summary: ${summary}` : '',
     '',
     'Evidence reviewed:',
-    ...(context.files.length ? context.files.slice(0, 8).map((file) => `- ${file.path}`) : ['- No readable source files were selected.']),
+    ...(context.files.length ? context.files.slice(0, 12).map((file) => `- ${file.path}`) : ['- No readable source files were selected.']),
     '',
     `Request: ${prompt}`,
     '',
-    'Provide an exact @File or a more specific change request to generate a surgical patch.',
+    'The agent no longer requires an exact @File. Use @Folder only when you want to narrow the autonomous search scope to a directory.',
     `Available validation: ${validation.commands.map((command) => command.command).join(', ') || 'none detected'}.`,
   ].join('\n');
 }
 
-async function proposeConservativePatch(root: string, prompt: string, context: ContextSearchResult): Promise<{ files: ProposedPatchFile[] }> {
-  const lowerPrompt = prompt.toLowerCase();
-  const planCandidate = /definition of done|dod|agentic|coding agent|code space|cursor|claude code|workflow|blueprint/.test(lowerPrompt);
-  if (!planCandidate) return { files: [] };
+async function proposeAutonomousPatch(root: string, prompt: string, context: ContextSearchResult, request: AgentRequest): Promise<{ summary: string; files: ProposedPatchFile[] }> {
+  if (!context.files.length) return { summary: 'No readable files were discovered in the workspace.', files: [] };
 
-  const filePath = 'docs/superpowers/specs/code-space-agentic-runtime-dods.md';
-  const target = path.join(root, filePath);
-  let beforeContent = '';
-  try {
-    beforeContent = await fs.readFile(target, 'utf8');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  const modelResult = await callPatchPlannerModel(prompt, context, request).catch((error) => ({
+    summary: `Model-backed patch planning failed: ${error instanceof Error ? error.message : String(error)}`,
+    files: [] as PatchModelResult['files'],
+    unableReason: 'model_failed',
+  }));
+
+  const files: ProposedPatchFile[] = [];
+  for (const file of modelResult.files ?? []) {
+    const relativePath = normalizeRelativePath(file.path);
+    if (!relativePath || relativePath.startsWith('../') || relativePath.includes('/../')) continue;
+    const target = path.resolve(root, relativePath);
+    if (target !== root && !target.startsWith(`${root}${path.sep}`)) continue;
+    let beforeContent = '';
+    try {
+      beforeContent = await fs.readFile(target, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    if (beforeContent === file.afterContent) continue;
+    const diagnostics = validateSyntaxLightweight(relativePath, file.afterContent);
+    if (diagnostics.length) throw new Error(`Generated patch for ${relativePath} failed syntax pre-validation: ${diagnostics[0].message}`);
+    files.push({
+      path: relativePath,
+      beforeContent,
+      afterContent: file.afterContent,
+      explanation: file.explanation || modelResult.summary || 'Autonomous code patch',
+      unifiedDiff: createUnifiedDiff(relativePath, beforeContent, file.afterContent),
+    });
   }
 
-  const afterContent = buildRuntimeDodDocument(prompt, context);
-  const diagnostics = validateSyntaxLightweight(filePath, afterContent);
-  if (diagnostics.length) throw new Error(`Generated DoD document failed validation: ${diagnostics[0].message}`);
-
-  return {
-    files: [
-      {
-        path: filePath,
-        beforeContent,
-        afterContent,
-        explanation: 'Add high-definition DoDs and execution blueprint for the fully agentic Code Space runtime.',
-        unifiedDiff: createUnifiedDiff(filePath, beforeContent, afterContent),
-      },
-    ],
-  };
+  return { summary: modelResult.summary || modelResult.unableReason || 'Autonomous patch planner completed.', files };
 }
 
-function buildRuntimeDodDocument(prompt: string, context: ContextSearchResult): string {
-  return [
-    '# Code Space Agentic Runtime — Definitions of Done',
-    '',
-    '## Source request',
-    prompt,
-    '',
-    '## DoD 1 — Ask / Plan / Code mode parity',
-    '- Ask mode is strictly read-only and never proposes disk mutation.',
-    '- Plan mode writes a planning artifact with assumptions, scope, risks, validation gates, and rollback plan.',
-    '- Code mode proposes checkpointed, reviewable patches and does not apply them without user approval.',
-    '',
-    '## DoD 2 — Dynamic context discovery',
-    '- Context selection starts with @Files/@Folder/open tabs and expands through search, dependency tracing, and validation surfaces.',
-    '- Large outputs are persisted as artifacts and inspected through bounded read/grep tools.',
-    '- Agents must read target files before editing and must not edit from snippets alone.',
-    '',
-    '## DoD 3 — Surgical editing',
-    '- All model-facing edits use exact SEARCH/REPLACE blocks or server-generated before/after proposals.',
-    '- The server rejects missing or non-unique SEARCH blocks instead of fuzzy applying.',
-    '- Syntax pre-validation runs before patch application.',
-    '',
-    '## DoD 4 — Verification and self-healing',
-    '- After accepted patches, the runtime runs detected typecheck, lint, test, and build commands when available.',
-    '- Failing logs are stored as artifacts with read hints for repair turns.',
-    '- Repair turns stay scoped to failing files and stop after a bounded retry budget.',
-    '',
-    '## DoD 5 — Checkpoint and rollback',
-    '- Every accepted patch creates a file checkpoint before write.',
-    '- Checkpoints can be restored deterministically through the checkpoint restore API.',
-    '- UI refreshes editor state, tree, and git status after apply/rollback.',
-    '',
-    '## Current evidence reviewed',
-    ...(context.files.length ? context.files.map((file) => `- ${file.path}`) : ['- No context files selected.']),
-    '',
+async function callPatchPlannerModel(prompt: string, context: ContextSearchResult, request: AgentRequest): Promise<PatchModelResult> {
+  if (!request.apiKey && request.providerId !== 'local') {
+    return { summary: 'No provider API key is configured, so autonomous code generation cannot call a model yet.', files: [], unableReason: 'missing_api_key' };
+  }
+
+  const system = [
+    'You are Code Space Autonomous Patch Planner.',
+    'You are allowed to choose files yourself from repository evidence. Do not ask the user to provide an exact @File.',
+    'If @Folder context is present, treat it as an exact directory scope and prefer files inside it.',
+    'Return only JSON. No markdown. No code fences.',
+    'Schema: {"summary":"string","files":[{"path":"relative/path","afterContent":"complete full file content","explanation":"why changed"}],"validationCommands":["optional command"]}.',
+    'Rules: preserve existing style, keep the smallest safe change, and include complete afterContent for every changed or new file.',
   ].join('\n');
+  const contextBlock = context.files
+    .map((file) => [`--- FILE ${file.path} (${file.reasons.join(', ') || 'selected'}) ---`, file.content, file.truncated ? '\n[TRUNCATED]' : ''].join('\n'))
+    .join('\n\n');
+  const user = [`Task: ${prompt}`, '', 'Repository evidence:', contextBlock].join('\n');
+
+  if (request.providerId === 'anthropic') {
+    const response = await fetch(request.endpoint ?? 'https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': request.apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: request.model,
+        max_tokens: 8096,
+        system,
+        messages: [{ role: 'user', content: user }],
+      }),
+    });
+    if (!response.ok) throw new Error(`Anthropic patch planner failed: ${response.status} ${await response.text()}`);
+    const json = (await response.json()) as { content?: Array<{ type: string; text?: string }> };
+    return parsePlannerJson(json.content?.map((block) => block.text ?? '').join('\n') ?? '');
+  }
+
+  const baseUrl = request.providerId === 'local' ? request.endpoint || 'http://localhost:11434/v1' : request.endpoint || 'https://api.openai.com/v1';
+  const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...(request.apiKey ? { authorization: `Bearer ${request.apiKey}` } : {}),
+    },
+    body: JSON.stringify({
+      model: request.model,
+      temperature: request.localTemperature ?? 0.2,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      response_format: { type: 'json_object' },
+    }),
+  });
+  if (!response.ok) throw new Error(`OpenAI-compatible patch planner failed: ${response.status} ${await response.text()}`);
+  const json = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+  return parsePlannerJson(json.choices?.[0]?.message?.content ?? '');
+}
+
+function parsePlannerJson(raw: string): PatchModelResult {
+  const trimmed = raw.trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
+  const parsed = JSON.parse(trimmed) as Partial<PatchModelResult>;
+  return {
+    summary: String(parsed.summary ?? parsed.unableReason ?? 'Patch planner returned a response.'),
+    files: Array.isArray(parsed.files)
+      ? parsed.files
+          .filter((file) => file && typeof file.path === 'string' && typeof file.afterContent === 'string')
+          .map((file) => ({ path: file.path, afterContent: file.afterContent, explanation: String(file.explanation ?? 'Autonomous patch') }))
+      : [],
+    validationCommands: Array.isArray(parsed.validationCommands) ? parsed.validationCommands.map(String) : undefined,
+    unableReason: parsed.unableReason ? String(parsed.unableReason) : undefined,
+  };
 }
 
 function shouldUseMultiAgent(prompt: string, intents: string[]): boolean {
