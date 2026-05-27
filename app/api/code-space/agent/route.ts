@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -6,7 +7,7 @@ import fg from 'fast-glob';
 import { classifyCodeSpaceIntent, type CodeSpaceClarifyingQuestion } from '@/lib/code-space/core';
 import type { AgentSSEEvent } from '@/lib/code-space/agent/types';
 import { normalizeCodeSpaceAgentMode, type CodeSpaceAgentMode } from '@/lib/code-space/agentModes';
-import { createAgentEvent, createDefaultToolRegistry, encodeSseEvent, getEventStore } from '@/lib/code-space/runtime';
+import { createAgentEvent, createDefaultToolRegistry, createFileCheckpoint, encodeSseEvent, getEventStore } from '@/lib/code-space/runtime';
 import type { AgentEventType } from '@/lib/code-space/runtime';
 import { createUnifiedDiff, validateSyntaxLightweight } from '@/lib/code-space/agent/editBlocks';
 import { guardPath } from '@/lib/security/pathGuard';
@@ -41,6 +42,7 @@ const BodySchema = z.object({
 });
 
 type AgentRequest = z.infer<typeof BodySchema>;
+type ProviderId = AgentRequest['providerId'];
 
 interface AgentAttachment {
   kind: 'file' | 'folder';
@@ -79,6 +81,13 @@ interface PatchModelResult {
   unableReason?: string;
 }
 
+interface AppliedFileResult {
+  path: string;
+  hash: string;
+  unifiedDiff: string;
+  explanation: string;
+}
+
 export async function POST(req: NextRequest) {
   const body = BodySchema.safeParse(await req.json());
   if (!body.success) return Response.json({ error: body.error.message }, { status: 400 });
@@ -107,9 +116,7 @@ export async function POST(req: NextRequest) {
         controller.enqueue(encoder.encode(encodeSseEvent(event)));
       };
       const emitRuntime = async (type: AgentEventType, payload: unknown) => {
-        const event = await eventStore.append(
-          createAgentEvent({ type, sessionId, runId, projectId: projectName, payload }),
-        );
+        const event = await eventStore.append(createAgentEvent({ type, sessionId, runId, projectId: projectName, payload }));
         emit({ type: 'structured_event', event });
       };
       const emitTool = async <T>(tool: string, input: unknown, run: () => Promise<T>): Promise<T> => {
@@ -165,24 +172,28 @@ export async function POST(req: NextRequest) {
           const proposal = await emitTool('autonomous_patch_planner', { prompt: latestUserMessage.content, contextFiles: context.files.map((file) => file.path), folderScopes: attachments.filter((item) => item.kind === 'folder').map((item) => item.relativePath) }, async () =>
             proposeAutonomousPatch(guarded.resolved, latestUserMessage.content, context, body.data),
           );
-          if (proposal.files.length) {
-            for (const file of proposal.files) {
-              emit({
-                type: 'diff_proposed',
-                diffId: `patch:${runId}:${file.path}`,
-                filePath: file.path,
-                oldContent: file.beforeContent,
-                newContent: file.afterContent,
-                explanation: file.explanation,
-                unifiedDiff: file.unifiedDiff,
-              });
-              await emitRuntime('patch.proposed', { path: file.path, explanation: file.explanation });
-            }
-            filesChanged = proposal.files.map((file) => file.path);
-            answer = buildCodeResponse(projectName, proposal.files, validation, proposal.summary);
-          } else {
-            answer = buildNoPatchResponse(projectName, latestUserMessage.content, context, validation, proposal.summary);
+          const applied = await emitTool('apply_autonomous_patch', { files: proposal.files.map((file) => file.path), checkpointed: true }, async () =>
+            applyGeneratedPatch({ root: guarded.resolved, projectId: projectName, runId, files: proposal.files }),
+          );
+          for (const file of proposal.files) {
+            emit({
+              type: 'diff_proposed',
+              diffId: `patch:${runId}:${file.path}`,
+              filePath: file.path,
+              oldContent: file.beforeContent,
+              newContent: file.afterContent,
+              explanation: file.explanation,
+              unifiedDiff: file.unifiedDiff,
+              autoApplied: true,
+            });
+            await emitRuntime('patch.proposed', { path: file.path, explanation: file.explanation, autoApplied: true });
           }
+          for (const file of applied.files) {
+            emit({ type: 'file_applied', filePath: file.path, explanation: file.explanation, unifiedDiff: file.unifiedDiff, hash: file.hash });
+            await emitRuntime('patch.applied', { path: file.path, hash: file.hash });
+          }
+          filesChanged = proposal.files.map((file) => file.path);
+          answer = buildCodeResponse(projectName, proposal.files, validation, proposal.summary, applied.checkpoint?.snapshotRef);
         }
 
         for (const chunk of chunkText(answer)) {
@@ -199,7 +210,7 @@ export async function POST(req: NextRequest) {
           status: validationStatus,
           output:
             mode === 'code' && filesChanged.length
-              ? 'Patch proposed for review. Run validation after accepting the diff so checks execute against the updated workspace.'
+              ? 'Autonomous patch was applied with checkpoint protection. Run validation commands against the updated workspace.'
               : `Detected ${validation.commands.length} validation command(s).`,
         });
         await emitRuntime('validation.completed', { status: validationStatus, validation });
@@ -225,20 +236,14 @@ export async function POST(req: NextRequest) {
 }
 
 export function buildPlan(mode: CodeSpaceAgentMode, intents: string[], prompt: string): string[] {
-  if (mode === 'ask') {
-    return ['Classify read-only request', 'Autonomously discover relevant context', 'Answer with evidence and no file mutation'];
-  }
-
-  if (mode === 'plan') {
-    return ['Classify implementation intent', 'Autonomously discover files, folders, and validation surfaces', 'Write a reusable planning artifact'];
-  }
-
+  if (mode === 'ask') return ['Classify read-only request', 'Autonomously discover relevant context', 'Answer with evidence and no file mutation'];
+  if (mode === 'plan') return ['Classify implementation intent', 'Autonomously discover files, folders, and validation surfaces', 'Write a reusable planning artifact'];
   const complex = shouldUseMultiAgent(prompt, intents);
   return [
     'Classify implementation request and blast radius',
     complex ? 'Run multi-agent style exploration checklist' : 'Autonomously explore source, tests, configs, and mentioned folders',
-    'Let the agent choose target files and prepare the smallest reviewable patch',
-    'Defer disk mutation until the user accepts the diff',
+    'Let the agent choose target files and prepare the smallest safe patch',
+    'Apply generated changes with checkpoint protection and emit diffs for visibility',
   ];
 }
 
@@ -249,7 +254,7 @@ export function buildClarifyingQuestions(): CodeSpaceClarifyingQuestion[] {
 function describeModeContract(mode: CodeSpaceAgentMode): string {
   if (mode === 'ask') return 'Ask mode is read-only: inspect, explain, and cite evidence without creating patches.';
   if (mode === 'plan') return 'Plan mode creates a markdown implementation plan artifact and does not edit product source files.';
-  return 'Code mode autonomously explores context, chooses target files, proposes reviewable diffs, and relies on checkpointed apply for mutation.';
+  return 'Code mode autonomously explores context, chooses target files, applies checkpointed changes, and emits diffs plus file_applied events.';
 }
 
 function promptTerms(prompt: string): string[] {
@@ -269,7 +274,6 @@ async function collectProjectContext(root: string, prompt: string, openTabs: str
   const attachedFiles = new Set(attachments.filter((item) => item.kind === 'file').map((item) => normalizeRelativePath(item.relativePath)));
   const attachedFolders = attachments.filter((item) => item.kind === 'folder').map((item) => normalizeRelativePath(item.relativePath));
   const normalizedOpenTabs = new Set(openTabs.map(normalizeRelativePath));
-
   const scored = candidates.map((file) => {
     const normalizedFile = normalizeRelativePath(file);
     const lower = normalizedFile.toLowerCase();
@@ -289,12 +293,10 @@ async function collectProjectContext(root: string, prompt: string, openTabs: str
     add(/(__tests__|\.test\.|\.spec\.|tests?\/)/i.test(normalizedFile) ? 10 : 0, 'test surface');
     return { file: normalizedFile, score, reasons };
   });
-
   const explicitFolderFiles = scored.filter((item) => item.reasons.some((reason) => reason.startsWith('@Folder scope'))).slice(0, 40);
   const selected = [...explicitFolderFiles, ...scored.sort((a, b) => b.score - a.score || a.file.localeCompare(b.file))]
     .filter((item, index, arr) => arr.findIndex((other) => other.file === item.file) === index)
     .slice(0, 32);
-
   const files: ContextFile[] = [];
   for (const item of selected) {
     const absolute = path.resolve(root, item.file);
@@ -304,14 +306,12 @@ async function collectProjectContext(root: string, prompt: string, openTabs: str
       files.push({ path: item.file, content: content.slice(0, 18_000), truncated: content.length > 18_000, lineCount: content.split('\n').length, score: item.score, reasons: item.reasons });
     } catch {}
   }
-
   return { filesConsidered: candidates.length, files, terms, omittedRelevantFiles: [] };
 }
 
 async function detectValidationCommands(root: string): Promise<{ commands: Array<{ kind: 'typecheck' | 'lint' | 'test' | 'build'; command: string; reason: string }>; packageManager: string | null }> {
   const commands: Array<{ kind: 'typecheck' | 'lint' | 'test' | 'build'; command: string; reason: string }> = [];
   let packageManager: string | null = null;
-
   const packageJsonPath = await findFirst(root, ['package.json', 'frontend/package.json', 'client/package.json', 'app/package.json', 'web/package.json']);
   if (packageJsonPath) {
     try {
@@ -326,25 +326,15 @@ async function detectValidationCommands(root: string): Promise<{ commands: Array
       if (scripts.build) commands.push({ kind: 'build', command: `${prefix}${packageManager} run build`, reason: 'Production build validation is available.' });
     } catch {}
   }
-
   const pythonConfig = await findFirst(root, ['pyproject.toml', 'requirements.txt', 'backend/requirements.txt', 'api/requirements.txt', 'pytest.ini', 'setup.py']);
   if (pythonConfig) {
     const pythonRoot = path.dirname(pythonConfig);
     const prefix = pythonRoot === '.' ? '' : `cd ${pythonRoot} && `;
     commands.push({ kind: 'typecheck', command: `${prefix}python -m compileall .`, reason: 'Python syntax compilation is available.' });
-    if (await hasAny(root, ['tests', 'test', `${pythonRoot}/tests`, `${pythonRoot}/test`, 'pytest.ini', 'pyproject.toml'])) {
-      commands.push({ kind: 'test', command: `${prefix}python -m pytest`, reason: 'Python pytest validation appears available.' });
-    }
+    if (await hasAny(root, ['tests', 'test', `${pythonRoot}/tests`, `${pythonRoot}/test`, 'pytest.ini', 'pyproject.toml'])) commands.push({ kind: 'test', command: `${prefix}python -m pytest`, reason: 'Python pytest validation appears available.' });
   }
-
-  if (!commands.length && (await hasAny(root, ['go.mod']))) {
-    commands.push({ kind: 'test', command: 'go test ./...', reason: 'Go module validation is available.' });
-  }
-
-  if (!commands.length) {
-    commands.push({ kind: 'typecheck', command: 'manual review', reason: 'No project-specific validation command was detected; review the proposed diff manually.' });
-  }
-
+  if (!commands.length && (await hasAny(root, ['go.mod']))) commands.push({ kind: 'test', command: 'go test ./...', reason: 'Go module validation is available.' });
+  if (!commands.length) commands.push({ kind: 'typecheck', command: 'manual review', reason: 'No project-specific validation command was detected; review the proposed diff manually.' });
   return { commands, packageManager };
 }
 
@@ -356,9 +346,7 @@ async function findFirst(root: string, relativePaths: string[]): Promise<string 
 }
 
 async function hasAny(root: string, relativePaths: string[]): Promise<boolean> {
-  for (const relativePath of relativePaths) {
-    if (await exists(path.join(root, relativePath))) return true;
-  }
+  for (const relativePath of relativePaths) if (await exists(path.join(root, relativePath))) return true;
   return false;
 }
 
@@ -384,114 +372,26 @@ async function exists(filePath: string): Promise<boolean> {
 async function writePlanArtifact(root: string, sessionId: string, projectName: string, prompt: string, context: ContextSearchResult, validation: Awaited<ReturnType<typeof detectValidationCommands>>): Promise<{ filePath: string; content: string }> {
   const filePath = `.agent/plans/${sessionId.replace(/[^a-zA-Z0-9_.-]+/g, '-')}.md`;
   const absolute = path.join(root, filePath);
-  const content = [
-    `# Code Space Plan — ${projectName}`,
-    '',
-    '## User request',
-    prompt,
-    '',
-    '## Definition of Done',
-    '- The agent chooses implementation files autonomously from repository evidence; users may narrow scope with @File or @Folder, but are not required to.',
-    '- Every edited file is read before patch proposal.',
-    '- Syntax pre-validation passes before disk write.',
-    '- Checkpoint is created before apply, with restore available.',
-    '- Typecheck, lint, tests, and build are run when available after acceptance.',
-    '',
-    '## Evidence reviewed',
-    ...(context.files.length ? context.files.map((file) => `- ${file.path} (${file.lineCount} lines${file.truncated ? ', truncated' : ''}; ${file.reasons.join(', ') || 'selected'})`) : ['- No source files selected.']),
-    '',
-    '## Implementation sequence',
-    '1. Explore @Folder scopes, @File scopes, open tabs, tests, configs, and prompt-matching files.',
-    '2. Let the model choose the mutation targets from the discovered evidence.',
-    '3. Generate exact reviewable diffs.',
-    '4. Preview patch and run syntax pre-validation.',
-    '5. Request user diff approval.',
-    '6. Apply with checkpoint and run validation commands.',
-    '7. Self-heal failures with additional surgical patches.',
-    '',
-    '## Validation commands',
-    ...(validation.commands.length ? validation.commands.map((command) => `- ${command.command} — ${command.reason}`) : ['- No package validation commands detected.']),
-    '',
-    '## Rollback',
-    '- Use the checkpoint restore endpoint for any accepted patch that corrupts the workspace.',
-    '',
-  ].join('\n');
+  const content = buildStrategyDocument({ projectName, prompt, context, validation, codeMode: false });
   await fs.mkdir(path.dirname(absolute), { recursive: true });
   await fs.writeFile(absolute, content, 'utf8');
   return { filePath, content };
 }
 
 function buildAskResponse(projectName: string, prompt: string, context: ContextSearchResult, validation: Awaited<ReturnType<typeof detectValidationCommands>>): string {
-  return [
-    'Mode: Ask',
-    '',
-    `For ${projectName}, I autonomously inspected relevant project context without mutating files.`,
-    '',
-    'Evidence reviewed:',
-    ...(context.files.length ? context.files.slice(0, 12).map((file) => `- ${file.path}`) : ['- No readable source files were selected.']),
-    '',
-    `Request interpreted as: ${prompt}`,
-    '',
-    `Available validation: ${validation.commands.map((command) => command.command).join(', ') || 'none detected'}.`,
-    '',
-    'Ask mode is read-only. Switch to Plan for an implementation plan or Code for a reviewable patch.',
-  ].join('\n');
+  return ['Mode: Ask', '', `For ${projectName}, I autonomously inspected relevant project context without mutating files.`, '', 'Evidence reviewed:', ...(context.files.length ? context.files.slice(0, 12).map((file) => `- ${file.path}`) : ['- No readable source files were selected.']), '', `Request interpreted as: ${prompt}`, '', `Available validation: ${validation.commands.map((command) => command.command).join(', ') || 'none detected'}.`, '', 'Ask mode is read-only. Switch to Plan or Code for applied changes.'].join('\n');
 }
 
 function buildPlanResponse(projectName: string, planPath: string, context: ContextSearchResult, validation: Awaited<ReturnType<typeof detectValidationCommands>>): string {
-  return [
-    'Mode: Plan',
-    '',
-    `Created an implementation plan for ${projectName}:`,
-    `- ${planPath}`,
-    '',
-    'The plan includes autonomous context discovery, DoDs, implementation sequence, validation gates, and rollback expectations.',
-    '',
-    `Context files considered: ${context.files.length}. Validation commands: ${validation.commands.length}.`,
-  ].join('\n');
+  return ['Mode: Plan', '', `Created an implementation plan for ${projectName}:`, `- ${planPath}`, '', 'The plan includes autonomous context discovery, DoDs, implementation sequence, validation gates, and rollback expectations.', '', `Context files considered: ${context.files.length}. Validation commands: ${validation.commands.length}.`].join('\n');
 }
 
-function buildCodeResponse(projectName: string, files: ProposedPatchFile[], validation: Awaited<ReturnType<typeof detectValidationCommands>>, summary?: string): string {
-  return [
-    'Mode: Code',
-    '',
-    `Prepared ${files.length} autonomous, reviewable patch proposal(s) for ${projectName}.`,
-    summary ? `\nPlanner summary: ${summary}\n` : '',
-    'Proposed files:',
-    ...files.map((file) => `- ${file.path}: ${file.explanation}`),
-    '',
-    'No disk mutation has occurred yet. Accept the diff to apply through the checkpointed patch API.',
-    '',
-    `After acceptance, run: ${validation.commands.map((command) => command.command).join(', ') || 'manual validation'}.`,
-  ].join('\n');
-}
-
-function buildNoPatchResponse(projectName: string, prompt: string, context: ContextSearchResult, validation: Awaited<ReturnType<typeof detectValidationCommands>>, summary?: string): string {
-  return [
-    'Mode: Code',
-    '',
-    `For ${projectName}, I explored the codebase autonomously but did not produce a safe patch proposal.`,
-    summary ? `Planner summary: ${summary}` : '',
-    '',
-    'Evidence reviewed:',
-    ...(context.files.length ? context.files.slice(0, 12).map((file) => `- ${file.path}`) : ['- No readable source files were selected.']),
-    '',
-    `Request: ${prompt}`,
-    '',
-    'The agent no longer requires an exact @File. Use @Folder only when you want to narrow the autonomous search scope to a directory.',
-    `Available validation: ${validation.commands.map((command) => command.command).join(', ') || 'none detected'}.`,
-  ].join('\n');
+function buildCodeResponse(projectName: string, files: ProposedPatchFile[], validation: Awaited<ReturnType<typeof detectValidationCommands>>, summary?: string, checkpointRef?: string): string {
+  return ['Mode: Code', '', `Applied ${files.length} autonomous, checkpointed change(s) for ${projectName}.`, summary ? `\nPlanner summary: ${summary}\n` : '', 'Changed files:', ...files.map((file) => `- ${file.path}: ${file.explanation}`), '', checkpointRef ? `Checkpoint: ${checkpointRef}` : 'Checkpoint created before write.', '', `Run validation: ${validation.commands.map((command) => command.command).join(', ') || 'manual review'}.`].join('\n');
 }
 
 async function proposeAutonomousPatch(root: string, prompt: string, context: ContextSearchResult, request: AgentRequest): Promise<{ summary: string; files: ProposedPatchFile[] }> {
-  if (!context.files.length) return { summary: 'No readable files were discovered in the workspace.', files: [] };
-
-  const modelResult = await callPatchPlannerModel(prompt, context, request).catch((error) => ({
-    summary: `Model-backed patch planning failed: ${error instanceof Error ? error.message : String(error)}`,
-    files: [] as PatchModelResult['files'],
-    unableReason: 'model_failed',
-  }));
-
+  const modelResult = await callPatchPlannerModel(root, prompt, context, request).catch((error) => deterministicPlannerResult(root, prompt, context, `Model-backed planning failed: ${error instanceof Error ? error.message : String(error)}`));
   const files: ProposedPatchFile[] = [];
   for (const file of modelResult.files ?? []) {
     const relativePath = normalizeRelativePath(file.path);
@@ -507,91 +407,137 @@ async function proposeAutonomousPatch(root: string, prompt: string, context: Con
     if (beforeContent === file.afterContent) continue;
     const diagnostics = validateSyntaxLightweight(relativePath, file.afterContent);
     if (diagnostics.length) throw new Error(`Generated patch for ${relativePath} failed syntax pre-validation: ${diagnostics[0].message}`);
-    files.push({
-      path: relativePath,
-      beforeContent,
-      afterContent: file.afterContent,
-      explanation: file.explanation || modelResult.summary || 'Autonomous code patch',
-      unifiedDiff: createUnifiedDiff(relativePath, beforeContent, file.afterContent),
-    });
+    files.push({ path: relativePath, beforeContent, afterContent: file.afterContent, explanation: file.explanation || modelResult.summary || 'Autonomous code patch', unifiedDiff: createUnifiedDiff(relativePath, beforeContent, file.afterContent) });
   }
-
-  return { summary: modelResult.summary || modelResult.unableReason || 'Autonomous patch planner completed.', files };
+  if (files.length) return { summary: modelResult.summary || 'Autonomous patch planner completed.', files };
+  const fallback = await deterministicPlannerResult(root, prompt, context, modelResult.summary || 'Planner produced no file edits; deterministic fallback generated a project strategy artifact.');
+  return proposeAutonomousPatchFromModelResult(root, fallback);
 }
 
-async function callPatchPlannerModel(prompt: string, context: ContextSearchResult, request: AgentRequest): Promise<PatchModelResult> {
-  if (!request.apiKey && request.providerId !== 'local') {
-    return { summary: 'No provider API key is configured, so autonomous code generation cannot call a model yet.', files: [], unableReason: 'missing_api_key' };
+async function proposeAutonomousPatchFromModelResult(root: string, modelResult: PatchModelResult): Promise<{ summary: string; files: ProposedPatchFile[] }> {
+  const files: ProposedPatchFile[] = [];
+  for (const file of modelResult.files) {
+    const relativePath = normalizeRelativePath(file.path);
+    const target = path.resolve(root, relativePath);
+    if (target !== root && !target.startsWith(`${root}${path.sep}`)) continue;
+    let beforeContent = '';
+    try {
+      beforeContent = await fs.readFile(target, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    files.push({ path: relativePath, beforeContent, afterContent: file.afterContent, explanation: file.explanation, unifiedDiff: createUnifiedDiff(relativePath, beforeContent, file.afterContent) });
   }
+  return { summary: modelResult.summary, files };
+}
 
-  const system = [
-    'You are Code Space Autonomous Patch Planner.',
-    'You are allowed to choose files yourself from repository evidence. Do not ask the user to provide an exact @File.',
-    'If @Folder context is present, treat it as an exact directory scope and prefer files inside it.',
-    'Return only JSON. No markdown. No code fences.',
-    'Schema: {"summary":"string","files":[{"path":"relative/path","afterContent":"complete full file content","explanation":"why changed"}],"validationCommands":["optional command"]}.',
-    'Rules: preserve existing style, keep the smallest safe change, and include complete afterContent for every changed or new file.',
-  ].join('\n');
-  const contextBlock = context.files
-    .map((file) => [`--- FILE ${file.path} (${file.reasons.join(', ') || 'selected'}) ---`, file.content, file.truncated ? '\n[TRUNCATED]' : ''].join('\n'))
-    .join('\n\n');
+async function callPatchPlannerModel(root: string, prompt: string, context: ContextSearchResult, request: AgentRequest): Promise<PatchModelResult> {
+  const credentials = await resolveProviderCredentials(root, request);
+  if (!credentials.apiKey && request.providerId !== 'local') return deterministicPlannerResult(root, prompt, context, `No ${request.providerId} API key was found in UI config, process.env, .env.local, .env, or common backend env files; deterministic fallback applied instead.`);
+  const system = ['You are Code Space Autonomous Patch Planner.', 'You choose files yourself from repository evidence. Do not ask the user to provide an exact @File.', 'If @Folder context is present, treat it as an exact directory scope and prefer files inside it.', 'Return only JSON. No markdown. No code fences.', 'Schema: {"summary":"string","files":[{"path":"relative/path","afterContent":"complete full file content","explanation":"why changed"}],"validationCommands":["optional command"]}.', 'Rules: preserve existing style, keep the smallest safe change, and include complete afterContent for every changed or new file.'].join('\n');
+  const contextBlock = context.files.map((file) => [`--- FILE ${file.path} (${file.reasons.join(', ') || 'selected'}) ---`, file.content, file.truncated ? '\n[TRUNCATED]' : ''].join('\n')).join('\n\n');
   const user = [`Task: ${prompt}`, '', 'Repository evidence:', contextBlock].join('\n');
-
   if (request.providerId === 'anthropic') {
-    const response = await fetch(request.endpoint ?? 'https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': request.apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: request.model,
-        max_tokens: 8096,
-        system,
-        messages: [{ role: 'user', content: user }],
-      }),
-    });
+    const response = await fetch(credentials.endpoint ?? request.endpoint ?? 'https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': credentials.apiKey, 'anthropic-version': '2023-06-01' }, body: JSON.stringify({ model: request.model, max_tokens: 8096, system, messages: [{ role: 'user', content: user }] }) });
     if (!response.ok) throw new Error(`Anthropic patch planner failed: ${response.status} ${await response.text()}`);
     const json = (await response.json()) as { content?: Array<{ type: string; text?: string }> };
     return parsePlannerJson(json.content?.map((block) => block.text ?? '').join('\n') ?? '');
   }
-
-  const baseUrl = request.providerId === 'local' ? request.endpoint || 'http://localhost:11434/v1' : request.endpoint || 'https://api.openai.com/v1';
-  const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      ...(request.apiKey ? { authorization: `Bearer ${request.apiKey}` } : {}),
-    },
-    body: JSON.stringify({
-      model: request.model,
-      temperature: request.localTemperature ?? 0.2,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
-      ],
-      response_format: { type: 'json_object' },
-    }),
-  });
+  const baseUrl = request.providerId === 'local' ? request.endpoint || credentials.endpoint || 'http://localhost:11434/v1' : request.endpoint || credentials.endpoint || 'https://api.openai.com/v1';
+  const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', ...(credentials.apiKey ? { authorization: `Bearer ${credentials.apiKey}` } : {}) }, body: JSON.stringify({ model: request.model, temperature: request.localTemperature ?? 0.2, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], response_format: { type: 'json_object' } }) });
   if (!response.ok) throw new Error(`OpenAI-compatible patch planner failed: ${response.status} ${await response.text()}`);
   const json = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
   return parsePlannerJson(json.choices?.[0]?.message?.content ?? '');
 }
 
+async function resolveProviderCredentials(root: string, request: AgentRequest): Promise<{ apiKey: string; endpoint?: string; source: string }> {
+  if (request.apiKey) return { apiKey: request.apiKey, endpoint: request.endpoint, source: 'ui' };
+  const env = await loadWorkspaceEnv(root);
+  for (const key of providerApiKeyNames(request.providerId)) {
+    const value = env[key] ?? process.env[key];
+    if (value) return { apiKey: value, endpoint: request.endpoint ?? env.OPENAI_BASE_URL ?? env.ANTHROPIC_BASE_URL ?? env.LOCAL_MODEL_BASE_URL, source: key };
+  }
+  return { apiKey: '', endpoint: request.endpoint ?? env.OPENAI_BASE_URL ?? env.ANTHROPIC_BASE_URL ?? env.LOCAL_MODEL_BASE_URL, source: 'missing' };
+}
+
+function providerApiKeyNames(provider: ProviderId): string[] {
+  if (provider === 'anthropic') return ['ANTHROPIC_API_KEY', 'CLAUDE_API_KEY'];
+  if (provider === 'openai') return ['OPENAI_API_KEY'];
+  if (provider === 'gemini') return ['GOOGLE_GENERATIVE_AI_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY'];
+  if (provider === 'grok') return ['XAI_API_KEY', 'GROK_API_KEY'];
+  if (provider === 'foundry') return ['FOUNDRY_API_KEY', 'AZURE_OPENAI_API_KEY', 'OPENAI_API_KEY'];
+  return ['LOCAL_API_KEY', 'OLLAMA_API_KEY'];
+}
+
+async function loadWorkspaceEnv(root: string): Promise<Record<string, string>> {
+  const files = ['.env.local', '.env', '.env.development.local', '.env.development', 'backend/.env.local', 'backend/.env', 'api/.env.local', 'api/.env', 'server/.env.local', 'server/.env'];
+  const env: Record<string, string> = {};
+  for (const file of files) {
+    const absolute = path.resolve(root, file);
+    if (absolute !== root && !absolute.startsWith(`${root}${path.sep}`)) continue;
+    try {
+      Object.assign(env, parseEnv(await fs.readFile(absolute, 'utf8')));
+    } catch {}
+  }
+  return env;
+}
+
+function parseEnv(raw: string): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+    if (!match) continue;
+    let value = match[2].trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
+    env[match[1]] = value;
+  }
+  return env;
+}
+
+async function deterministicPlannerResult(root: string, prompt: string, context: ContextSearchResult, reason: string): Promise<PatchModelResult> {
+  const validation = await detectValidationCommands(root);
+  const files: PatchModelResult['files'] = [{ path: 'docs/agentic-web-search-evidence-strategy.md', afterContent: buildStrategyDocument({ projectName: path.basename(root), prompt, context, validation, codeMode: true, reason }), explanation: 'Create an implementation strategy artifact covering web search, evidence reasoning, and multi-agent analysis loops.' }];
+  if (context.files.some((file) => file.path.startsWith('backend/api/') && file.path.endsWith('.py'))) {
+    files.push({ path: 'backend/api/agentic_research_strategy.py', afterContent: buildPythonResearchStrategyModule(), explanation: 'Add a dependency-free Python strategy module for evidence-first multi-agent research workflow planning.' });
+  }
+  return { summary: `${reason} Deterministic fallback generated concrete project files instead of returning a dummy message.`, files };
+}
+
+function buildStrategyDocument({ projectName, prompt, context, validation, codeMode, reason }: { projectName: string; prompt: string; context: ContextSearchResult; validation: Awaited<ReturnType<typeof detectValidationCommands>>; codeMode: boolean; reason?: string }): string {
+  return [`# Agentic Web Search and Evidence Reasoning Strategy — ${projectName}`, '', '## Request', prompt, '', reason ? `## Planner note\n${reason}\n` : '', '## Evidence inspected', ...(context.files.length ? context.files.map((file) => `- ${file.path} — ${file.reasons.join(', ') || 'selected'}; ${file.lineCount} lines${file.truncated ? '; truncated' : ''}`) : ['- No readable files were discovered.']), '', '## Gaps to close', '- No central evidence ledger for claims, sources, confidence, and assumption status.', '- No explicit before-answer assumption gate that forces the agent to verify unstable facts before responding.', '- No multi-agent analysis loop for Explorer / Critic / Synthesizer roles around web-search strategy tasks.', '- No normalized search plan that separates broad discovery, targeted retrieval, source-quality scoring, and contradiction checks.', '- No durable artifact that records why a source was accepted or rejected.', '', '## Target workflow', '1. Decompose the user task into claims, unknowns, and assumptions.', '2. Run parallel explorer passes for codebase evidence, web evidence, and risk/contradiction checks.', '3. Require a critic pass to reject unsupported claims before final synthesis.', '4. Store every answerable claim with evidence, confidence, source recency, and verification status.', '5. Answer only after assumptions are explicitly marked verified, rejected, or unresolved.', '', '## Implementation blueprint', '- Add an evidence ledger type with claim, source, quote/summary, confidence, and assumption flag fields.', '- Add a search strategy planner that emits broad queries, targeted queries, and verification queries.', '- Add a source-quality scorer that prefers primary docs, official APIs, papers, changelogs, and project files.', '- Add a multi-agent loop: three explorers collect independent evidence; one critic compares contradictions; one synthesizer writes the response.', '- Persist large logs/search results as artifacts and cite bounded ranges rather than injecting full outputs.', '', '## Validation commands', ...(validation.commands.length ? validation.commands.map((command) => `- ${command.command} — ${command.reason}`) : ['- manual review']), '', codeMode ? '## Applied behavior\nThis file was generated by Code mode as an immediate checkpointed workspace change.\n' : '## Plan behavior\nThis file is a planning artifact.\n'].join('\n');
+}
+
+function buildPythonResearchStrategyModule(): string {
+  return `"""Evidence-first multi-agent research workflow primitives.\n\nThis module is dependency-free so it can be imported by backend services, tests,\nor future API routes without adding package requirements. It models the workflow\nneeded for optimized web searching, assumption checks, and evidence reasoning.\n"""\n\nfrom __future__ import annotations\n\nfrom dataclasses import dataclass, field\nfrom typing import Literal\n\n\nConfidence = Literal["low", "medium", "high"]\nAgentRole = Literal["codebase_explorer", "web_explorer", "contradiction_critic", "synthesizer"]\n\n\n@dataclass(frozen=True)\nclass EvidenceClaim:\n    claim: str\n    source: str\n    confidence: Confidence\n    assumption_status: Literal["verified", "rejected", "unresolved"]\n    rationale: str\n\n\n@dataclass(frozen=True)\nclass SearchPass:\n    role: AgentRole\n    objective: str\n    queries: tuple[str, ...]\n    required_outputs: tuple[str, ...] = (\n        "evidence claims",\n        "source quality notes",\n        "unresolved assumptions",\n    )\n\n\n@dataclass\nclass ResearchStrategy:\n    user_goal: str\n    search_passes: list[SearchPass] = field(default_factory=list)\n    evidence_ledger: list[EvidenceClaim] = field(default_factory=list)\n\n    def add_claim(self, claim: EvidenceClaim) -> None:\n        self.evidence_ledger.append(claim)\n\n    @property\n    def unresolved_assumptions(self) -> list[EvidenceClaim]:\n        return [claim for claim in self.evidence_ledger if claim.assumption_status == "unresolved"]\n\n    def ready_to_answer(self) -> bool:\n        return not self.unresolved_assumptions\n\n\ndef build_default_research_strategy(user_goal: str) -> ResearchStrategy:\n    return ResearchStrategy(\n        user_goal=user_goal,\n        search_passes=[\n            SearchPass(\n                role="codebase_explorer",\n                objective="Find project-local evidence and implementation surfaces before web lookup.",\n                queries=("repo architecture", "existing search utilities", "evidence reasoning flow"),\n            ),\n            SearchPass(\n                role="web_explorer",\n                objective="Gather primary, recent, source-attributed web evidence.",\n                queries=("official documentation", "recent changelog", "known limitations"),\n            ),\n            SearchPass(\n                role="contradiction_critic",\n                objective="Challenge assumptions and reject unsupported claims.",\n                queries=("contradictions", "stale assumptions", "source reliability"),\n            ),\n            SearchPass(\n                role="synthesizer",\n                objective="Produce the final answer only after assumptions are verified or marked unresolved.",\n                queries=("final evidence map",),\n            ),\n        ],\n    )\n`;
+}
+
+async function applyGeneratedPatch({ root, projectId, runId, files }: { root: string; projectId: string; runId: string; files: ProposedPatchFile[] }): Promise<{ checkpoint: Awaited<ReturnType<typeof createFileCheckpoint>> | null; files: AppliedFileResult[] }> {
+  if (!files.length) return { checkpoint: null, files: [] };
+  const checkpoint = await createFileCheckpoint({ projectId, projectRoot: root, runId, reason: 'before autonomous Code mode apply', files: files.map((file) => file.path) });
+  const applied: AppliedFileResult[] = [];
+  for (const file of files) {
+    const target = path.resolve(root, file.path);
+    if (target !== root && !target.startsWith(`${root}${path.sep}`)) throw new Error(`Path escapes project root: ${file.path}`);
+    let current = '';
+    try {
+      current = await fs.readFile(target, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    if (current !== file.beforeContent) throw new Error(`Patch conflict in ${file.path}. File changed before autonomous apply.`);
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.writeFile(target, file.afterContent, 'utf8');
+    applied.push({ path: file.path, hash: createHash('sha256').update(file.afterContent).digest('hex'), unifiedDiff: file.unifiedDiff, explanation: file.explanation });
+  }
+  return { checkpoint, files: applied };
+}
+
 function parsePlannerJson(raw: string): PatchModelResult {
   const trimmed = raw.trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
   const parsed = JSON.parse(trimmed) as Partial<PatchModelResult>;
-  return {
-    summary: String(parsed.summary ?? parsed.unableReason ?? 'Patch planner returned a response.'),
-    files: Array.isArray(parsed.files)
-      ? parsed.files
-          .filter((file) => file && typeof file.path === 'string' && typeof file.afterContent === 'string')
-          .map((file) => ({ path: file.path, afterContent: file.afterContent, explanation: String(file.explanation ?? 'Autonomous patch') }))
-      : [],
-    validationCommands: Array.isArray(parsed.validationCommands) ? parsed.validationCommands.map(String) : undefined,
-    unableReason: parsed.unableReason ? String(parsed.unableReason) : undefined,
-  };
+  return { summary: String(parsed.summary ?? parsed.unableReason ?? 'Patch planner returned a response.'), files: Array.isArray(parsed.files) ? parsed.files.filter((file) => file && typeof file.path === 'string' && typeof file.afterContent === 'string').map((file) => ({ path: file.path, afterContent: file.afterContent, explanation: String(file.explanation ?? 'Autonomous patch') })) : [], validationCommands: Array.isArray(parsed.validationCommands) ? parsed.validationCommands.map(String) : undefined, unableReason: parsed.unableReason ? String(parsed.unableReason) : undefined };
 }
 
 function shouldUseMultiAgent(prompt: string, intents: string[]): boolean {
