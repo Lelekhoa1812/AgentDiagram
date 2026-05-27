@@ -10,7 +10,7 @@ describe('Code Space agent route mode helpers', () => {
     ]);
   });
 
-  it('builds a deep Plan workflow and asks detailed MCQ clarifiers for ambiguous implementation prompts', () => {
+  it('builds a deep Plan workflow and asks architecture/design MCQ clarifiers for ambiguous implementation prompts', () => {
     const plan = buildPlan('plan', ['feature_build'], 'make this better');
     expect(plan).toEqual([
       'Map request intent and planning depth',
@@ -46,9 +46,14 @@ describe('Code Space agent route mode helpers', () => {
         },
       ],
     });
-    expect(questions.length).toBeGreaterThanOrEqual(4);
-    expect(questions.map((question) => question.id)).toContain('planning-depth');
-    expect(questions.map((question) => question.id)).toContain('build-execution');
+    const questionIds = questions.map((question) => question.id);
+    expect(questionIds).not.toContain('planning-depth');
+    expect(questionIds).not.toContain('build-execution');
+    expect(questionIds).not.toContain('agent-review-loop');
+    expect(questionIds).not.toContain('validation-gate');
+    expect(questionIds).toContain('application-architecture');
+    expect(questionIds).toContain('service-boundary');
+    expect(questions.map((question) => question.question).join('\n')).toMatch(/monolith|micro-services|dedicated service|existing service/i);
   });
 
   it('keeps Code mode implementation-oriented without clarifying questions', () => {

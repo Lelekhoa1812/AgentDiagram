@@ -7,6 +7,7 @@ import type { CodeSpaceAgentMode } from '@/lib/code-space/agentModes';
 import type { CodeSpaceExecutionPolicy } from '@/lib/code-space/executionPolicy';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+(globalThis as typeof globalThis & { React: typeof React }).React = React;
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
@@ -18,7 +19,14 @@ function createSession(): CodeSpaceAgentSession {
     title: 'Plan session',
     status: 'planning',
     mode: 'plan',
-    messages: [],
+    messages: [
+      {
+        id: 'msg-1',
+        role: 'assistant',
+        content: 'Plan ready.',
+        createdAt: Date.now(),
+      },
+    ],
     toolCalls: [],
     plan: [],
     clarifyingQuestions: [],

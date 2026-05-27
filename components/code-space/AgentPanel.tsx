@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import React, { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Bot, Loader2, Zap } from 'lucide-react';
 import type { CodeSpaceAgentSession, CodeSpaceMessage } from '@/lib/code-space/core';
 import type { CodeSpaceAgentMode } from '@/lib/code-space/agentModes';
