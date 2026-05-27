@@ -46,8 +46,8 @@ interface AgentPanelProps {
   onCancelRun: () => void;
   onAcceptDiff: (diffId: string) => void;
   onRejectDiff: (diffId: string) => void;
-  onOpenPlanFile: (filePath: string) => void;
-  onBuildFromPlan: (filePath: string) => void;
+  onOpenPlanFile?: (filePath: string) => void;
+  onBuildFromPlan?: (filePath: string) => void;
   mentionIndex?: FileMentionIndex;
   indexStatus?: MentionIndexStatus;
   indexError?: string;
@@ -175,6 +175,29 @@ export function AgentPanel({
     setPromptMentions([]);
   };
 
+  const handleOpenPlanFile = (filePath: string) => {
+    if (onOpenPlanFile) {
+      onOpenPlanFile(filePath);
+      return;
+    }
+    window.dispatchEvent(new CustomEvent('code-space:open-plan-file', { detail: { filePath } }));
+  };
+
+  const handleBuildFromPlan = (filePath: string) => {
+    if (onBuildFromPlan) {
+      onBuildFromPlan(filePath);
+      return;
+    }
+    onAgentModeChange('code');
+    window.setTimeout(() => {
+      onSubmitPrompt([
+        `Build from the approved plan at ${filePath}.`,
+        '',
+        'Use the plan as the source of truth, implement its TODOs end-to-end, and run the validation strategy before summarising the result.',
+      ].join('\n'));
+    }, 50);
+  };
+
   return (
     <div className="flex h-full flex-col border-l border-[#30363d] bg-[#0d1117] text-xs font-mono text-[#e6edf3]">
       <div className="flex flex-wrap items-center gap-2 border-b border-[#30363d] px-3 py-2">
@@ -203,7 +226,7 @@ export function AgentPanel({
                   <div className="whitespace-pre-wrap break-words text-[11px] leading-5">{renderMessageText(message)}</div>
                 </div>
               ))}
-              <PlanLink filePath={session?.planMarkdown?.filePath} disabled={isRunning} onView={onOpenPlanFile} onRun={onBuildFromPlan} />
+              <PlanLink filePath={session?.planMarkdown?.filePath} disabled={isRunning} onView={handleOpenPlanFile} onRun={handleBuildFromPlan} />
               {isRunning && (
                 <div className="flex items-center gap-2 text-[10px] text-[#8b949e]">
                   <Loader2 size={12} className="animate-spin" />
