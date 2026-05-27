@@ -5,7 +5,11 @@ AgentDiagram is an open-source, locally runnable diagram-as-code editor with an 
 It is designed to live inside the repository you want to analyze, so the app can scan your codebase locally, generate diagrams from it, and keep the entire workflow on your machine unless you choose to send prompts to an AI provider.
 
 ![Example Diagram](examples/diagram.png)
+**SaaS app architecture diagram illustrated**   
+
 ![Code Space](examples/coder.png)
+
+**Agentic coding space illustrated**  
 
 ## What it does
 

@@ -13,6 +13,7 @@ const PREFERENCES_KEY = 'agentdiagram:code-space:preferences:v1';
 export interface CodeSpaceLayoutPreferences {
   activeProjectId?: string | null;
   activeSessionId?: string | null;
+  activeTabId?: string | null;
   agentMode?: CodeSpaceAgentMode;
   leftSidebarVisible?: boolean;
   rightSidebarVisible?: boolean;

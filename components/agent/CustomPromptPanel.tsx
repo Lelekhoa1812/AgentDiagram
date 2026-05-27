@@ -7,6 +7,7 @@ import { ProviderConfig } from './ProviderConfig';
 import { AnalysisAnimation } from './AnalysisAnimation';
 import { readAgentStream, readErrorMessage, type AgentStreamEvent } from './streamEvents';
 import type { ClarifyStreamOutput } from '@/lib/util/stream';
+import { extractFallbackName } from '@/lib/code-space/sessionNaming';
 
 type Step = 'prompt' | 'questions' | 'generating';
 type DiagramStyle = 'single' | 'multi-layer';
@@ -160,15 +161,36 @@ export function CustomPromptPanel() {
     const ac = new AbortController();
     abortRef.current = ac;
 
+    const clarifyModel =
+      provider.provider === 'foundry'
+        ? (provider.customModel ?? provider.model)
+        : provider.provider === 'local'
+          ? (provider.localModelName ?? '')
+          : provider.model;
+    const clarifyApiKey =
+      provider.provider === 'local'
+        ? (provider.localApiKey ?? '')
+        : (provider.apiKey || undefined);
+    const clarifyEndpoint =
+      provider.provider === 'local'
+        ? (provider.localBaseUrl ?? undefined)
+        : (provider.endpoint || undefined);
+    const clarifyTemperature =
+      provider.provider === 'local' ? (provider.localTemperature ?? 0.7) : undefined;
+    const clarifyMaxTokens =
+      provider.provider === 'local' ? (provider.localContextLength ?? 4096) : undefined;
+
     try {
       const res = await fetch('/api/agent/clarify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider: provider.provider,
-          model: provider.provider === 'foundry' ? provider.customModel ?? '' : provider.model,
-          apiKey: provider.apiKey || undefined,
-          endpoint: provider.endpoint || undefined,
+          model: clarifyModel,
+          apiKey: clarifyApiKey,
+          endpoint: clarifyEndpoint,
+          ...(clarifyTemperature !== undefined ? { temperature: clarifyTemperature } : {}),
+          ...(clarifyMaxTokens !== undefined ? { maxTokens: clarifyMaxTokens } : {}),
           prompt,
         }),
         signal: ac.signal,
@@ -265,17 +287,38 @@ export function CustomPromptPanel() {
     const ac = new AbortController();
     abortRef.current = ac;
 
-    const endpoint = isMulti ? '/api/agent/custom-multilayer' : '/api/agent/custom';
+    const apiEndpoint = isMulti ? '/api/agent/custom-multilayer' : '/api/agent/custom';
+
+    const genModel =
+      provider.provider === 'foundry'
+        ? (provider.customModel ?? provider.model)
+        : provider.provider === 'local'
+          ? (provider.localModelName ?? '')
+          : provider.model;
+    const genApiKey =
+      provider.provider === 'local'
+        ? (provider.localApiKey ?? '')
+        : (provider.apiKey || undefined);
+    const genEndpoint =
+      provider.provider === 'local'
+        ? (provider.localBaseUrl ?? undefined)
+        : (provider.endpoint || undefined);
+    const genTemperature =
+      provider.provider === 'local' ? (provider.localTemperature ?? 0.7) : undefined;
+    const genMaxTokens =
+      provider.provider === 'local' ? (provider.localContextLength ?? 4096) : undefined;
 
     try {
-      const res = await fetch(endpoint, {
+      const res = await fetch(apiEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider: provider.provider,
-          model: provider.provider === 'foundry' ? provider.customModel ?? '' : provider.model,
-          apiKey: provider.apiKey || undefined,
-          endpoint: provider.endpoint || undefined,
+          model: genModel,
+          apiKey: genApiKey,
+          endpoint: genEndpoint,
+          ...(genTemperature !== undefined ? { temperature: genTemperature } : {}),
+          ...(genMaxTokens !== undefined ? { maxTokens: genMaxTokens } : {}),
           prompt,
           intentSummary: clarify.intent_summary,
           answers: compiledAnswers,
@@ -291,6 +334,11 @@ export function CustomPromptPanel() {
         setStep('questions');
         return;
       }
+      // Capture result data from the stream so we can await naming after the stream ends.
+      type SingleResult = { type: 'single'; dsl: string; instructionMarkdown: string };
+      type MultiResult = { type: 'multi'; out: MultiLayerOutput; instructionMarkdown: string };
+      let capturedResult: SingleResult | MultiResult | null = null;
+
       await readAgentStream(res.body, (ev: AgentStreamEvent) => {
         if (ev.type === 'stage') {
           setAgentStage(ev.stage);
@@ -306,16 +354,14 @@ export function CustomPromptPanel() {
           setTerminalState({ status: 'failed', message: ev.message });
           pushLog({ stage: ev.stage, level: 'error', message: ev.message });
         } else if (ev.type === 'result') {
-          // Single-layer result
+          // Single-layer result — capture for async naming after stream ends
           sawResult = true;
           const instructionMarkdown = ev.instructionMarkdown ?? '';
           setInstructionMarkdown(instructionMarkdown);
           setDsl(ev.dsl);
-          const name = prompt.trim().split(/\s+/).slice(0, 3).join(' ') || 'custom';
-          addGeneratedProject(name, ev.dsl, undefined, instructionMarkdown);
-          setMode('editor');
+          capturedResult = { type: 'single', dsl: ev.dsl, instructionMarkdown };
         } else if (ev.type === 'result-multilayer') {
-          // Multi-layer result — wire into LayerNavigator
+          // Multi-layer result — capture for async naming after stream ends
           sawResult = true;
           const instructionMarkdown = ev.instructionMarkdown ?? '';
           setInstructionMarkdown(instructionMarkdown);
@@ -324,13 +370,43 @@ export function CustomPromptPanel() {
           clearOverrides();
           setActiveLayer('overview');
           setDsl(out.overview.dsl);
-          const name = prompt.trim().split(/\s+/).slice(0, 3).join(' ') || 'custom';
-          addGeneratedProject(name, out.overview.dsl, out, instructionMarkdown);
-          setMode('editor');
+          capturedResult = { type: 'multi', out, instructionMarkdown };
         } else if (ev.type === 'done') {
           setAgentStage(null);
         }
       });
+
+      // After the stream ends, resolve the project name and call addGeneratedProject.
+      const result = capturedResult;
+      if (result !== null) {
+        let projectName = extractFallbackName(prompt, 2);
+        try {
+          const nameRes = await fetch('/api/code-space/name-session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              query: prompt.slice(0, 100),
+              providerId: provider.provider,
+              model: genModel,
+              apiKey: genApiKey,
+              endpoint: genEndpoint,
+              mode: 'app-planner',
+            }),
+          });
+          if (nameRes.ok) {
+            const { name } = await nameRes.json() as { name: string };
+            if (name) projectName = name;
+          }
+        } catch {
+          // fallback already set
+        }
+        if (result.type === 'single') {
+          addGeneratedProject(projectName, result.dsl, undefined, result.instructionMarkdown);
+        } else {
+          addGeneratedProject(projectName, result.out.overview.dsl, result.out, result.instructionMarkdown);
+        }
+        setMode('editor');
+      }
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {
         sawFailure = true;
