@@ -666,7 +666,10 @@ async function writePlanArtifact(root: string, sessionId: string, projectName: s
   const absolute = path.join(root, filePath);
   const fallback = buildStrategyDocument({ projectName, prompt, context, validation, codeMode: false, answers });
   const content = request
-    ? await buildModelBackedStrategyDocument(root, { projectName, prompt, context, validation, answers, fallback, request }).catch(() => fallback)
+    ? sanitizePlanArtifact(
+        await buildModelBackedStrategyDocument(root, { projectName, prompt, context, validation, answers, fallback, request }).catch(() => fallback),
+        fallback,
+      )
     : fallback;
   await fs.mkdir(path.dirname(absolute), { recursive: true });
   await fs.writeFile(absolute, content, 'utf8');
@@ -694,7 +697,8 @@ async function buildModelBackedStrategyDocument(
     'Write markdown only. Do not include code fences around the whole document.',
     'Create an operator-ready implementation plan that a Code mode agent can execute without re-planning from scratch.',
     'Ground every claim in the provided repository evidence. Do not invent files or pretend separate agents actually ran; represent them as review lanes or agent perspectives.',
-    'Include detailed MCQ decisions and selected answers when provided.',
+    'Do not include MCQ questions, option menus, A/B/C choices, or questionnaire transcripts in the markdown plan.',
+    'If sidebar answers were provided, summarize only the selected inputs as concise planning constraints without reproducing the original question text.',
     'Prefer concrete file paths, sequencing, checkpoints, tests, fallback behavior, and acceptance criteria over generic advice.',
   ].join('\n');
   const evidence = input.context.files
@@ -705,8 +709,8 @@ async function buildModelBackedStrategyDocument(
     `Project: ${input.projectName}`,
     `Request: ${input.prompt}`,
     '',
-    'Clarified MCQ decisions:',
-    input.answers.length ? input.answers.map((answer) => `- ${answer.question}\n  Selected: ${answer.answer}`).join('\n') : '- No answers were provided; encode assumptions explicitly.',
+    'Sidebar-selected planning inputs:',
+    input.answers.length ? input.answers.map((answer, index) => `- Input ${index + 1}: ${answer.answer}`).join('\n') : '- No sidebar answers were provided; encode assumptions explicitly without inventing MCQ choices.',
     '',
     'Validation commands discovered:',
     ...input.validation.commands.map((command) => `- ${command.command} — ${command.reason}`),
@@ -739,6 +743,14 @@ async function buildModelBackedStrategyDocument(
   const trimmed = text.trim();
   if (!trimmed || !trimmed.startsWith('#')) return input.fallback;
   return trimmed;
+}
+
+function sanitizePlanArtifact(candidate: string, fallback: string): string {
+  return containsMcqTranscript(candidate) ? fallback : candidate;
+}
+
+function containsMcqTranscript(content: string): boolean {
+  return /\bMCQ\s*\d+\s*:/i.test(content) || /^\s*[-*]\s*[A-E]\)\s+/im.test(content) || /I encode MCQ-style decisions/i.test(content);
 }
 
 async function buildAskResponse(root: string, projectName: string, prompt: string, context: ContextSearchResult, validation: Awaited<ReturnType<typeof detectValidationCommands>>, request: AgentRequest): Promise<string> {
@@ -849,12 +861,12 @@ function extractPlanClarificationAnswers(messages: AgentRequest['messages']): Pl
   return answers;
 }
 
-function buildStrategyDocument({ projectName, prompt, context, validation, codeMode, reason, answers = [] }: { projectName: string; prompt: string; context: ContextSearchResult; validation: Awaited<ReturnType<typeof detectValidationCommands>>; codeMode: boolean; reason?: string; answers?: PlanClarificationAnswer[] }): string {
+export function buildStrategyDocument({ projectName, prompt, context, validation, codeMode, reason, answers = [] }: { projectName: string; prompt: string; context: ContextSearchResult; validation: Awaited<ReturnType<typeof detectValidationCommands>>; codeMode: boolean; reason?: string; answers?: PlanClarificationAnswer[] }): string {
   const evidence = formatInspectedEvidence(context);
   const architecture = buildCurrentArchitectureSummary(context, prompt);
   const implementationTasks = buildImplementationTodos(prompt, context);
   const riskItems = buildRiskItems(context, prompt);
-  const clarifiedSection = answers.length ? ['## Clarified decisions', ...answers.map((answer) => `- **${answer.question}** ${answer.answer}`), ''] : [];
+  const clarifiedSection = answers.length ? ['## Sidebar-selected planning inputs', ...answers.map((answer, index) => `- **Input ${index + 1}:** ${answer.answer}`), ''] : [];
   const noteSection = reason ? ['## Note', reason, ''] : [];
   return [
     `# Code Space Plan — ${projectName}`,
@@ -864,11 +876,11 @@ function buildStrategyDocument({ projectName, prompt, context, validation, codeM
     '',
     ...noteSection,
     ...clarifiedSection,
-    '## Planning questions and assumptions',
+    '## Planning inputs and assumptions',
     ...(answers.length
-      ? answers.map((answer) => `- **Decision:** ${answer.question} **Selected:** ${answer.answer}`)
+      ? answers.map((answer, index) => `- **Input ${index + 1}:** ${answer.answer}`)
       : [
-          '- **Assumption:** No MCQ answers were supplied, so Code mode should preserve the narrowest safe scope and pause only on conflicts that would change product behavior.',
+          '- **Assumption:** No sidebar decisions were submitted, so Code mode should preserve the narrowest safe scope and pause only on conflicts that would change product behavior.',
           '- **Assumption:** The implementation agent should read this plan artifact before editing and treat repository evidence as stronger than generic workflow rules.',
         ]),
     '',

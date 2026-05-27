@@ -6,6 +6,7 @@ import {
   buildClarifyingQuestions,
   buildPlan,
   buildPlanImplementationPrompt,
+  buildStrategyDocument,
   collectProjectContext,
   extractBuildPlanPath,
 } from '../route';
@@ -123,5 +124,46 @@ describe('Code Space agent route mode helpers', () => {
     expect(prompt).toContain('Build from the approved plan at .agent/plans/session-123.md.');
     expect(prompt).toContain('Read that plan artifact first');
     expect(extractBuildPlanPath(prompt)).toBe('.agent/plans/session-123.md');
+  });
+
+  it('keeps MCQ question text and option menus out of the plan artifact', () => {
+    const content = buildStrategyDocument({
+      projectName: 'demo',
+      prompt: 'improve planning',
+      context: {
+        filesConsidered: 1,
+        terms: [],
+        omittedRelevantFiles: [],
+        files: [
+          {
+            path: 'app/api/code-space/agent/route.ts',
+            content: 'export function buildPlan() {}',
+            truncated: false,
+            lineCount: 1,
+            score: 10,
+            reasons: ['test'],
+            summary: 'Agent route',
+            symbols: ['buildPlan'],
+          },
+        ],
+      },
+      validation: {
+        commands: [{ kind: 'test', command: 'npm run test', reason: 'Automated tests are available.' }],
+        packageManager: 'npm',
+      },
+      codeMode: false,
+      answers: [
+        {
+          question: 'Should this be implemented as a cohesive monolith/module inside the existing app, or split into micro-services?',
+          answer: 'Modular monolith inside the existing app (Recommended) — reuse current routing.',
+        },
+      ],
+    });
+
+    expect(content).not.toMatch(/\bMCQ\s*\d+\s*:/i);
+    expect(content).not.toMatch(/Should this be implemented as a cohesive monolith/i);
+    expect(content).not.toMatch(/^\s*[-*]\s*[A-E]\)\s+/im);
+    expect(content).toContain('Sidebar-selected planning inputs');
+    expect(content).toContain('Modular monolith inside the existing app');
   });
 });
