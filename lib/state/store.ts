@@ -143,6 +143,12 @@ export interface ProviderConfig {
   apiKey: string;
   customModel?: string;
   endpoint?: string;
+  // Local model fields — only used when provider === 'local'
+  localBaseUrl?: string;       // e.g. "http://localhost:11434/v1"
+  localModelName?: string;     // e.g. "llama3.2"
+  localApiKey?: string;        // optional; e.g. "ollama" or blank
+  localContextLength?: number; // default 4096
+  localTemperature?: number;   // default 0.7
 }
 
 const DEFAULT_PROVIDER: ProviderConfig = {
