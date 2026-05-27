@@ -4,7 +4,9 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Bot, Loader2, Zap } from 'lucide-react';
 import type { CodeSpaceAgentSession, CodeSpaceMessage } from '@/lib/code-space/core';
 import type { CodeSpaceAgentMode } from '@/lib/code-space/agentModes';
+import type { CodeSpaceExecutionPolicy } from '@/lib/code-space/executionPolicy';
 import { AgentModeSelector } from './AgentModeSelector';
+import { ExecutionPolicySelector } from './ExecutionPolicySelector';
 import { CollapsibleSection } from './CollapsibleSection';
 import { SessionListSection } from './SessionListSection';
 import { FileMentionInput } from './FileMentionInput';
@@ -29,10 +31,12 @@ interface AgentPanelProps {
   }>;
   providerSummary: string;
   agentMode: CodeSpaceAgentMode;
+  executionPolicy: CodeSpaceExecutionPolicy;
   onOpenModelConfig: () => void;
   onGenerateDiagram: () => void;
   onOpenAppPlanner: () => void;
   onAgentModeChange: (mode: CodeSpaceAgentMode) => void;
+  onExecutionPolicyChange: (policy: CodeSpaceExecutionPolicy) => void;
   canGenerateDiagram: boolean;
   onSelectSession: (sessionId: string | null) => void;
   onRenameSession: (session: CodeSpaceAgentSession) => void;
@@ -68,6 +72,25 @@ function renderMessageText(message: CodeSpaceMessage) {
   return 'I reviewed the project context. No code changes were applied in this run.';
 }
 
+function renderDiff(diff: string) {
+  return diff.split('\n').map((line, index) => {
+    let className = 'text-[#c9d1d9]';
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      className = 'bg-[#12261b] text-[#3fb950]';
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      className = 'bg-[#2d1517] text-[#f85149]';
+    } else if (line.startsWith('@@')) {
+      className = 'text-[#79c0ff]';
+    }
+
+    return (
+      <div key={`${index}:${line.slice(0, 12)}`} className={`whitespace-pre-wrap break-all px-1 ${className}`}>
+        {line || ' '}
+      </div>
+    );
+  });
+}
+
 export function AgentPanel({
   session,
   sessions,
@@ -75,10 +98,12 @@ export function AgentPanel({
   pendingDiffs,
   providerSummary,
   agentMode,
+  executionPolicy,
   onOpenModelConfig,
   onGenerateDiagram,
   onOpenAppPlanner,
   onAgentModeChange,
+  onExecutionPolicyChange,
   canGenerateDiagram,
   onSelectSession,
   onRenameSession,
@@ -207,12 +232,14 @@ export function AgentPanel({
                 <div key={diff.diffId} className="rounded border border-[#30363d] bg-[#0f1114]">
                   <div className="flex items-center gap-2 border-b border-[#1f1f1f] px-2 py-1">
                     <span className="truncate text-[10px] text-[#e6edf3]">{diff.filePath}</span>
-                    <span className="ml-auto text-[9px] uppercase tracking-wider text-[#f0883e]">approval required</span>
+                    <span className="ml-auto text-[9px] uppercase tracking-wider text-[#facc15]">
+                      {executionPolicy === 'auto' ? 'auto apply enabled' : 'approval required'}
+                    </span>
                   </div>
                   {diff.explanation && <p className="px-2 pt-2 text-[10px] leading-4 text-[#8b949e]">{diff.explanation}</p>}
-                  <pre className="max-h-48 overflow-auto px-2 py-2 text-[9px] leading-4 text-[#c9d1d9]">
-                    {diff.unifiedDiff ?? `${diff.oldContent}\n---\n${diff.newContent}`}
-                  </pre>
+                  <div className="max-h-72 overflow-auto border-t border-[#1b1f24] bg-[#0d1117] py-2 text-[9px] leading-4">
+                    {renderDiff(diff.unifiedDiff ?? `${diff.oldContent}\n---\n${diff.newContent}`)}
+                  </div>
                   <div className="flex justify-end gap-2 border-t border-[#1f1f1f] px-2 py-1.5">
                     <button type="button" onClick={() => onRejectDiff(diff.diffId)} className="rounded border border-[#30363d] px-2 py-1 text-[10px] text-[#f85149] hover:bg-[#2d1517]">
                       Reject
@@ -313,7 +340,14 @@ export function AgentPanel({
               App Planner
             </button>
           </div>
-          <AgentModeSelector mode={agentMode} disabled={isRunning} onChange={onAgentModeChange} />
+          <div className="flex items-center gap-2">
+            <ExecutionPolicySelector
+              policy={executionPolicy}
+              disabled={isRunning}
+              onChange={onExecutionPolicyChange}
+            />
+            <AgentModeSelector mode={agentMode} disabled={isRunning} onChange={onAgentModeChange} />
+          </div>
         </div>
       </form>
     </div>
