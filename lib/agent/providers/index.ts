@@ -81,7 +81,7 @@ export async function validateWithRetry(
       }
       return result;
     },
-    { signal: opts.signal, onRetry: opts.onRetry },
+    { signal: opts.signal, onRetry: opts.onRetry, cooldownKey: cooldownKey(session) },
   );
 }
 
@@ -98,8 +98,6 @@ export async function chatWithRetry(
   const provider = makeProvider(session.id, {
     apiKey: session.apiKey,
     endpoint: session.endpoint,
-    temperature: session.temperature,
-    maxTokens: session.maxTokens,
   });
   return withRetry(
     () => {
@@ -112,8 +110,12 @@ export async function chatWithRetry(
       };
       return provider.chat(params);
     },
-    { signal: opts.signal, onRetry: opts.onRetry },
+    { signal: opts.signal, onRetry: opts.onRetry, cooldownKey: cooldownKey(session) },
   );
+}
+
+function cooldownKey(session: ProviderSession): string {
+  return `${session.id}:${session.model}:${session.endpoint ?? 'default'}`;
 }
 
 export type { Provider, ProviderId, ProviderConfig, ChatMessage, ChatParams, RetryListener, ValidationResult };
