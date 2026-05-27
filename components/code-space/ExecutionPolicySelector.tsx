@@ -8,6 +8,10 @@ import {
   normalizeCodeSpaceExecutionPolicy,
   type CodeSpaceExecutionPolicy,
 } from '@/lib/code-space/executionPolicy';
+import {
+  CODE_SPACE_DROPDOWN_OPTION_DESCRIPTION_CLASS,
+  CODE_SPACE_DROPDOWN_OPTION_TEXT_CLASS,
+} from './codeSpaceDropdownStyles';
 
 // Root Cause vs Logic: The selector component was missing, so Next.js failed while resolving the import; adding
 // this dropdown exposes the existing execution policy options without changing the surrounding layout.
@@ -96,9 +100,9 @@ export function ExecutionPolicySelector({
                 className={`flex w-full items-start gap-2 px-2 py-1.5 text-left ${optionMeta.menuItemClassName}`}
               >
                 <Check size={12} className={`mt-0.5 ${selected ? optionMeta.accentClassName : 'text-transparent'}`} aria-hidden="true" />
-                <span className="min-w-0">
+                <span className={CODE_SPACE_DROPDOWN_OPTION_TEXT_CLASS}>
                   <span className={`block text-[10px] font-semibold ${optionMeta.accentClassName}`}>{optionMeta.label}</span>
-                  <span className="block text-[9px] leading-3 text-[#8b949e]">{optionMeta.description}</span>
+                  <span className={CODE_SPACE_DROPDOWN_OPTION_DESCRIPTION_CLASS}>{optionMeta.description}</span>
                 </span>
               </button>
             );

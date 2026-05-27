@@ -8,6 +8,10 @@ import {
   normalizeCodeSpaceAgentMode,
   type CodeSpaceAgentMode,
 } from '@/lib/code-space/agentModes';
+import {
+  CODE_SPACE_DROPDOWN_OPTION_DESCRIPTION_CLASS,
+  CODE_SPACE_DROPDOWN_OPTION_TEXT_CLASS,
+} from './codeSpaceDropdownStyles';
 
 interface AgentModeSelectorProps {
   mode: CodeSpaceAgentMode;
@@ -89,9 +93,9 @@ export function AgentModeSelector({ mode, disabled = false, onChange }: AgentMod
                 className={`flex w-full items-start gap-2 px-2 py-1.5 text-left ${meta.menuItemClassName}`}
               >
                 <Check size={12} className={`mt-0.5 ${selected ? meta.accentClassName : 'text-transparent'}`} aria-hidden="true" />
-                <span className="min-w-0">
+                <span className={CODE_SPACE_DROPDOWN_OPTION_TEXT_CLASS}>
                   <span className={`block text-[10px] font-semibold ${meta.accentClassName}`}>{meta.label}</span>
-                  <span className="block text-[9px] leading-3 text-[#8b949e]">{meta.description}</span>
+                  <span className={CODE_SPACE_DROPDOWN_OPTION_DESCRIPTION_CLASS}>{meta.description}</span>
                 </span>
               </button>
             );
