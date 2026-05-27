@@ -25,6 +25,28 @@ describe('createPatchProposal', () => {
     expect(proposal.diff).toContain('-export const hello = "hi";');
     expect(proposal.diff).toContain('+export const hello = "hello";');
   });
+
+  it('renders deleted files as removals instead of empty writes', () => {
+    const proposal = createPatchProposal({
+      id: 'patch-2',
+      runId: 'run-2',
+      projectId: 'project-2',
+      explanation: 'Delete obsolete strategy file',
+      files: [
+        {
+          path: 'src/agentic_research_strategy.py',
+          beforeContent: 'print("obsolete")\n',
+          afterContent: '',
+          deleted: true,
+        },
+      ],
+    });
+
+    expect(proposal.filesChanged).toEqual(['src/agentic_research_strategy.py']);
+    expect(proposal.additions).toBe(0);
+    expect(proposal.deletions).toBe(1);
+    expect(proposal.diff).toContain('-print("obsolete")');
+  });
 });
 
 describe('splitDiffHunks', () => {

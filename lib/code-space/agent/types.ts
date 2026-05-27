@@ -10,8 +10,8 @@ export type AgentSSEEvent =
   | { type: 'todo_updated'; todoId: string; done: boolean }
   | { type: 'tool_start'; toolCallId: string; tool: string; input: unknown }
   | { type: 'tool_result'; toolCallId: string; tool: string; output: unknown; durationMs: number; error?: string }
-  | { type: 'diff_proposed'; diffId: string; filePath: string; oldContent: string; newContent: string; explanation?: string; unifiedDiff?: string; autoApplied?: boolean }
-  | { type: 'file_applied'; filePath: string; explanation?: string; unifiedDiff?: string; hash: string }
+  | { type: 'diff_proposed'; diffId: string; filePath: string; oldContent: string; newContent: string; deleted?: boolean; explanation?: string; unifiedDiff?: string; autoApplied?: boolean }
+  | { type: 'file_applied'; filePath: string; deleted?: boolean; explanation?: string; unifiedDiff?: string; hash: string }
   | { type: 'terminal_chunk'; chunk: string }
   | { type: 'validation_result'; id: string; command: string; status: 'passed' | 'failed' | 'skipped'; output: string }
   | { type: 'lint_errors'; filePath: string; errors: Array<{ file: string; line: number; col: number; severity: 'error' | 'warning'; message: string; rule?: string }> }

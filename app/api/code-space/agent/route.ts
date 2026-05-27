@@ -71,13 +71,14 @@ interface ProposedPatchFile {
   path: string;
   beforeContent: string;
   afterContent: string;
+  deleted?: boolean;
   explanation: string;
   unifiedDiff: string;
 }
 
 interface PatchModelResult {
   summary: string;
-  files: Array<{ path: string; afterContent: string; explanation: string }>;
+  files: Array<{ path: string; afterContent: string; deleted?: boolean; explanation: string }>;
   validationCommands?: string[];
   unableReason?: string;
 }
@@ -87,6 +88,7 @@ interface AppliedFileResult {
   hash: string;
   unifiedDiff: string;
   explanation: string;
+  deleted?: boolean;
 }
 
 export async function POST(req: NextRequest) {
@@ -171,11 +173,11 @@ export async function POST(req: NextRequest) {
             applyGeneratedPatch({ root: guarded.resolved, projectId: projectName, runId, files: proposal.files }),
           );
           for (const file of proposal.files) {
-            emit({ type: 'diff_proposed', diffId: `patch:${runId}:${file.path}`, filePath: file.path, oldContent: file.beforeContent, newContent: file.afterContent, explanation: file.explanation, unifiedDiff: file.unifiedDiff, autoApplied: true });
+            emit({ type: 'diff_proposed', diffId: `patch:${runId}:${file.path}`, filePath: file.path, oldContent: file.beforeContent, newContent: file.afterContent, deleted: file.deleted, explanation: file.explanation, unifiedDiff: file.unifiedDiff, autoApplied: true });
             await emitRuntime('patch.proposed', { path: file.path, explanation: file.explanation, autoApplied: true });
           }
           for (const file of applied.files) {
-            emit({ type: 'file_applied', filePath: file.path, explanation: file.explanation, unifiedDiff: file.unifiedDiff, hash: file.hash });
+            emit({ type: 'file_applied', filePath: file.path, deleted: file.deleted, explanation: file.explanation, unifiedDiff: file.unifiedDiff, hash: file.hash });
             await emitRuntime('patch.applied', { path: file.path, hash: file.hash });
           }
           filesChanged = proposal.files.map((file) => file.path);
@@ -417,16 +419,27 @@ async function proposeAutonomousPatch(root: string, prompt: string, context: Con
     const target = path.resolve(root, relativePath);
     if (target !== root && !target.startsWith(`${root}${path.sep}`)) continue;
     let beforeContent = '';
+    let fileExists = true;
     try {
       beforeContent = await fs.readFile(target, 'utf8');
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      fileExists = false;
     }
-    if (beforeContent === file.afterContent) continue;
-    const diagnostics = validateSyntaxLightweight(relativePath, file.afterContent);
+    const deleted = shouldDeleteFile(prompt, file, fileExists);
+    if (!deleted && beforeContent === file.afterContent) continue;
+    const diagnostics = deleted ? [] : validateSyntaxLightweight(relativePath, file.afterContent);
     const firstDiagnostic = diagnostics[0];
     if (firstDiagnostic) throw new Error(`Generated patch for ${relativePath} failed syntax pre-validation: ${firstDiagnostic.message}`);
-    files.push({ path: relativePath, beforeContent, afterContent: file.afterContent, explanation: file.explanation || modelResult.summary || 'Code change', unifiedDiff: createUnifiedDiff(relativePath, beforeContent, file.afterContent) });
+    // Root Cause vs Logic: deletes used to collapse into empty afterContent, which left the file on disk; keep an explicit delete flag so the apply path can remove the path instead of rewriting it empty.
+    files.push({
+      path: relativePath,
+      beforeContent,
+      afterContent: file.afterContent,
+      deleted,
+      explanation: file.explanation || modelResult.summary || 'Code change',
+      unifiedDiff: createUnifiedDiff(relativePath, beforeContent, deleted ? '' : file.afterContent),
+    });
   }
   return { summary: modelResult.summary || 'Planning completed.', files };
 }
@@ -438,8 +451,8 @@ async function callPatchPlannerModel(root: string, prompt: string, context: Cont
     'You are Code Space Autonomous Patch Planner.',
     'Choose files from repository evidence. Do not ask the user to provide an exact @File.',
     'Return only JSON. No markdown. No code fences.',
-    'Schema: {"summary":"string","files":[{"path":"relative/path","afterContent":"complete full file content","explanation":"why changed"}],"validationCommands":["optional command"]}.',
-    'Preserve existing style, keep the smallest safe change, and include complete afterContent for every changed or new file.',
+    'Schema: {"summary":"string","files":[{"path":"relative/path","afterContent":"complete full file content","deleted":false,"explanation":"why changed"}],"validationCommands":["optional command"]}.',
+    'Preserve existing style, keep the smallest safe change, and include complete afterContent for every changed or new file. If the task removes a file, set deleted:true and leave afterContent empty instead of simulating deletion by blanking the file.',
     REFACTOR_WORKFLOW,
     TERMINAL_DECISION_GUIDE,
   ].join('\n');
@@ -536,6 +549,17 @@ async function applyGeneratedPatch({ root, projectId, runId, files }: { root: st
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
+    if (file.deleted) {
+      const fileExists = await exists(target);
+      if (current && current !== file.beforeContent) throw new Error(`Patch conflict in ${file.path}. File changed before autonomous apply.`);
+      if (!fileExists) {
+        applied.push({ path: file.path, hash: createHash('sha256').update(`deleted:${file.path}`).digest('hex'), unifiedDiff: file.unifiedDiff, explanation: file.explanation, deleted: true });
+        continue;
+      }
+      await fs.rm(target, { force: false, recursive: true });
+      applied.push({ path: file.path, hash: createHash('sha256').update(`deleted:${file.path}`).digest('hex'), unifiedDiff: file.unifiedDiff, explanation: file.explanation, deleted: true });
+      continue;
+    }
     if (current !== file.beforeContent) throw new Error(`Patch conflict in ${file.path}. File changed before autonomous apply.`);
     await fs.mkdir(path.dirname(target), { recursive: true });
     await fs.writeFile(target, file.afterContent, 'utf8');
@@ -550,7 +574,21 @@ function parsePlannerJson(raw: string): PatchModelResult {
   const end = trimmed.lastIndexOf('}');
   const candidate = start >= 0 && end > start ? trimmed.slice(start, end + 1) : trimmed;
   const parsed = JSON.parse(candidate) as Partial<PatchModelResult>;
-  return { summary: String(parsed.summary ?? parsed.unableReason ?? 'Patch planner returned a response.'), files: Array.isArray(parsed.files) ? parsed.files.filter((file) => file && typeof file.path === 'string' && typeof file.afterContent === 'string').map((file) => ({ path: file.path, afterContent: file.afterContent, explanation: String(file.explanation ?? 'Code change') })) : [], validationCommands: Array.isArray(parsed.validationCommands) ? parsed.validationCommands.map(String) : undefined, unableReason: parsed.unableReason ? String(parsed.unableReason) : undefined };
+  return {
+    summary: String(parsed.summary ?? parsed.unableReason ?? 'Patch planner returned a response.'),
+    files: Array.isArray(parsed.files)
+      ? parsed.files
+          .filter((file) => file && typeof file.path === 'string' && typeof file.afterContent === 'string')
+          .map((file) => ({
+            path: file.path,
+            afterContent: file.afterContent,
+            deleted: typeof file.deleted === 'boolean' ? file.deleted : undefined,
+            explanation: String(file.explanation ?? 'Code change'),
+          }))
+      : [],
+    validationCommands: Array.isArray(parsed.validationCommands) ? parsed.validationCommands.map(String) : undefined,
+    unableReason: parsed.unableReason ? String(parsed.unableReason) : undefined,
+  };
 }
 
 function shouldUseMultiAgent(prompt: string, intents: string[]): boolean {
@@ -559,6 +597,13 @@ function shouldUseMultiAgent(prompt: string, intents: string[]): boolean {
 
 function isRefactorTask(prompt: string, intents: string[]): boolean {
   return /(?:rename|move|relocat|reorgani[sz]e|folder|file|path|import|export)/i.test(prompt) && (intents.includes('refactor') || /(?:rename|move|folder|path)/i.test(prompt));
+}
+
+function shouldDeleteFile(prompt: string, file: { path: string; afterContent: string; deleted?: boolean; explanation: string }, fileExists: boolean): boolean {
+  if (file.deleted) return true;
+  if (!fileExists) return false;
+  if (file.afterContent.trim().length > 0) return false;
+  return /\b(delete|remove|unlink|rm|erase|drop)\b/i.test(`${prompt} ${file.explanation} ${file.path}`);
 }
 
 function chunkText(text: string): string[] {

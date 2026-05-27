@@ -12,6 +12,7 @@ const PatchFile = z.object({
   path: z.string().min(1),
   beforeContent: z.string(),
   afterContent: z.string(),
+  deleted: z.boolean().optional(),
 });
 
 const EditBlock = z.object({
@@ -115,18 +116,25 @@ export async function POST(req: Request) {
     for (const file of parsed.data.files) {
       const target = resolveInside(guarded.resolved, file.path);
       let current = '';
+      let fileExists = true;
       try {
         current = await fs.readFile(target, 'utf8');
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        fileExists = false;
       }
 
-      if (current === file.afterContent) {
+      if (file.deleted) {
+        if (!fileExists) {
+          alreadyApplied.push(file.path);
+          continue;
+        }
+      } else if (current === file.afterContent) {
         alreadyApplied.push(file.path);
         continue;
       }
 
-      if (current !== file.beforeContent) {
+      if (!file.deleted && current !== file.beforeContent) {
         const diff = firstDifference(current, file.beforeContent) ?? { index: 0, line: 1, column: 1 };
         conflicts.push({
           path: file.path,
@@ -178,8 +186,13 @@ export async function POST(req: Request) {
 
     for (const file of filesToWrite) {
       const target = resolveInside(guarded.resolved, file.path);
-      await fs.mkdir(path.dirname(target), { recursive: true });
-      await fs.writeFile(target, file.afterContent, 'utf8');
+      // Root Cause vs Logic: deletion requests previously wrote an empty string, which preserved the file; use a real filesystem removal when the patch is marked deleted.
+      if (file.deleted) {
+        await fs.rm(target, { force: false, recursive: true });
+      } else {
+        await fs.mkdir(path.dirname(target), { recursive: true });
+        await fs.writeFile(target, file.afterContent, 'utf8');
+      }
     }
 
     return NextResponse.json({

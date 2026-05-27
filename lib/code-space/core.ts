@@ -159,6 +159,7 @@ export interface CodeSpaceAgentSession {
     filePath: string;
     beforeContent: string;
     afterContent: string;
+    deleted?: boolean;
     acceptedAt: number;
   }>;
 }

@@ -313,6 +313,7 @@ export function CodeSpaceWorkspace() {
     filePath: string;
     oldContent: string;
     newContent: string;
+    deleted?: boolean;
     explanation?: string;
     unifiedDiff?: string;
   }>>([]);
@@ -322,6 +323,7 @@ export function CodeSpaceWorkspace() {
     filePath: string;
     beforeContent: string;
     afterContent: string;
+    deleted?: boolean;
     acceptedAt: number;
   }>>([]);
   const agentAbortRef = useRef<AbortController | null>(null);
@@ -1209,6 +1211,7 @@ export function CodeSpaceWorkspace() {
         filePath: string;
         oldContent: string;
         newContent: string;
+        deleted?: boolean;
         explanation?: string;
         unifiedDiff?: string;
       },
@@ -1221,21 +1224,22 @@ export function CodeSpaceWorkspace() {
         const response = await fetch('/api/code-space/patches', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'apply',
-            rootPath: activeProject.rootPath,
-            projectId: activeProject.id,
-            runId: session.id,
-            patchId: diff.diffId,
-            files: [
-              {
-                path: diff.filePath,
-                beforeContent: diff.oldContent,
-                afterContent: diff.newContent,
-              },
-            ],
-          }),
-        });
+              body: JSON.stringify({
+                action: 'apply',
+                rootPath: activeProject.rootPath,
+                projectId: activeProject.id,
+                runId: session.id,
+                patchId: diff.diffId,
+                files: [
+                  {
+                    path: diff.filePath,
+                    beforeContent: diff.oldContent,
+                    afterContent: diff.newContent,
+                    deleted: diff.deleted,
+                  },
+                ],
+              }),
+            });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error ?? 'Patch apply failed');
         const acceptedAt = Date.now();
@@ -1246,6 +1250,7 @@ export function CodeSpaceWorkspace() {
             filePath: diff.filePath,
             beforeContent: diff.oldContent,
             afterContent: diff.newContent,
+            deleted: diff.deleted,
             acceptedAt,
           },
         ]);
@@ -1258,6 +1263,7 @@ export function CodeSpaceWorkspace() {
               filePath: diff.filePath,
               beforeContent: diff.oldContent,
               afterContent: diff.newContent,
+              deleted: diff.deleted,
               acceptedAt,
             },
           ],
@@ -1411,6 +1417,7 @@ export function CodeSpaceWorkspace() {
                 filePath: event.filePath,
                 oldContent: event.oldContent,
                 newContent: event.newContent,
+                deleted: event.deleted,
                 explanation: event.explanation,
                 unifiedDiff: event.unifiedDiff,
               };

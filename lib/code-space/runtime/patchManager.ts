@@ -2,6 +2,7 @@ export interface PatchProposalFileInput {
   path: string;
   beforeContent: string;
   afterContent: string;
+  deleted?: boolean;
 }
 
 export interface PatchProposal {
@@ -33,7 +34,7 @@ function lines(content: string): string[] {
 
 function createUnifiedFileDiff(file: PatchProposalFileInput): { diff: string; additions: number; deletions: number } {
   const before = lines(file.beforeContent);
-  const after = lines(file.afterContent);
+  const after = file.deleted ? [] : lines(file.afterContent);
   const max = Math.max(before.length, after.length);
   const out = [`--- a/${file.path}`, `+++ b/${file.path}`, `@@ -1,${before.length} +1,${after.length} @@`];
   let additions = 0;
