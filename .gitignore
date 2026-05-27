@@ -19,6 +19,9 @@ tests/
 tests/visual/__snapshots__/*.actual.png
 tests/visual/__snapshots__/*.diff.png
 
+docs/superpowers/
+docs/plan/
+
 .claude
 .superpowers
 .cursor

@@ -13,10 +13,15 @@ import {
   buildPlanImplementationPrompt,
   extractBuildPlanPath,
 } from '@/lib/code-space/planBuild';
+import {
+  formatPlanArtifactSectionHeading,
+  PLAN_ARTIFACT_SECTION_TITLES,
+} from '@/lib/code-space/agent/planTemplate';
 import { createAgentEvent, createDefaultToolRegistry, createFileCheckpoint, encodeSseEvent, getEventStore } from '@/lib/code-space/runtime';
 import type { AgentEventType } from '@/lib/code-space/runtime';
 import { createUnifiedDiff, validateSyntaxLightweight } from '@/lib/code-space/agent/editBlocks';
 import { chatWithRetry } from '@/lib/agent/providers';
+import { chatStructuredWithRetry } from '@/lib/agent/planning/structuredOutput';
 import { guardPath } from '@/lib/security/pathGuard';
 import {
   buildCodeCompletionResponse,
@@ -55,6 +60,48 @@ const BodySchema = z.object({
 type AgentRequest = z.infer<typeof BodySchema>;
 type ProviderId = AgentRequest['providerId'];
 type PlanClarificationAnswer = { question: string; answer: string };
+type WorkflowOutline = {
+  intentSummary: string;
+  planItems: string[];
+  clarifyingQuestions: CodeSpaceClarifyingQuestion[];
+};
+
+const WORKFLOW_OUTLINE_SCHEMA = {
+  type: 'object',
+  properties: {
+    intent_summary: { type: 'string' },
+    plan_items: { type: 'array', items: { type: 'string' } },
+    clarifying_questions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          question: { type: 'string' },
+          choices: { type: 'array', items: { type: 'string' } },
+          allowMultiple: { type: 'boolean' },
+        },
+        required: ['id', 'question', 'choices', 'allowMultiple'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['intent_summary', 'plan_items', 'clarifying_questions'],
+  additionalProperties: false,
+} as const;
+
+const WorkflowOutlineSchema = z.object({
+  intent_summary: z.string(),
+  plan_items: z.array(z.string()),
+  clarifying_questions: z.array(
+    z.object({
+      id: z.string(),
+      question: z.string(),
+      choices: z.array(z.string()),
+      allowMultiple: z.boolean(),
+    }),
+  ),
+});
 
 const execFileAsync = promisify(execFile);
 
@@ -164,10 +211,24 @@ export async function POST(req: NextRequest) {
         );
         await emitRuntime('context.search.completed', { selectedFiles: context.files.map((file) => file.path), summaries: context.files.map((file) => ({ path: file.path, summary: file.summary })), terms: context.terms, attachments });
 
-        // Motivation vs Logic: Plan/todo scaffolds are user-visible commitments. Emit them only after repository
-        // evidence has been gathered and code-intelligence expansion has run, so the agent never appears to plan,
-        // ask MCQs, or implement from prompt text alone.
-        const plan = buildPlan(mode, intents, promptForContext);
+        // Motivation vs Logic: plan/todo scaffolds are user-visible commitments, so they must come from the same
+        // evidence-grounded synthesis pass that will also decide whether clarification is actually required.
+        const workflowOutline = await emitTool(
+          'workflow_outline',
+          {
+            mode,
+            prompt: promptForContext,
+            intents,
+            context: context.files.map((file) => ({
+              path: file.path,
+              summary: file.summary,
+              truncated: file.truncated,
+              symbols: file.symbols,
+            })),
+          },
+          async () => generateWorkflowOutline(guarded.resolved, body.data, promptForContext, intents, context, mode),
+        );
+        const plan = workflowOutline.planItems;
         emit({ type: 'plan_created', items: plan });
         await emitRuntime('plan.created', { items: plan, evidenceFiles: context.files.map((file) => file.path) });
         plan.forEach((text, index) => emit({ type: 'todo_created', todo: { id: `todo:${runId}:${index}`, text, done: false } }));
@@ -185,7 +246,7 @@ export async function POST(req: NextRequest) {
           emit({ type: 'todo_updated', todoId: `todo:${runId}:2`, done: true });
         } else if (mode === 'plan') {
           const clarificationAnswers = extractPlanClarificationAnswers(messages);
-          const questions = buildClarifyingQuestions(planningPrompt, intents, context);
+          const questions = workflowOutline.clarifyingQuestions;
           const shouldAskClarification = questions.length > 0 && clarificationAnswers.length === 0;
           if (shouldAskClarification) {
             emit({ type: 'clarifying_questions_created', questions });
@@ -194,7 +255,7 @@ export async function POST(req: NextRequest) {
             emit({ type: 'todo_updated', todoId: `todo:${runId}:2`, done: true });
           } else {
             const planArtifact = await emitTool('write_plan_artifact', { projectName, prompt: planningPrompt, inspectedFiles: context.files.map((file) => file.path), answers: clarificationAnswers }, async () =>
-              writePlanArtifact(guarded.resolved, sessionId, projectName, planningPrompt, context, validation, clarificationAnswers, body.data),
+              writePlanArtifact(guarded.resolved, sessionId, projectName, planningPrompt, context, validation, clarificationAnswers, body.data, workflowOutline),
             );
             filesChanged = [planArtifact.filePath];
             emit({ type: 'plan_markdown_created', filePath: planArtifact.filePath, content: planArtifact.content });
@@ -333,106 +394,28 @@ export async function POST(req: NextRequest) {
   });
 }
 
-export function buildPlan(mode: CodeSpaceAgentMode, intents: string[], prompt: string): string[] {
-  if (mode === 'ask') return ['Gather comprehensive repository evidence', 'Trace relevant symbols and references', 'Answer directly from inspected context'];
-  if (mode === 'plan') return ['Gather comprehensive repository evidence', 'Expand related files with symbol and reference context', 'Ask MCQ decisions only after inspected evidence reveals ambiguity', 'Write an operator-ready implementation plan artifact'];
-  if (isRefactorTask(prompt, intents)) return ['Gather comprehensive repository evidence', 'Inspect the current file, imports, exports, and references', 'Move or rename files on disk with shell-native operations instead of duplicating them', 'Search and repair every affected importer, export, and test', 'Run validation commands to confirm the refactor compiles cleanly'];
-  const complex = shouldUseMultiAgent(prompt, intents);
-  return ['Gather comprehensive repository evidence', complex ? 'Explore likely implementation paths from inspected files' : 'Inspect relevant source and tests', 'Apply the smallest safe change', 'Report changed files and validation'];
+export async function buildPlan(
+  mode: CodeSpaceAgentMode,
+  intents: string[],
+  prompt: string,
+  context?: ContextSearchResult,
+  request?: AgentRequest,
+): Promise<string[]> {
+  if (!context?.files.length || !request) return [];
+  const outline = await generateWorkflowOutline('', request, prompt, intents, context, mode);
+  return outline.planItems;
 }
 
-export function buildClarifyingQuestions(prompt = '', intents: string[] = [], context?: ContextSearchResult): CodeSpaceClarifyingQuestion[] {
-  if (!context?.files.length) return [];
-
-  const text = prompt.toLowerCase();
-  const questions: CodeSpaceClarifyingQuestion[] = [];
-  const files = context?.files.map((file) => file.path) ?? [];
-  const hasBackend = files.some((file) => /api|server|backend|route|controller|service/i.test(file));
-  const hasFrontend = files.some((file) => /component|page|app|ui|style|css|tsx$/i.test(file));
-  const featureLike = intents.some((intent) => ['feature_build', 'refactor', 'dependency/setup', 'styling/ui_change'].includes(intent));
-
-  if (featureLike && (hasBackend || hasFrontend)) {
-    questions.push({
-      id: 'application-architecture',
-      question: 'Should this be implemented as a cohesive monolith/module inside the existing app, or split into micro-services?',
-      choices: [
-        'Modular monolith inside the existing app (Recommended) — reuse current routing, state, auth/config, and validation boundaries.',
-        'Micro-services split — introduce separately deployed services with explicit network contracts and operational ownership.',
-        'Hybrid boundary — keep the UI/workflow in-app while isolating the highest-risk capability behind a service interface.',
-      ],
-    });
-    questions.push({
-      id: 'service-boundary',
-      question: 'If new API behavior is needed, should the REST API be served by a new dedicated service or merged into existing services?',
-      choices: [
-        'Merge into existing services/routes (Recommended) — preserve current service boundaries unless scaling or ownership requires a split.',
-        'Create a dedicated API service — use when lifecycle, deployment, security, or traffic profile should be independently managed.',
-        'Define an internal adapter first — keep callers stable while deciding later whether the implementation moves out-of-process.',
-      ],
-    });
-  }
-
-  if (featureLike && /agent|ai|llm|planner|planning|workflow|orchestration|tool|search|retrieval|evidence/i.test(text)) {
-    questions.push({
-      id: 'agent-orchestration-boundary',
-      question: 'Where should agent/planner intelligence live in the architecture?',
-      choices: [
-        'Backend/runtime orchestrator (Recommended) — keep strategy, tool use, context loading, and implementation handoff close to execution state.',
-        'Frontend-guided workflow — let the UI collect design choices while backend services remain mostly deterministic.',
-        'Dedicated agent service — isolate model orchestration, traces, and long-running planning from the main app runtime.',
-      ],
-    });
-  }
-
-  if (featureLike && /data|database|schema|state|persist|cache|session|history|artifact|plan/i.test(text)) {
-    questions.push({
-      id: 'state-persistence',
-      question: 'How should durable planning/build state be stored?',
-      choices: [
-        'Reuse the existing session/artifact store (Recommended) — keep plan, build, and trace state in one recoverable workflow.',
-        'Introduce a dedicated planning table/collection — use if plans need independent lifecycle, permissions, or analytics.',
-        'Store only file artifacts — keep runtime state minimal and treat markdown/checkpoints as the source of truth.',
-      ],
-    });
-  }
-
-  if (featureLike && (hasBackend || hasFrontend) && !/only|frontend|backend|api|full[- ]?stack|end[- ]?to[- ]?end/i.test(text)) {
-    questions.push({
-      id: 'implementation-boundary',
-      question: 'Which implementation boundary should the plan optimize for?',
-      choices: [
-        'End-to-end vertical slice (Recommended) — plan UI, API/state, persistence, and validation together when the repo evidence supports it.',
-        'Frontend-only — keep backend and data model behavior unchanged.',
-        'Backend/core-only — expose behavior without changing user-facing UI yet.',
-      ],
-    });
-  }
-
-  if (/auth|payment|billing|database|migration|schema|external|integration|security|permission|delete|destructive/i.test(text)) {
-    questions.push({
-      id: 'risk-policy',
-      question: 'How should risky or externally-coupled changes be handled?',
-      choices: [
-        'Safe staged rollout (Recommended) — isolate risky changes, add guards, and require explicit validation before broad rollout.',
-        'Prototype behind a feature flag — ship inactive scaffolding first, then enable after review.',
-        'Direct implementation — plan the full change now because the risk is already accepted.',
-      ],
-    });
-  }
-
-  if (/ui|design|layout|component|sidebar|panel|button|modal|responsive|ux/i.test(text)) {
-    questions.push({
-      id: 'ux-priority',
-      question: 'What UX priority should guide implementation details?',
-      choices: [
-        'Production workflow clarity (Recommended) — concise status, clear actions, and no internal reasoning in chat.',
-        'Maximum transparency — show more progress detail and diagnostics in expandable panels.',
-        'Minimal surface change — preserve existing layout while fixing the requested behavior.',
-      ],
-    });
-  }
-
-  return questions.slice(0, 6);
+export async function buildClarifyingQuestions(
+  prompt = '',
+  intents: string[] = [],
+  context?: ContextSearchResult,
+  request?: AgentRequest,
+  mode: CodeSpaceAgentMode = 'plan',
+): Promise<CodeSpaceClarifyingQuestion[]> {
+  if (!context?.files.length || !request) return [];
+  const outline = await generateWorkflowOutline('', request, prompt, intents, context, mode);
+  return outline.clarifyingQuestions;
 }
 
 function describeModeContract(mode: CodeSpaceAgentMode): string {
@@ -778,13 +761,23 @@ async function exists(filePath: string): Promise<boolean> {
   }
 }
 
-async function writePlanArtifact(root: string, sessionId: string, projectName: string, prompt: string, context: ContextSearchResult, validation: Awaited<ReturnType<typeof detectValidationCommands>>, answers: PlanClarificationAnswer[] = [], request?: AgentRequest): Promise<{ filePath: string; content: string }> {
+async function writePlanArtifact(
+  root: string,
+  sessionId: string,
+  projectName: string,
+  prompt: string,
+  context: ContextSearchResult,
+  validation: Awaited<ReturnType<typeof detectValidationCommands>>,
+  answers: PlanClarificationAnswer[] = [],
+  request?: AgentRequest,
+  workflowOutline?: WorkflowOutline,
+): Promise<{ filePath: string; content: string }> {
   const filePath = `.agent/plans/${sessionId.replace(/[^a-zA-Z0-9_.-]+/g, '-')}.md`;
   const absolute = path.join(root, filePath);
-  const fallback = buildStrategyDocument({ projectName, prompt, context, validation, codeMode: false, answers });
+  const fallback = buildStrategyDocument({ projectName, prompt, context, validation, codeMode: false, answers, workflowOutline });
   const content = request
     ? sanitizePlanArtifact(
-        await buildModelBackedStrategyDocument(root, { projectName, prompt, context, validation, answers, fallback, request }).catch(() => fallback),
+        await buildModelBackedStrategyDocument(root, { projectName, prompt, context, validation, answers, fallback, request, workflowOutline }).catch(() => fallback),
         fallback,
       )
     : fallback;
@@ -806,6 +799,7 @@ async function buildModelBackedStrategyDocument(
     answers: PlanClarificationAnswer[];
     fallback: string;
     request: AgentRequest;
+    workflowOutline?: WorkflowOutline;
   },
 ): Promise<string> {
   const credentials = await resolveProviderCredentials(root, input.request);
@@ -817,8 +811,8 @@ async function buildModelBackedStrategyDocument(
     'Ground every claim in the provided repository evidence. Do not invent files or describe work that was not supported by the inspected code.',
     'Do not include MCQ questions, option menus, A/B/C choices, questionnaire transcripts, or conversational closing offers.',
     'If sidebar answers were provided, summarize only the selected inputs as concise planning constraints without reproducing the original question text.',
-    'Prefer concrete file paths, sequencing, checkpoints, tests, fallback behavior, and acceptance criteria over generic advice.',
-    'End the document after the Build Instructions section and keep the output strictly to the plan artifact.',
+    'Prefer concrete file paths, sequencing, tests, and fallback behavior over generic advice.',
+    'End the document after the Assumptions or optional Notice section and keep the output strictly to the plan artifact.',
   ].join('\n');
   const evidence = input.context.files
     .slice(0, 16)
@@ -830,21 +824,16 @@ async function buildModelBackedStrategyDocument(
     '',
     'Planning inputs and assumptions:',
     input.answers.length ? input.answers.map((answer, index) => `- Input ${index + 1}: ${answer.answer}`).join('\n') : '- No sidebar answers were provided; encode assumptions explicitly without inventing MCQ choices.',
+    input.workflowOutline?.intentSummary ? `- Intent summary: ${input.workflowOutline.intentSummary}` : '',
     '',
     'Validation commands discovered:',
     ...input.validation.commands.map((command) => `- ${command.command} — ${command.reason}`),
     '',
     'Required markdown shape:',
     '# Code Space Plan — <project>',
-    '## Planning Decisions And Assumptions',
-    '## Context Already Inspected',
-    '## Implementation Plan',
-    '## File-Level Change Plan',
-    '## Validation and Testing',
-    '## Risks and Acceptance Criteria',
-    '## Definition Of Done',
-    '## Build Instructions',
-    'Keep the plan focused on implementation, validation, and risks only.',
+    ...PLAN_ARTIFACT_SECTION_TITLES.map((title) => formatPlanArtifactSectionHeading(title)),
+    'Optional sections like Notice, Disclaimer, or Risks should be added only when they materially help the implementer.',
+    'Keep the plan focused on implementation, validation, and concrete context analysis only.',
     '',
     'Repository evidence:',
     evidence || '(No readable evidence was found.)',
@@ -993,130 +982,162 @@ function extractPlanClarificationAnswers(messages: AgentRequest['messages']): Pl
   return answers;
 }
 
-export function buildStrategyDocument({ projectName, prompt, context, validation, codeMode, reason, answers = [] }: { projectName: string; prompt: string; context: ContextSearchResult; validation: Awaited<ReturnType<typeof detectValidationCommands>>; codeMode: boolean; reason?: string; answers?: PlanClarificationAnswer[] }): string {
-  const implementationTasks = buildImplementationTodos(prompt, context);
-  const riskItems = buildRiskItems(context, prompt);
-  const noteSection = reason ? ['## Note', reason, ''] : [];
-  const planningAssumptionsSection = [
-    '## Planning Decisions And Assumptions',
-    ...(answers.length
-      ? answers.map((answer, index) => `- **Input ${index + 1}:** ${answer.answer}`)
-      : [
-          '- **Assumption:** No sidebar decisions were submitted, so Code mode should preserve the narrowest safe scope and pause only on conflicts that would change product behavior.',
-          '- **Assumption:** The implementation agent should read this plan artifact before editing and treat repository evidence as stronger than generic workflow rules.',
-        ]),
-    '',
+function formatList(items: string[]): string {
+  if (!items.length) return '';
+  if (items.length === 1) return items[0] ?? '';
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(', ')}, and ${items[items.length - 1]}`;
+}
+
+function buildPlanSummary(prompt: string, context: ContextSearchResult, answers: PlanClarificationAnswer[], outline?: WorkflowOutline): string {
+  const inspectedFiles = context.files.slice(0, 4).map((file) => `\`${file.path}\``);
+  const intentSummary = outline?.intentSummary?.trim();
+  const evidenceText = inspectedFiles.length
+    ? `Ground the change in ${formatList(inspectedFiles)} and keep the implementation inside the existing boundary.`
+    : 'Ground the change in the inspected repository evidence and keep the implementation inside the existing boundary.';
+  const assumptionText = answers.length
+    ? 'Reflect the selected sidebar decisions directly in the implementation scope.'
+    : 'State any unresolved assumptions explicitly so the implementer can validate them.';
+  return `${(intentSummary || prompt.trim().replace(/\s+/g, ' '))}. ${evidenceText} ${assumptionText}`;
+}
+
+function buildPlanKeyChanges(context: ContextSearchResult, prompt: string, outline?: WorkflowOutline): string[] {
+  if (outline?.planItems.length) {
+    return outline.planItems.map((item) => `- ${item}`);
+  }
+  const files = context.files.map((file) => file.path.toLowerCase());
+  const topFiles = context.files.slice(0, 4).map((file) => `\`${file.path}\``);
+  const bullets: string[] = [];
+  if (!files.length) {
+    bullets.push('- Base the plan on the inspected repository evidence and keep the scope narrow.');
+  } else {
+    bullets.push(`- Ground the plan in ${formatList(topFiles)}.`);
+  }
+  if (files.some((file) => /route|app\/api|server/.test(file))) bullets.push('- Keep the change within the existing API or orchestration boundary.');
+  if (files.some((file) => /component|ui|panel|workspace|editor/.test(file))) bullets.push('- Keep the user-facing work aligned with the current Code Space surface.');
+  if (files.some((file) => /markdown|preview|renderer|asset|path/.test(file))) bullets.push('- Keep markdown and preview behavior aligned with the shared helpers.');
+  if (files.some((file) => /test|spec|vitest|playwright/.test(file))) bullets.push('- Preserve the nearby test surface that already covers this seam.');
+  if (/preview|editor|toggle|markdown/i.test(prompt)) bullets.push('- Preserve tab-scoped preview behavior for markdown-related changes.');
+  return bullets.length ? bullets : ['- Reuse the inspected implementation seam and keep the work incremental.'];
+}
+
+function buildPlanTestPlans(validation: Awaited<ReturnType<typeof detectValidationCommands>>): string[] {
+  return validation.commands.length
+    ? validation.commands.map((command) => `- ${command.command} — ${command.reason}`)
+    : ['- Manual review — no project-specific validation command was detected.'];
+}
+
+function buildPlanAssumptions(context: ContextSearchResult, answers: PlanClarificationAnswer[]): string[] {
+  if (answers.length) {
+    return answers.map((answer, index) => `- Input ${index + 1}: ${answer.answer}`);
+  }
+  const hasMarkdownSurface = context.files.some((file) => /markdown|preview|renderer/.test(file.path.toLowerCase()));
+  return [
+    '- The implementation should preserve the narrowest safe scope and avoid introducing a second workflow path unless the inspected code requires it.',
+    hasMarkdownSurface
+      ? '- Shared markdown rendering should remain the source of truth for preview behavior so Code Space and other markdown surfaces stay aligned.'
+      : '- The plan should stay grounded in the inspected repository evidence and treat the current boundary as the default integration point.',
   ];
-  // Motivation vs Logic: keep plan artifacts tight and execution-first so Code mode sees only the information
-  // needed to implement, validate, and review the change. The logic stays in the helper blocks below instead
-  // of spreading into extra narrative sections that do not help the build flow act.
+}
+
+export function buildStrategyDocument({ projectName, prompt, context, validation, codeMode: _codeMode, reason, answers = [], workflowOutline }: { projectName: string; prompt: string; context: ContextSearchResult; validation: Awaited<ReturnType<typeof detectValidationCommands>>; codeMode: boolean; reason?: string; answers?: PlanClarificationAnswer[]; workflowOutline?: WorkflowOutline }): string {
+  const summary = buildPlanSummary(prompt, context, answers, workflowOutline);
+  const keyChanges = buildPlanKeyChanges(context, prompt, workflowOutline);
+  const testPlans = buildPlanTestPlans(validation);
+  const assumptions = buildPlanAssumptions(context, answers);
+  const notice = reason?.trim() ? [`- ${reason.trim()}`] : [];
+  // Motivation vs Logic: keep the fallback plan artifact aligned with the exact markdown template so the
+  // model-backed and deterministic paths both produce the same structural contract for Plan mode.
   return [
     `# Code Space Plan — ${projectName}`,
     '',
-    '## Request Summary',
-    prompt,
+    '## Summary',
+    summary,
     '',
-    ...noteSection,
-    ...planningAssumptionsSection,
-    '## Implementation Plan',
-    '### Current system',
-    ...buildCurrentSystemFindings(context),
+    '## Key Changes',
+    ...keyChanges,
     '',
-    '### Implementation plan',
-    ...buildRecommendedStrategy(prompt),
+    '## Test Plans',
+    ...testPlans,
     '',
-    '## File-Level Change Plan',
-    '- Checkpoint 1: Re-open the plan, target files, and nearest tests so implementation starts from fresh evidence rather than this summarized artifact alone.',
-    '- Checkpoint 2: Add failing tests or update existing tests around the workflow seam that will change.',
-    '- Checkpoint 3: Implement the smallest modular change that satisfies the plan while preserving existing service boundaries.',
-    '- Checkpoint 4: Run validation, repair failures from root cause, and document any residual risk in the final response.',
+    '## Assumptions',
+    ...assumptions,
     '',
-    ...implementationTasks.map((task, index) => `${index + 1}. ${task}`),
-    '',
-    '## Validation and Testing',
-    ...(validation.commands.length ? validation.commands.map((command) => `- ${command.command} — ${command.reason}`) : ['- Manual review — no project-specific validation command was detected.']),
-    '- Add focused unit or integration coverage around the changed service boundary where an existing test pattern is present.',
-    '- Run validation after each correction pass and record unresolved risks before marking the session complete.',
-    '',
-    '## Risks and Acceptance Criteria',
-    ...riskItems,
-    '',
-    '## Definition Of Done',
-    '- The final implementation follows the inspected service boundaries instead of introducing a parallel workflow.',
-    '- Public user-facing chat remains concise while tool/audit details stay in structured panels or plan artifacts.',
-    '- The plan can be opened directly in the Code Space editor through View plan.',
-    '- Code mode can use this plan as the source of truth and apply checkpointed changes with validation.',
-    '- Validation passes, or remaining failures are explicitly summarized with next actions.',
-    '',
-    '## Build Instructions',
-    '- Build must switch to Code mode explicitly; do not submit another Plan-mode request from this button.',
-    '- Code mode must read this plan artifact first, load the referenced source/test files, implement the ordered tasks, and validate before summarizing.',
-    '- If the workspace has drifted since planning, prefer the current code and explain the adjustment instead of regenerating a dummy plan.',
+    ...(notice.length ? ['## Notice', ...notice, ''] : []),
   ].join('\n');
 }
 
-function buildCurrentSystemFindings(context: ContextSearchResult): string[] {
-  const files = context.files.map((file) => file.path.toLowerCase());
-  const findings: string[] = [];
-  if (!files.length) return ['- No readable files were discovered before this plan was created.'];
-  if (files.some((file) => /routes?|app/.test(file))) findings.push('- Request routing is handled through API entrypoints before reaching orchestration/search/retrieval services.');
-  if (files.some((file) => /chatbot|coordinator|agent/.test(file))) findings.push('- Agent coordination appears separated from low-level retrieval/search utilities, so strategy changes should be introduced at the orchestration boundary rather than inside every engine.');
-  if (files.some((file) => /search|engine|duckduckgo|medical|multilingual|video/.test(file))) findings.push('- Search capability is engine-oriented: query construction, external lookup, multilingual/medical specialization, extraction, and result post-processing are implemented as separate surfaces.');
-  if (files.some((file) => /retrieval|evidence|source/.test(file))) findings.push('- Evidence/retrieval layers are responsible for ranking, provenance, grounding, and selecting context for the final response.');
-  return findings.length ? findings : ['- The selected files define the implementation surfaces that should be changed; no reliable architecture summary could be inferred beyond the inspected evidence.'];
-}
-
-function buildRecommendedStrategy(prompt: string): string[] {
-  if (/search|web|evidence|clinical|lookup|api/i.test(prompt)) {
-    return [
-      '- Introduce a search decision policy that classifies the query intent, required freshness, clinical specificity, source quality requirement, and whether local retrieval is sufficient before web lookup.',
-      '- Add a strategy layer between API/agent orchestration and concrete search engines so query expansion, engine choice, retries, and evidence ranking are deterministic and auditable.',
-      '- Normalize search results into a shared clinical evidence contract with title, URL/source, date, source type, relevance score, quality tier, snippet, extracted content, and provenance metadata.',
-      '- Feed normalized evidence into retrieval/evidence managers for reranking, deduplication, contradiction checks, and final context assembly instead of letting each engine shape output independently.',
-      '- Keep provider/network failures recoverable: return partial evidence with warnings, avoid hallucinated citations, and preserve enough trace detail for the internal tool panel.',
-    ];
+// Root Cause vs Logic: earlier workflow text was synthesized from fixed heuristics, which meant the runtime could
+// promise plan steps or clarifying questions before it had actually reasoned over the inspected evidence.
+async function generateWorkflowOutline(
+  root: string,
+  request: AgentRequest,
+  prompt: string,
+  intents: string[],
+  context: ContextSearchResult,
+  mode: CodeSpaceAgentMode,
+): Promise<WorkflowOutline> {
+  const credentials = await resolveProviderCredentials(root, request);
+  if (!credentials.apiKey && request.providerId !== 'local') {
+    return { intentSummary: '', planItems: [], clarifyingQuestions: [] };
   }
-  return [
-    '- Implement the change at the narrowest service boundary already present in the inspected code.',
-    '- Preserve existing naming, configuration, and validation patterns from the inspected files.',
-    '- Keep the user-facing workflow simple while keeping diagnostics available in internal panels and plan artifacts.',
+
+  const evidence = context.files
+    .slice(0, 12)
+    .map((file) => [`--- FILE ${file.path} (${file.summary}) ---`, file.content.slice(0, 2500), file.truncated ? '\n[TRUNCATED]' : ''].join('\n'))
+    .join('\n\n');
+
+  const messages = [
+    {
+      role: 'system' as const,
+      content:
+        'You are Code Space, synthesizing a workflow outline from repository evidence and the user request. ' +
+        'Return only JSON. No markdown, no code fences, no commentary. ' +
+        'Infer the user intent from the prompt and the inspected files before choosing any implementation steps or clarifications. ' +
+        'Only ask clarifying questions when the evidence still leaves a meaningful implementation ambiguity. ' +
+        'Keep plan items concrete, short, and action-oriented. They should reflect actual next steps implied by the repo evidence, not generic workflow templates. ' +
+        'Do not emit architecture MCQs unless the evidence really points to multiple plausible implementation boundaries. ' +
+        'When you do ask clarifying questions, keep each question tied to a concrete decision that blocks implementation.',
+    },
+    {
+      role: 'user' as const,
+      content: [
+        `Mode: ${mode}`,
+        `Prompt: ${prompt}`,
+        `Intents: ${intents.join(', ') || '(none)'}`,
+        '',
+        'Observed repository evidence:',
+        evidence || '(No readable evidence was found.)',
+      ].join('\n'),
+    },
   ];
-}
 
-function buildImplementationTodos(prompt: string, context: ContextSearchResult): string[] {
-  const files = context.files.map((file) => file.path);
-  const tasks: string[] = [];
-  const routingFile = files.find((file) => /routes?\.py|app\.py|route\.ts/i.test(file));
-  const coordinatorFile = files.find((file) => /coordinator|chatbot|agent|orchestrator/i.test(file));
-  const searchFiles = files.filter((file) => /search|engine|duckduckgo|medical|multilingual|video/i.test(file)).slice(0, 5);
-  const evidenceFile = files.find((file) => /evidence|retrieval|source/i.test(file));
+  try {
+    const outline = await chatStructuredWithRetry(
+      { id: request.providerId, model: request.model, endpoint: credentials.endpoint, apiKey: credentials.apiKey || 'local' },
+      messages,
+      {
+        jsonSchema: WORKFLOW_OUTLINE_SCHEMA,
+        schema: WorkflowOutlineSchema,
+      },
+    );
 
-  if (/search|web|evidence|clinical|lookup|api/i.test(prompt)) {
-    tasks.push(`Map the request flow from ${routingFile ?? 'the API entrypoint'} into ${coordinatorFile ?? 'the agent/search coordinator'} and identify the exact hook where search strategy should be selected.`);
-    tasks.push(`Design a typed SearchStrategy/EvidenceRequest contract covering freshness, clinical source quality, query expansion, engine selection, retries, and provenance.`);
-    tasks.push(`Refactor ${searchFiles.join(', ') || 'the search engine modules'} so engine outputs normalize into one evidence schema before downstream ranking.`);
-    tasks.push(`Update ${evidenceFile ?? 'the retrieval/evidence layer'} to consume normalized web evidence, deduplicate sources, score clinical reliability, and expose citations safely.`);
-    tasks.push('Add tests for strategy selection, engine fallback, source normalization, deduplication, and clinical evidence ranking using mocked search responses.');
-    tasks.push('Add concise user-facing failure behavior for no-results, stale evidence, low-quality sources, and provider/network timeouts.');
-    return tasks;
+    return {
+      intentSummary: outline.intent_summary.trim(),
+      planItems: outline.plan_items.map((item) => item.trim()).filter(Boolean).slice(0, 6),
+      clarifyingQuestions: outline.clarifying_questions
+        .map((question) => ({
+          id: question.id.trim(),
+          question: question.question.trim(),
+          choices: question.choices.map((choice) => choice.trim()).filter(Boolean).slice(0, 5),
+          allowMultiple: question.allowMultiple,
+        }))
+        .filter((question) => question.question && question.choices.length >= 2)
+        .slice(0, 6),
+    };
+  } catch {
+    return { intentSummary: '', planItems: [], clarifyingQuestions: [] };
   }
-
-  tasks.push(`Use the inspected files (${files.slice(0, 6).join(', ') || 'selected project files'}) as the implementation boundary.`);
-  tasks.push('Apply the change through the existing routing/state/service pattern rather than introducing a duplicate path.');
-  tasks.push('Update tests, fixtures, or documentation where the inspected project pattern shows an existing validation surface.');
-  tasks.push('Run validation and repair issues before summarizing completion.');
-  return tasks;
-}
-
-function buildRiskItems(context: ContextSearchResult, prompt: string): string[] {
-  const risks = ['- Acceptance: the implementation uses inspected files and does not create an unrelated parallel subsystem.'];
-  if (/clinical|medical|evidence|citation|search|web/i.test(prompt)) {
-    risks.push('- Acceptance: clinical/web evidence includes provenance, source quality, recency handling, and clear fallback behavior when evidence is insufficient.');
-    risks.push('- Risk: external search providers may fail or return low-quality results; mitigation is deterministic fallback, partial-result handling, and internal trace capture.');
-  }
-  if (context.files.some((file) => file.truncated)) risks.push('- Risk: some large files were summarized from truncated content; Code mode should re-open the specific sections before editing them.');
-  risks.push('- Acceptance: validation commands complete successfully or unresolved failures are listed with file-level next steps.');
-  return risks;
 }
 
 async function proposeAutonomousPatch(root: string, prompt: string, context: ContextSearchResult, request: AgentRequest): Promise<{ summary: string; files: ProposedPatchFile[] }> {
@@ -1294,14 +1315,6 @@ function parsePlannerJson(raw: string): PatchModelResult {
     validationCommands: Array.isArray(parsed.validationCommands) ? parsed.validationCommands.map(String) : undefined,
     unableReason: parsed.unableReason ? String(parsed.unableReason) : undefined,
   };
-}
-
-function shouldUseMultiAgent(prompt: string, intents: string[]): boolean {
-  return /architecture|multi[- ]?agent|agentic|migration|refactor|cursor|claude code|orchestration/i.test(prompt) || intents.includes('refactor') || intents.includes('feature_build');
-}
-
-function isRefactorTask(prompt: string, intents: string[]): boolean {
-  return /(?:rename|move|relocat|reorgani[sz]e|folder|file|path|import|export)/i.test(prompt) && (intents.includes('refactor') || /(?:rename|move|folder|path)/i.test(prompt));
 }
 
 function shouldDeleteFile(prompt: string, file: { path: string; afterContent: string; deleted?: boolean; explanation: string }, fileExists: boolean): boolean {

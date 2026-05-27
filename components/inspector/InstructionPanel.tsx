@@ -2,13 +2,10 @@
 
 import { useRef, useState } from 'react';
 import { Download, FileText, Loader2 } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import rehypeSanitize from 'rehype-sanitize';
-import remarkGfm from 'remark-gfm';
 import { useDiagramStore } from '@/lib/state/store';
 import { downloadTextFile } from '@/lib/export/download';
 import { downloadInstructionPdf } from '@/lib/export/instructionPdf';
-import { instructionMarkdownComponents } from './instructionMarkdown';
+import { MarkdownRenderer } from '@/components/markdown/MarkdownRenderer';
 
 export function InstructionPanel() {
   const instructionMarkdown = useDiagramStore((s) => s.instructionMarkdown);
@@ -65,13 +62,7 @@ export function InstructionPanel() {
       <div className="min-h-0 flex-1 overflow-y-auto bg-ink-900/70 p-4">
         {instructionMarkdown.trim() ? (
           <article ref={contentRef} className="rounded-xl border border-ink-700 bg-ink-900 px-5 py-4 text-sm shadow-inner">
-            <ReactMarkdown
-              components={instructionMarkdownComponents}
-              rehypePlugins={[rehypeSanitize]}
-              remarkPlugins={[remarkGfm]}
-            >
-              {instructionMarkdown}
-            </ReactMarkdown>
+            <MarkdownRenderer markdown={instructionMarkdown} />
           </article>
         ) : (
           <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-ink-700 bg-ink-850/50 p-6 text-center text-xs leading-6 text-ink-400">

@@ -1,7 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+vi.mock('@/lib/agent/planning/structuredOutput', () => ({
+  chatStructuredWithRetry: vi.fn(),
+}));
 import {
   buildClarifyingQuestions,
   buildPlan,
@@ -14,26 +17,50 @@ import {
   buildCodeCompletionResponse,
   buildPlanCompletionResponse,
 } from '@/lib/code-space/agent/runResponses';
+import { chatStructuredWithRetry } from '@/lib/agent/planning/structuredOutput';
 
 describe('Code Space agent route mode helpers', () => {
-  it('builds a read-only Ask plan', () => {
-    expect(buildPlan('ask', ['repository_explanation'], 'explain this repo')).toEqual([
-      'Gather comprehensive repository evidence',
-      'Trace relevant symbols and references',
-      'Answer directly from inspected context',
-    ]);
-  });
+  it('asks the model for workflow items and clarifying questions after context has been inspected', async () => {
+    vi.mocked(chatStructuredWithRetry).mockResolvedValue({
+      intent_summary: 'Modernize the workflow around the existing Code Space surface.',
+      plan_items: ['Inspect the current agent route', 'Use the observed context to shape the outline'],
+      clarifying_questions: [
+        {
+          id: 'implementation-boundary',
+          question: 'Which boundary should this implementation stay within?',
+          choices: ['Existing route', 'Dedicated service', 'Hybrid boundary'],
+          allowMultiple: false,
+        },
+      ],
+    } as never);
 
-  it('builds a deep Plan workflow and asks architecture/design MCQ clarifiers for ambiguous implementation prompts', () => {
-    const plan = buildPlan('plan', ['feature_build'], 'make this better');
-    expect(plan).toEqual([
-      'Gather comprehensive repository evidence',
-      'Expand related files with symbol and reference context',
-      'Ask MCQ decisions only after inspected evidence reveals ambiguity',
-      'Write an operator-ready implementation plan artifact',
-    ]);
+    const request = {
+      providerId: 'openai',
+      model: 'gpt-test',
+      apiKey: 'test-key',
+      endpoint: '',
+    } as never;
 
-    const questions = buildClarifyingQuestions('comprehensively improve the agent planning and Build button workflow', ['feature_build'], {
+    const plan = await buildPlan('plan', ['feature_build'], 'make this better', {
+      filesConsidered: 4,
+      terms: [],
+      omittedRelevantFiles: [],
+      files: [
+        {
+          path: 'components/code-space/AgentPanel.tsx',
+          content: '',
+          truncated: false,
+          lineCount: 1,
+          score: 10,
+          reasons: ['test'],
+          summary: 'UI surface',
+          symbols: [],
+        },
+      ],
+    }, request);
+    expect(plan).toEqual(['Inspect the current agent route', 'Use the observed context to shape the outline']);
+
+    const questions = await buildClarifyingQuestions('comprehensively improve the agent planning and Build button workflow', ['feature_build'], {
       filesConsidered: 4,
       terms: [],
       omittedRelevantFiles: [],
@@ -59,21 +86,18 @@ describe('Code Space agent route mode helpers', () => {
           symbols: [],
         },
       ],
-    });
+    }, request);
     const questionIds = questions.map((question) => question.id);
-    expect(questionIds).not.toContain('planning-depth');
-    expect(questionIds).not.toContain('build-execution');
-    expect(questionIds).not.toContain('agent-review-loop');
-    expect(questionIds).not.toContain('validation-gate');
-    expect(questionIds).toContain('application-architecture');
-    expect(questionIds).toContain('service-boundary');
-    expect(questions.map((question) => question.question).join('\n')).toMatch(/monolith|micro-services|dedicated service|existing service/i);
+    expect(questionIds).toEqual(['implementation-boundary']);
+    expect(questions[0]?.choices).toEqual(['Existing route', 'Dedicated service', 'Hybrid boundary']);
+    expect(questions[0]?.question).toContain('boundary');
+    expect(vi.mocked(chatStructuredWithRetry)).toHaveBeenCalledTimes(2);
   });
 
-  it('does not ask planning MCQs before repository evidence has been inspected', () => {
-    expect(buildClarifyingQuestions('build a better planning workflow', ['feature_build'])).toEqual([]);
+  it('returns no workflow outline when context has not been inspected yet', async () => {
+    expect(await buildClarifyingQuestions('build a better planning workflow', ['feature_build'])).toEqual([]);
     expect(
-      buildClarifyingQuestions('build a better planning workflow', ['feature_build'], {
+      await buildClarifyingQuestions('build a better planning workflow', ['feature_build'], {
         filesConsidered: 12,
         terms: [],
         omittedRelevantFiles: [],
@@ -98,28 +122,6 @@ describe('Code Space agent route mode helpers', () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
-  });
-
-  it('keeps Code mode implementation-oriented without clarifying questions', () => {
-    expect(buildPlan('code', ['bug_fix'], 'fix the failing build and run tests')).toEqual([
-      'Gather comprehensive repository evidence',
-      'Inspect relevant source and tests',
-      'Apply the smallest safe change',
-      'Report changed files and validation',
-    ]);
-    expect(buildClarifyingQuestions()).toEqual([]);
-  });
-
-  it('treats refactor tasks as move-first workflows before updating imports and validation', () => {
-    const plan = buildPlan('code', ['refactor'], 'rename the widgets folder and update imports');
-
-    expect(plan).toEqual([
-      'Gather comprehensive repository evidence',
-      'Inspect the current file, imports, exports, and references',
-      'Move or rename files on disk with shell-native operations instead of duplicating them',
-      'Search and repair every affected importer, export, and test',
-      'Run validation commands to confirm the refactor compiles cleanly',
-    ]);
   });
 
   it('builds Code mode prompts that preserve and expose the selected plan path', () => {
@@ -158,29 +160,27 @@ describe('Code Space agent route mode helpers', () => {
       codeMode: false,
       answers: [
         {
-          question: 'Should this be implemented as a cohesive monolith/module inside the existing app, or split into micro-services?',
-          answer: 'Modular monolith inside the existing app (Recommended) — reuse current routing.',
+          question: 'Which boundary should this implementation stay within?',
+          answer: 'Existing route',
         },
       ],
+      workflowOutline: {
+        intentSummary: 'Improve the plan workflow using inspected repository evidence.',
+        planItems: ['Inspect the agent route', 'Use context to drive the outline'],
+        clarifyingQuestions: [],
+      },
     });
 
     expect(content).not.toMatch(/\bMCQ\s*\d+\s*:/i);
-    expect(content).not.toMatch(/Should this be implemented as a cohesive monolith/i);
+    expect(content).not.toMatch(/Which boundary should this implementation stay within/i);
     expect(content).not.toMatch(/^\s*[-*]\s*[A-E]\)\s+/im);
-    expect(content).toContain('## Request Summary');
-    expect(content).not.toContain('\n## Request\n');
-    expect(content).toContain('## Planning Decisions And Assumptions');
-    expect(content).toContain('## Implementation Plan');
-    expect(content).toContain('### Current system');
-    expect(content).toContain('### Implementation plan');
-    expect(content).toContain('## Validation and Testing');
-    expect(content).toContain('## Risks and Acceptance Criteria');
-    expect(content).toContain('Modular monolith inside the existing app');
-    expect(content).toContain('Request routing is handled through API entrypoints');
-    expect(content).not.toContain('## Context Already Inspected');
-    expect(content).not.toContain('## Multi-Agent Exploration Brief');
-    expect(content).not.toContain('## Current behavior inferred from the codebase');
-    expect(content).not.toContain('## Execution Blueprint');
+    expect(content).toContain('## Summary');
+    expect(content).toContain('## Key Changes');
+    expect(content).toContain('## Test Plans');
+    expect(content).toContain('## Assumptions');
+    expect(content).toContain('Improve the plan workflow using inspected repository evidence.');
+    expect(content).toContain('Inspect the agent route');
+    expect(content).toContain('Use context to drive the outline');
   });
 
   it('summarizes plan completion from the actual plan artifact instead of a canned template', () => {
@@ -189,10 +189,12 @@ describe('Code Space agent route mode helpers', () => {
       planPath: '.agent/plans/session-123.md',
       planContent: [
         '# Code Space Plan',
-        '## Implementation Plan',
+        '## Summary',
+        'Keep the plan aligned with the actual repository evidence.',
+        '## Key Changes',
         '- Update AgentPanel to show the live plan summary.',
         '- Derive the completion text from the artifact content.',
-        '## Validation and Testing',
+        '## Test Plans',
         '- cd backend && python -m compileall .',
         '- cd backend && python -m pytest',
       ].join('\n'),
@@ -207,7 +209,7 @@ describe('Code Space agent route mode helpers', () => {
     });
 
     expect(response).toContain('Saved .agent/plans/session-123.md for demo.');
-    expect(response).toContain('Plan focus: Update AgentPanel to show the live plan summary.; Derive the completion text from the artifact content.');
+    expect(response).toContain('Plan focus: Keep the plan aligned with the actual repository evidence.; Update AgentPanel to show the live plan summary.');
     expect(response).toContain('Validation: `cd backend && python -m compileall .`; `cd backend && python -m pytest`.');
     expect(response).not.toContain('Plan ready for');
     expect(response).not.toContain('Use Build when you are ready for Code mode to implement it.');

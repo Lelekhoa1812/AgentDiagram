@@ -4,8 +4,7 @@ import path from 'node:path';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { isHiddenByDefault } from '@/lib/agent/repo/ignoreDefaults';
-import { normalizeIgnoredFolders } from '@/lib/agent/repo/repoScanner';
-import { defaultRepoPath, guardPath } from '@/lib/security/pathGuard';
+import { resolveCodeSpaceChild } from '@/lib/code-space/runtime/filePaths';
 
 export const runtime = 'nodejs';
 
@@ -52,18 +51,6 @@ const Body = z.discriminatedUnion('action', [
   }),
 ]);
 
-function resolveChild(rootPath: string, relativePath = ''): { ok: true; root: string; child: string; rel: string } | { ok: false; error: string } {
-  const rootGuard = guardPath(rootPath || defaultRepoPath());
-  if (!rootGuard.ok) return { ok: false, error: rootGuard.reason ?? 'Invalid root path' };
-  const [normalized = ''] = normalizeIgnoredFolders([relativePath]);
-  if (relativePath && !normalized) return { ok: false, error: 'Invalid file path' };
-  const child = path.resolve(rootGuard.resolved, normalized || '.');
-  if (child !== rootGuard.resolved && !child.startsWith(`${rootGuard.resolved}${path.sep}`)) {
-    return { ok: false, error: 'File path escapes project root' };
-  }
-  return { ok: true, root: rootGuard.resolved, child, rel: normalized };
-}
-
 function sha256(content: string | Buffer): string {
   return createHash('sha256').update(content).digest('hex');
 }
@@ -77,7 +64,7 @@ export async function GET(req: Request) {
   });
   if (!parsed.success) return NextResponse.json({ error: 'Invalid query' }, { status: 400 });
 
-  const resolved = resolveChild(parsed.data.rootPath ?? defaultRepoPath(), parsed.data.path ?? '');
+  const resolved = resolveCodeSpaceChild(parsed.data.rootPath ?? '', parsed.data.path ?? '');
   if (!resolved.ok) return NextResponse.json({ error: resolved.error }, { status: 400 });
 
   try {
@@ -120,7 +107,7 @@ export async function POST(req: Request) {
   const parsed = Body.safeParse(json);
   if (!parsed.success) return NextResponse.json({ error: 'Invalid request body', details: parsed.error.issues }, { status: 400 });
 
-  const resolved = resolveChild(parsed.data.rootPath, parsed.data.path);
+  const resolved = resolveCodeSpaceChild(parsed.data.rootPath, parsed.data.path);
   if (!resolved.ok) return NextResponse.json({ error: resolved.error }, { status: 400 });
 
   if (parsed.data.action === 'read') {
@@ -158,7 +145,7 @@ export async function POST(req: Request) {
   }
 
   if (parsed.data.action === 'rename' || parsed.data.action === 'duplicate') {
-    const target = resolveChild(parsed.data.rootPath, parsed.data.nextPath);
+    const target = resolveCodeSpaceChild(parsed.data.rootPath, parsed.data.nextPath);
     if (!target.ok) return NextResponse.json({ error: target.error }, { status: 400 });
     try {
       await fs.mkdir(path.dirname(target.child), { recursive: true });

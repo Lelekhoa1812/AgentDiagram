@@ -24,7 +24,6 @@ import {
   Play,
   Plus,
   RefreshCw,
-  Save,
   Search,
   Sparkles,
   Trash2,
@@ -59,6 +58,8 @@ import {
   type CodeSpaceExecutionPolicy,
 } from '@/lib/code-space/executionPolicy';
 import { BottomPanel } from '@/components/code-space/BottomPanel';
+import { CodeSpaceMarkdownPreview } from '@/components/code-space/CodeSpaceMarkdownPreview';
+import { CodeSpaceTabActions } from '@/components/code-space/CodeSpaceTabActions';
 import {
     deleteCodeSpaceProject,
     deleteCodeSpaceSession,
@@ -1082,11 +1083,17 @@ export function CodeSpaceWorkspace() {
     }
   }, [deleteProjectDirectory, finalizeProjectRemoval, projectToDelete]);
 
+  // Motivation vs Logic: markdown preview is a tab-level state, not a one-off render choice, so the opener restores preview by default for new markdown tabs and preserves an explicit user override when reopening an existing tab.
   const openFile = useCallback(
-    async (project: CodeSpaceProject, filePath: string) => {
+    async (project: CodeSpaceProject, filePath: string, options?: { preview?: boolean }) => {
       if (!project.rootPath) return;
       const existing = tabs.find((tab) => tab.projectId === project.id && tab.path === filePath);
       if (existing) {
+        if (typeof options?.preview === 'boolean' && existing.preview !== options.preview) {
+          const nextTab = { ...existing, preview: options.preview };
+          setTabs((current) => current.map((tab) => (tab.id === nextTab.id ? nextTab : tab)));
+          void saveCodeSpaceTab(nextTab);
+        }
         setActiveTabId(existing.id);
         void ensureFileContent(project, existing);
         return;
@@ -1102,7 +1109,7 @@ export function CodeSpaceWorkspace() {
           contentHash: data.hash,
           dirty: false,
           pinned: true,
-          preview: false,
+          preview: detectCodeSpaceLanguage(filePath) === 'markdown',
           lastOpenedAt: Date.now(),
         };
         setFileContents((current) => ({ ...current, [tab.id]: data }));
@@ -1113,7 +1120,7 @@ export function CodeSpaceWorkspace() {
         setError(err instanceof Error ? err.message : String(err));
       }
     },
-    [ensureFileContent, loadFilePayload, tabs],
+    [ensureFileContent, loadFilePayload, saveCodeSpaceTab, tabs],
   );
 
   const openPlanFile = useCallback(
@@ -1208,8 +1215,21 @@ export function CodeSpaceWorkspace() {
     const target = window.prompt('Rename to project-relative path', activeTab.path);
     if (!target || target === activeTab.path) return;
     void runFileAction({ action: 'rename', path: activeTab.path, nextPath: target });
-    setTabs((current) => current.map((tab) => (tab.id === activeTab.id ? { ...tab, path: target, language: detectCodeSpaceLanguage(target) } : tab)));
-  }, [activeTab, runFileAction]);
+    const nextLanguage = detectCodeSpaceLanguage(target);
+    const nextTab = {
+      ...activeTab,
+      path: target,
+      language: nextLanguage,
+      preview:
+        nextLanguage === 'markdown'
+          ? activeTab.language === 'markdown'
+            ? activeTab.preview
+            : true
+          : false,
+    };
+    setTabs((current) => current.map((tab) => (tab.id === activeTab.id ? nextTab : tab)));
+    void saveCodeSpaceTab(nextTab);
+  }, [activeTab, runFileAction, saveCodeSpaceTab]);
 
   const duplicateActiveFile = useCallback(() => {
     if (!activeTab) return;
@@ -1227,6 +1247,13 @@ export function CodeSpaceWorkspace() {
     // Root Cause vs Logic: file deletions previously kept their tab rows in IndexedDB, so they popped back after refresh; delete the persisted entry too.
     void deleteCodeSpaceTab(tabIdToRemove);
   }, [activeTab, runFileAction]);
+
+  const toggleActiveTabPreview = useCallback(() => {
+    if (!activeTab || activeTab.language !== 'markdown') return;
+    const nextTab = { ...activeTab, preview: !activeTab.preview };
+    setTabs((current) => current.map((tab) => (tab.id === nextTab.id ? nextTab : tab)));
+    void saveCodeSpaceTab(nextTab);
+  }, [activeTab, saveCodeSpaceTab]);
 
   // Root Cause vs Logic: auto mode only changed how diffs were labeled; the workspace still held them in a manual review queue. Reuse the existing apply path so auto mode can commit the patch immediately and manual mode can keep the same confirmation flow.
   const applyPendingDiff = useCallback(
@@ -2048,12 +2075,14 @@ export function CodeSpaceWorkspace() {
               </button>
             ))}
           </div>
-          <button type="button" onClick={saveActiveFile} disabled={!activeTab?.dirty} className="mx-1 rounded p-1.5 text-[#8b8b8b] hover:bg-[#2a2d2e] disabled:opacity-40" title="Save active file (Cmd/Ctrl+S)">
-            <Save size={15} />
-          </button>
-          <button type="button" onClick={renameActiveFile} disabled={!activeTab} className="rounded px-2 py-1 text-[11px] text-[#8b8b8b] hover:bg-[#2a2d2e] disabled:opacity-40">Rename</button>
-          <button type="button" onClick={duplicateActiveFile} disabled={!activeTab} className="rounded px-2 py-1 text-[11px] text-[#8b8b8b] hover:bg-[#2a2d2e] disabled:opacity-40">Duplicate</button>
-          <button type="button" onClick={deleteActiveFile} disabled={!activeTab} className="rounded px-2 py-1 text-[11px] text-red-300 hover:bg-red-500/10 disabled:opacity-40">Delete</button>
+          <CodeSpaceTabActions
+            activeTab={activeTab}
+            onSave={saveActiveFile}
+            onRename={renameActiveFile}
+            onDuplicate={duplicateActiveFile}
+            onDelete={deleteActiveFile}
+            onTogglePreview={toggleActiveTabPreview}
+          />
           <button type="button" onClick={() => setRightVisible((value) => !value)} className="mx-1 rounded p-1.5 text-[#8b8b8b] hover:bg-[#2a2d2e]" title="Toggle agent (Cmd/Ctrl+I)">
             <PanelRight size={15} />
           </button>
@@ -2071,29 +2100,48 @@ export function CodeSpaceWorkspace() {
         <div className="min-h-0 flex-1 bg-[#1e1e1e]">
           {activeTab ? (
             activeTabPayload ? (
-              <Editor
-                height="100%"
-                theme={theme === 'light' ? 'agentdiagram-light' : 'agentdiagram-dark'}
-                language={activeTab.language}
-                path={`${activeTab.projectId}/${activeTab.path}`}
-                value={activeContent}
-                onChange={onEditorChange}
-                onMount={onEditorMount}
-                options={{
-                  readOnly: activeTab.path.includes('/generated/'),
-                  minimap: { enabled: minimapEnabled },
-                  wordWrap: wordWrap ? 'on' : 'off',
-                  fontSize: 13,
-                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                  lineNumbers: 'on',
-                  folding: true,
-                  bracketPairColorization: { enabled: true },
-                  guides: { indentation: true, bracketPairs: true },
-                  renderWhitespace: 'selection',
-                  scrollBeyondLastLine: false,
-                  automaticLayout: true,
-                }}
-              />
+              activeTab.language === 'markdown' && activeTab.preview ? (
+                activeTabProject ? (
+                  <CodeSpaceMarkdownPreview
+                    project={activeTabProject}
+                    filePath={activeTab.path}
+                    markdown={activeContent}
+                    theme={theme}
+                    onOpenFile={(filePath, options) => {
+                      if (!activeTabProject) return;
+                      void openFile(activeTabProject, filePath, options);
+                    }}
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-sm text-[#8b8b8b]">
+                    {activeTabIsLoading ? 'Loading file…' : 'Restoring file…'}
+                  </div>
+                )
+              ) : (
+                <Editor
+                  height="100%"
+                  theme={theme === 'light' ? 'agentdiagram-light' : 'agentdiagram-dark'}
+                  language={activeTab.language}
+                  path={`${activeTab.projectId}/${activeTab.path}`}
+                  value={activeContent}
+                  onChange={onEditorChange}
+                  onMount={onEditorMount}
+                  options={{
+                    readOnly: activeTab.path.includes('/generated/'),
+                    minimap: { enabled: minimapEnabled },
+                    wordWrap: wordWrap ? 'on' : 'off',
+                    fontSize: 13,
+                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                    lineNumbers: 'on',
+                    folding: true,
+                    bracketPairColorization: { enabled: true },
+                    guides: { indentation: true, bracketPairs: true },
+                    renderWhitespace: 'selection',
+                    scrollBeyondLastLine: false,
+                    automaticLayout: true,
+                  }}
+                />
+              )
             ) : (
               <div className="flex h-full items-center justify-center text-sm text-[#8b8b8b]">
                 {activeTabIsLoading ? 'Loading file…' : 'Restoring file…'}

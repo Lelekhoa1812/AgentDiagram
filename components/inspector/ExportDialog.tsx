@@ -3,12 +3,9 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BookOpenText, Download, FileCode2, ImageIcon, Layers3, X } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import rehypeSanitize from 'rehype-sanitize';
-import remarkGfm from 'remark-gfm';
 import type { RefObject } from 'react';
 import { type DiagramCanvasHandle } from '@/components/diagram/DiagramCanvas';
-import { instructionMarkdownComponents } from './instructionMarkdown';
+import { MarkdownRenderer } from '@/components/markdown/MarkdownRenderer';
 import { useDiagramStore } from '@/lib/state/store';
 import { serializeSvg } from '@/lib/export/svg';
 import { svgMarkupToPngBlob } from '@/lib/export/png';
@@ -412,13 +409,7 @@ export function ExportDialog({ open, onClose, diagramRef, dslText, instructionMa
         {hasInstructionContent && (
           <div aria-hidden className="pointer-events-none fixed left-[-10000px] top-0 w-[720px]">
             <article ref={instructionPreviewRef} className="rounded-xl border border-ink-700 bg-ink-900 px-5 py-4 text-sm shadow-inner">
-              <ReactMarkdown
-                components={instructionMarkdownComponents}
-                rehypePlugins={[rehypeSanitize]}
-                remarkPlugins={[remarkGfm]}
-              >
-                {instructionMarkdown}
-              </ReactMarkdown>
+              <MarkdownRenderer markdown={instructionMarkdown} />
             </article>
           </div>
         )}

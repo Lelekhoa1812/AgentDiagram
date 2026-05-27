@@ -9,8 +9,7 @@ Code Space must behave like a real coding agent surface with Cursor-style Ask / 
 - Ask mode is strictly read-only.
 - Ask mode can classify the task, inspect repository context, report evidence, and recommend next actions.
 - Ask mode never emits `diff_proposed`, `file_applied`, or checkpoint-creating events.
-- Plan mode creates or updates a markdown plan artifact under `.agent/plans/`.
-- Plan mode includes assumptions, risks, implementation sequence, validation gates, rollback strategy, and open questions.
+- Plan mode creates or updates a markdown plan artifact under `.agent/plans/` using a stable template with `Summary`, `Key Changes`, and `Test Plans`, adding `Assumptions` and other optional sections only when they materially help the implementer.
 - Code mode emits reviewable diffs and never writes directly from the model response.
 - Code mode always routes mutation through server-side patch preview/apply APIs.
 

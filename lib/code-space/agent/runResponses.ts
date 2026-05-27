@@ -1,3 +1,5 @@
+import { PLAN_ARTIFACT_SECTION_TITLES } from './planTemplate';
+
 export interface RunValidationCommand {
   command: string;
   reason: string;
@@ -25,10 +27,14 @@ export interface CodeResponseInput {
   checkpointRef?: string;
 }
 
-const PLAN_SECTION_TITLES = ['Implementation Plan', 'File-Level Change Plan', 'Validation and Testing'] as const;
-
 export function buildPlanCompletionResponse(input: PlanResponseInput): string {
-  const planHighlights = PLAN_SECTION_TITLES.flatMap((title) => extractSectionBullets(input.planContent ?? '', title)).slice(0, 2);
+  const summaryHighlight = extractSectionLead(input.planContent ?? '', 'Summary');
+  const planHighlights = [
+    summaryHighlight,
+    ...PLAN_ARTIFACT_SECTION_TITLES.slice(1).flatMap((title) => extractSectionBullets(input.planContent ?? '', title)),
+  ]
+    .filter((item): item is string => Boolean(item))
+    .slice(0, 2);
   const fileHighlights = input.inspectedFiles.slice(0, 3).map((file) => `\`${file.path}\``);
   const validationHighlights = summarizeValidationCommands(input.validationCommands, 2);
 
@@ -105,6 +111,21 @@ function extractSectionBullets(content: string, heading: string): string[] {
     if (bullets.length >= 2) break;
   }
   return bullets;
+}
+
+function extractSectionLead(content: string, heading: string): string | null {
+  const lines = content.split(/\r?\n/);
+  const startIndex = lines.findIndex((line) => new RegExp(`^##\\s+${escapeRegExp(heading)}\\b`, 'i').test(line.trim()));
+  if (startIndex < 0) return null;
+
+  for (let index = startIndex + 1; index < lines.length; index += 1) {
+    const line = lines[index]?.trim() ?? '';
+    if (!line) continue;
+    if (/^##\s+/.test(line)) break;
+    return line.replace(/^[-*]\s+/, '').replace(/^\d+\.\s+/, '').replace(/\s+/g, ' ').trim() || null;
+  }
+
+  return null;
 }
 
 function formatList(items: string[]): string {

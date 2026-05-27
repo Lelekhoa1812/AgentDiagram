@@ -1,6 +1,7 @@
 'use client';
 
 import type { CodeSpaceAgentSession, CodeSpaceBottomTab, CodeSpaceEditorTab, CodeSpaceProject } from './core';
+import { detectCodeSpaceLanguage } from './core';
 import { normalizeCodeSpaceAgentMode, type CodeSpaceAgentMode } from './agentModes';
 import type { CodeSpaceExecutionPolicy } from './executionPolicy';
 
@@ -143,7 +144,15 @@ export async function deleteCodeSpaceSession(sessionId: string): Promise<void> {
 
 export async function readCodeSpaceTabs(): Promise<CodeSpaceEditorTab[]> {
   const tabs = await getAllFromStore<CodeSpaceEditorTab>(TAB_STORE);
-  return tabs.sort((a, b) => b.lastOpenedAt - a.lastOpenedAt);
+  return tabs
+    .map((tab) => ({
+      ...tab,
+      preview:
+        typeof tab.preview === 'boolean'
+          ? tab.preview
+          : detectCodeSpaceLanguage(tab.path) === 'markdown',
+    }))
+    .sort((a, b) => b.lastOpenedAt - a.lastOpenedAt);
 }
 
 export async function saveCodeSpaceTab(tab: CodeSpaceEditorTab): Promise<void> {
