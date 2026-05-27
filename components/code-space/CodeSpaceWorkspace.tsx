@@ -323,7 +323,6 @@ export function CodeSpaceWorkspace() {
     const preferences = readCodeSpacePreferences();
     setActiveProjectId(preferences.activeProjectId ?? null);
     setActiveSessionId(preferences.activeSessionId ?? null);
-    setActiveTabId(preferences.activeTabId ?? null);
     setAgentMode(normalizeCodeSpaceAgentMode(preferences.agentMode));
     setLeftVisible(preferences.leftSidebarVisible ?? true);
     setRightVisible(preferences.rightSidebarVisible ?? true);
@@ -1214,7 +1213,13 @@ export function CodeSpaceWorkspace() {
           endpoint: provider.provider === 'local' ? (provider.localBaseUrl ?? undefined) : provider.endpoint,
         },
         (id, title) => {
-          patchSession(id, (s) => ({ ...s, title, updatedAt: Date.now() }));
+          // Re-check at patch time to avoid overwriting a manual rename that arrived
+          // between submit and the LLM naming response.
+          patchSession(id, (s) =>
+            s.title === 'New coding session' || s.title === userPrompt.slice(0, 56)
+              ? { ...s, title, updatedAt: Date.now() }
+              : s,
+          );
         },
         'code-space',
       );
