@@ -335,9 +335,13 @@ export function CustomPromptPanel() {
         return;
       }
       // Capture result data from the stream so we can await naming after the stream ends.
-      type SingleResult = { type: 'single'; dsl: string; instructionMarkdown: string };
-      type MultiResult = { type: 'multi'; out: MultiLayerOutput; instructionMarkdown: string };
-      let capturedResult: SingleResult | MultiResult | null = null;
+      // The `as` cast is needed because TypeScript's control-flow analysis cannot see
+      // that the synchronous callback inside readAgentStream mutates this variable.
+      type CapturedResult =
+        | { kind: 'single'; dsl: string; instructionMarkdown: string }
+        | { kind: 'multi'; out: MultiLayerOutput; instructionMarkdown: string };
+      // eslint-disable-next-line prefer-const
+      let capturedResult = null as CapturedResult | null;
 
       await readAgentStream(res.body, (ev: AgentStreamEvent) => {
         if (ev.type === 'stage') {
@@ -359,7 +363,7 @@ export function CustomPromptPanel() {
           const instructionMarkdown = ev.instructionMarkdown ?? '';
           setInstructionMarkdown(instructionMarkdown);
           setDsl(ev.dsl);
-          capturedResult = { type: 'single', dsl: ev.dsl, instructionMarkdown };
+          capturedResult = { kind: 'single', dsl: ev.dsl, instructionMarkdown };
         } else if (ev.type === 'result-multilayer') {
           // Multi-layer result — capture for async naming after stream ends
           sawResult = true;
@@ -370,7 +374,7 @@ export function CustomPromptPanel() {
           clearOverrides();
           setActiveLayer('overview');
           setDsl(out.overview.dsl);
-          capturedResult = { type: 'multi', out, instructionMarkdown };
+          capturedResult = { kind: 'multi', out, instructionMarkdown };
         } else if (ev.type === 'done') {
           setAgentStage(null);
         }
@@ -400,7 +404,7 @@ export function CustomPromptPanel() {
         } catch {
           // fallback already set
         }
-        if (result.type === 'single') {
+        if (result.kind === 'single') {
           addGeneratedProject(projectName, result.dsl, undefined, result.instructionMarkdown);
         } else {
           addGeneratedProject(projectName, result.out.overview.dsl, result.out, result.instructionMarkdown);
