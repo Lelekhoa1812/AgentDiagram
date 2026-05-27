@@ -31,6 +31,13 @@ interface AgentPanelProps {
     explanation?: string;
     unifiedDiff?: string;
   }>;
+  appliedDiffs: Array<{
+    filePath: string;
+    beforeContent: string;
+    afterContent: string;
+    deleted?: boolean;
+    acceptedAt: number;
+  }>;
   providerSummary: string;
   agentMode: CodeSpaceAgentMode;
   executionPolicy: CodeSpaceExecutionPolicy;
@@ -114,6 +121,7 @@ export function AgentPanel({
   sessions,
   isRunning,
   pendingDiffs,
+  appliedDiffs,
   providerSummary,
   agentMode,
   executionPolicy,
@@ -162,6 +170,34 @@ export function AgentPanel({
   const visibleValidationResults = useMemo(() => {
     return (session?.verificationResults ?? []).filter((result) => result.status === 'failed' || result.output.trim());
   }, [session?.verificationResults]);
+  const visiblePlanBuildStatus = session?.planMarkdown?.buildStatus ?? 'available';
+
+  // Motivation vs Logic: Cursor-style review keeps applied patches visible alongside pending ones, so the sidebar
+  // shows the full change history instead of dropping a container as soon as a patch is accepted.
+  const visibleDiffs = useMemo(() => {
+    const pending = pendingDiffs.map((diff) => ({
+      ...diff,
+      kind: 'pending' as const,
+      oldContent: diff.oldContent,
+      newContent: diff.newContent,
+      sortAt: Number.MAX_SAFE_INTEGER,
+    }));
+    const applied = appliedDiffs.map((diff) => ({
+      ...diff,
+      diffId: `applied:${diff.acceptedAt}:${diff.filePath}`,
+      oldContent: diff.beforeContent,
+      newContent: diff.afterContent,
+      explanation: 'Applied change',
+      unifiedDiff: undefined,
+      kind: 'applied' as const,
+      sortAt: diff.acceptedAt,
+    }));
+    return [...pending, ...applied].sort((a, b) => {
+      if (a.kind !== b.kind) return a.kind === 'pending' ? -1 : 1;
+      if (a.kind === 'pending' && b.kind === 'pending') return 0;
+      return b.sortAt - a.sortAt;
+    });
+  }, [appliedDiffs, pendingDiffs]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -192,7 +228,7 @@ export function AgentPanel({
     onAgentModeChange('code');
     // Root Cause vs Logic: React state updates are asynchronous, so submitting after `onAgentModeChange('code')`
     // could still call the previous Plan-mode callback and regenerate the plan. Pass an explicit mode override.
-    onSubmitPrompt(buildPlanImplementationPrompt(filePath), [], { modeOverride: 'code' });
+    onSubmitPrompt(buildPlanImplementationPrompt(filePath), [], { modeOverride: 'code', buildPlanPath: filePath });
   };
 
   return (
@@ -223,7 +259,13 @@ export function AgentPanel({
                   <div className="whitespace-pre-wrap break-words text-[11px] leading-5">{renderMessageText(message)}</div>
                 </div>
               ))}
-              <PlanLink filePath={session?.planMarkdown?.filePath} disabled={isRunning} onView={handleOpenPlanFile} onRun={handleBuildFromPlan} />
+              <PlanLink
+                filePath={session?.planMarkdown?.filePath}
+                disabled={isRunning}
+                buildStatus={visiblePlanBuildStatus}
+                onView={handleOpenPlanFile}
+                onRun={handleBuildFromPlan}
+              />
               {isRunning && (
                 <div className="flex items-center gap-2 text-[10px] text-[#8b949e]">
                   <Loader2 size={12} className="animate-spin" />
@@ -235,22 +277,24 @@ export function AgentPanel({
           <div ref={chatEndRef} />
         </div>
 
-        {pendingDiffs.length > 0 && (
-          <CollapsibleSection title="Code changes" defaultOpen compact rightSlot={<span className="text-[9px] text-[#6d6d6d]">{pendingDiffs.length}</span>}>
+        {visibleDiffs.length > 0 && (
+          <CollapsibleSection title="Code changes" defaultOpen compact rightSlot={<span className="text-[9px] text-[#6d6d6d]">{visibleDiffs.length}</span>}>
             <div className="space-y-2 rounded border border-[#2a2a2a] bg-[#111111] p-2">
-              {pendingDiffs.map((diff) => (
+              {visibleDiffs.map((diff) => (
                 <div key={diff.diffId} className="rounded border border-[#30363d] bg-[#0f1114]">
                   <div className="flex items-center gap-2 border-b border-[#1f1f1f] px-2 py-1">
                     <span className="truncate text-[10px] text-[#e6edf3]">{diff.filePath}</span>
-                    <span className={`ml-auto text-[9px] uppercase tracking-wider ${executionPolicyMeta.accentClassName}`}>{executionPolicy === 'auto' ? 'auto mode enabled' : 'confirm mode required'}</span>
+                    <span className={`ml-auto text-[9px] uppercase tracking-wider ${executionPolicyMeta.accentClassName}`}>
+                      {diff.kind === 'applied' ? 'applied' : executionPolicy === 'auto' ? 'auto mode enabled' : 'confirm mode required'}
+                    </span>
                   </div>
                   {diff.explanation && <p className="px-2 pt-2 text-[10px] leading-4 text-[#8b949e]">{diff.explanation}</p>}
                   <div className="max-h-72 overflow-auto border-t border-[#1b1f24] bg-[#0d1117] py-2 text-[9px] leading-4">
                     {renderDiff(diff.unifiedDiff ?? `${diff.oldContent}\n---\n${diff.newContent}`)}
                   </div>
                   <div className="flex justify-end gap-2 border-t border-[#1f1f1f] px-2 py-1.5">
-                    {executionPolicy === 'auto' ? (
-                      <span className={`text-[9px] uppercase tracking-wider ${executionPolicyMeta.accentClassName}`}>Applied automatically</span>
+                    {diff.kind === 'applied' || executionPolicy === 'auto' ? (
+                      <span className={`text-[9px] uppercase tracking-wider ${executionPolicyMeta.accentClassName}`}>Applied</span>
                     ) : (
                       <>
                         <button type="button" onClick={() => onRejectDiff(diff.diffId)} className="rounded border border-[#30363d] px-2 py-1 text-[10px] text-[#f85149] hover:bg-[#2d1517]">Reject</button>

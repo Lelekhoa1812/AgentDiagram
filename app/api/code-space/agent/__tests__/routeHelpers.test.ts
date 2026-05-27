@@ -10,6 +10,10 @@ import {
   collectProjectContext,
   extractBuildPlanPath,
 } from '../route';
+import {
+  buildCodeCompletionResponse,
+  buildPlanCompletionResponse,
+} from '@/lib/code-space/agent/runResponses';
 
 describe('Code Space agent route mode helpers', () => {
   it('builds a read-only Ask plan', () => {
@@ -163,7 +167,71 @@ describe('Code Space agent route mode helpers', () => {
     expect(content).not.toMatch(/\bMCQ\s*\d+\s*:/i);
     expect(content).not.toMatch(/Should this be implemented as a cohesive monolith/i);
     expect(content).not.toMatch(/^\s*[-*]\s*[A-E]\)\s+/im);
-    expect(content).toContain('Sidebar-selected planning inputs');
+    expect(content).toContain('## Request Summary');
+    expect(content).not.toContain('\n## Request\n');
+    expect(content).toContain('## Planning Decisions And Assumptions');
+    expect(content).toContain('## Implementation Plan');
+    expect(content).toContain('### Current system');
+    expect(content).toContain('### Implementation plan');
+    expect(content).toContain('## Validation and Testing');
+    expect(content).toContain('## Risks and Acceptance Criteria');
     expect(content).toContain('Modular monolith inside the existing app');
+    expect(content).toContain('Request routing is handled through API entrypoints');
+    expect(content).not.toContain('## Context Already Inspected');
+    expect(content).not.toContain('## Multi-Agent Exploration Brief');
+    expect(content).not.toContain('## Current behavior inferred from the codebase');
+    expect(content).not.toContain('## Execution Blueprint');
+  });
+
+  it('summarizes plan completion from the actual plan artifact instead of a canned template', () => {
+    const response = buildPlanCompletionResponse({
+      projectName: 'demo',
+      planPath: '.agent/plans/session-123.md',
+      planContent: [
+        '# Code Space Plan',
+        '## Implementation Plan',
+        '- Update AgentPanel to show the live plan summary.',
+        '- Derive the completion text from the artifact content.',
+        '## Validation and Testing',
+        '- cd backend && python -m compileall .',
+        '- cd backend && python -m pytest',
+      ].join('\n'),
+      inspectedFiles: [
+        { path: 'components/code-space/AgentPanel.tsx', summary: 'sidebar message surface' },
+        { path: 'app/api/code-space/agent/route.ts', summary: 'agent response route' },
+      ],
+      validationCommands: [
+        { command: 'cd backend && python -m compileall .', reason: 'Python syntax compilation is available.' },
+        { command: 'cd backend && python -m pytest', reason: 'Python pytest validation appears available.' },
+      ],
+    });
+
+    expect(response).toContain('Saved .agent/plans/session-123.md for demo.');
+    expect(response).toContain('Plan focus: Update AgentPanel to show the live plan summary.; Derive the completion text from the artifact content.');
+    expect(response).toContain('Validation: `cd backend && python -m compileall .`; `cd backend && python -m pytest`.');
+    expect(response).not.toContain('Plan ready for');
+    expect(response).not.toContain('Use Build when you are ready for Code mode to implement it.');
+  });
+
+  it('summarizes code completion from patch details and validation results without a fixed done template', () => {
+    const response = buildCodeCompletionResponse({
+      projectName: 'demo',
+      files: [
+        { path: 'components/code-space/AgentPanel.tsx', explanation: 'wire live completion copy into the sidebar' },
+        { path: 'app/api/code-space/agent/route.ts', explanation: 'route plan/code summaries through shared helpers' },
+      ],
+      validationRuns: [
+        { command: 'npm test', status: 'failed', output: '1 failing test' },
+        { command: 'npm run lint', status: 'passed', output: '' },
+      ],
+      summary: 'Refined the sidebar completion message so it reflects the actual patch.',
+      checkpointRef: 'snapshot:abc123',
+    });
+
+    expect(response).toContain('Refined the sidebar completion message so it reflects the actual patch.');
+    expect(response).toContain('Updated 2 files in demo: `components/code-space/AgentPanel.tsx` and `app/api/code-space/agent/route.ts`.');
+    expect(response).toContain('Validation still needs attention: `npm test`.');
+    expect(response).toContain('Checkpoint created before the edit.');
+    expect(response).not.toContain('Done — I updated');
   });
 });

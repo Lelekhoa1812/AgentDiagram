@@ -1,5 +1,7 @@
 import { NextRequest } from 'next/server';
 import { createHash } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { z } from 'zod';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -16,6 +18,10 @@ import type { AgentEventType } from '@/lib/code-space/runtime';
 import { createUnifiedDiff, validateSyntaxLightweight } from '@/lib/code-space/agent/editBlocks';
 import { chatWithRetry } from '@/lib/agent/providers';
 import { guardPath } from '@/lib/security/pathGuard';
+import {
+  buildCodeCompletionResponse,
+  buildPlanCompletionResponse,
+} from '@/lib/code-space/agent/runResponses';
 
 const MessageSchema = z.object({
   role: z.enum(['user', 'assistant', 'system', 'tool']),
@@ -49,6 +55,8 @@ const BodySchema = z.object({
 type AgentRequest = z.infer<typeof BodySchema>;
 type ProviderId = AgentRequest['providerId'];
 type PlanClarificationAnswer = { question: string; answer: string };
+
+const execFileAsync = promisify(execFile);
 
 export { buildPlanImplementationPrompt, extractBuildPlanPath };
 
@@ -151,7 +159,7 @@ export async function POST(req: NextRequest) {
 
         await emitTool('classify_task', { prompt: promptForContext, intents, mode }, async () => ({ intents, mode, modeContract: describeModeContract(mode) }));
 
-        const context = await emitTool('context_search', { openTabs, attachments, tools: registry.list().map((tool) => tool.name) }, async () =>
+        let context = await emitTool('context_search', { openTabs, attachments, tools: registry.list().map((tool) => tool.name) }, async () =>
           collectProjectContext(guarded.resolved, promptForContext, openTabs, attachments),
         );
         await emitRuntime('context.search.completed', { selectedFiles: context.files.map((file) => file.path), summaries: context.files.map((file) => ({ path: file.path, summary: file.summary })), terms: context.terms, attachments });
@@ -170,6 +178,7 @@ export async function POST(req: NextRequest) {
 
         let filesChanged: string[] = [];
         let answer = '';
+        let validationRuns: Array<{ command: string; status: 'passed' | 'failed' | 'skipped'; output: string }> = [];
 
         if (mode === 'ask') {
           answer = await buildAskResponse(guarded.resolved, projectName, latestUserMessage.content, context, validation, body.data);
@@ -189,27 +198,95 @@ export async function POST(req: NextRequest) {
             );
             filesChanged = [planArtifact.filePath];
             emit({ type: 'plan_markdown_created', filePath: planArtifact.filePath, content: planArtifact.content });
-            answer = buildPlanResponse(projectName, planArtifact.filePath, context, validation);
+            // Root Cause vs Logic: the sidebar should summarize the actual plan artifact, not a canned status line,
+            // so we surface the artifact path plus evidence-backed highlights from the plan body itself.
+            answer = buildPlanResponse(projectName, planArtifact.filePath, planArtifact.content, context, validation);
             emit({ type: 'todo_updated', todoId: `todo:${runId}:2`, done: true });
             emit({ type: 'todo_updated', todoId: `todo:${runId}:3`, done: true });
           }
         } else {
-          const proposal = await emitTool('autonomous_patch_planner', { provider: body.data.providerId, model: body.data.model, prompt: latestUserMessage.content, contextFiles: context.files.map((file) => file.path), folderScopes: attachments.filter((item) => item.kind === 'folder').map((item) => item.relativePath) }, async () =>
-            proposeAutonomousPatch(guarded.resolved, latestUserMessage.content, context, body.data),
-          );
-          const applied = await emitTool('apply_autonomous_patch', { files: proposal.files.map((file) => file.path), checkpointed: true }, async () =>
-            applyGeneratedPatch({ root: guarded.resolved, projectId: projectName, runId, files: proposal.files }),
-          );
-          for (const file of proposal.files) {
-            emit({ type: 'diff_proposed', diffId: `patch:${runId}:${file.path}`, filePath: file.path, oldContent: file.beforeContent, newContent: file.afterContent, deleted: file.deleted, explanation: file.explanation, unifiedDiff: file.unifiedDiff, autoApplied: true });
-            await emitRuntime('patch.proposed', { path: file.path, explanation: file.explanation, autoApplied: true });
+          let promptForPatch = latestUserMessage.content;
+          let latestProposal: Awaited<ReturnType<typeof proposeAutonomousPatch>> | null = null;
+          let latestApplied: Awaited<ReturnType<typeof applyGeneratedPatch>> | null = null;
+          const changedFiles = new Set<string>();
+
+          // Motivation vs Logic: Code mode is only useful if it keeps closing the loop on validation failures, so
+          // we feed the latest failure summary back into the same patch planner instead of stopping after the first apply pass.
+          for (let attempt = 0; attempt < 2; attempt += 1) {
+            latestProposal = await emitTool(
+              'autonomous_patch_planner',
+              {
+                provider: body.data.providerId,
+                model: body.data.model,
+                prompt: promptForPatch,
+                contextFiles: context.files.map((file) => file.path),
+                folderScopes: attachments.filter((item) => item.kind === 'folder').map((item) => item.relativePath),
+                attempt,
+              },
+              async () => proposeAutonomousPatch(guarded.resolved, promptForPatch, context, body.data),
+            );
+            latestApplied = await emitTool('apply_autonomous_patch', { files: latestProposal.files.map((file) => file.path), checkpointed: true, attempt }, async () =>
+              applyGeneratedPatch({ root: guarded.resolved, projectId: projectName, runId, files: latestProposal?.files ?? [] }),
+            );
+
+            for (const file of latestProposal.files) {
+              emit({ type: 'diff_proposed', diffId: `patch:${runId}:${file.path}:${attempt}`, filePath: file.path, oldContent: file.beforeContent, newContent: file.afterContent, deleted: file.deleted, explanation: file.explanation, unifiedDiff: file.unifiedDiff, autoApplied: true });
+              await emitRuntime('patch.proposed', { path: file.path, explanation: file.explanation, autoApplied: true, attempt });
+            }
+            for (const file of latestApplied.files) {
+              emit({ type: 'file_applied', filePath: file.path, deleted: file.deleted, explanation: file.explanation, unifiedDiff: file.unifiedDiff, hash: file.hash });
+              await emitRuntime('patch.applied', { path: file.path, hash: file.hash, attempt });
+              changedFiles.add(file.path);
+            }
+
+            validationRuns = await emitTool('validation_run', { commands: validation.commands.map((command) => command.command), attempt }, async () =>
+              runValidationCommands(guarded.resolved, validation.commands),
+            );
+            const validationFailed = validationRuns.some((item) => item.status === 'failed');
+            if (!validationFailed) break;
+
+            promptForPatch = [
+              latestUserMessage.content,
+              '',
+              'Validation results after the last implementation pass:',
+              ...validationRuns.map((item) => `- ${item.command}: ${item.status}\n  ${item.output || 'No output captured.'}`),
+              '',
+              'Keep implementing the code until the validation issues are fixed.',
+            ].join('\n');
+            context = await emitTool('context_search', { openTabs, attachments, tools: registry.list().map((tool) => tool.name), attempt }, async () =>
+              collectProjectContext(guarded.resolved, promptForPatch, openTabs, attachments),
+            );
+            await emitRuntime('context.search.completed', {
+              selectedFiles: context.files.map((file) => file.path),
+              summaries: context.files.map((file) => ({ path: file.path, summary: file.summary })),
+              terms: context.terms,
+              attachments,
+            });
           }
-          for (const file of applied.files) {
-            emit({ type: 'file_applied', filePath: file.path, deleted: file.deleted, explanation: file.explanation, unifiedDiff: file.unifiedDiff, hash: file.hash });
-            await emitRuntime('patch.applied', { path: file.path, hash: file.hash });
+
+          if (!latestProposal || !latestApplied) {
+            throw new Error('Code mode did not produce a patch proposal.');
           }
-          filesChanged = proposal.files.map((file) => file.path);
-          answer = buildCodeResponse(projectName, proposal.files, validation, proposal.summary, applied.checkpoint?.snapshotRef);
+
+          filesChanged = Array.from(changedFiles);
+          // Root Cause vs Logic: code mode needs a concise change summary grounded in the actual patch and
+          // validation results, not a fixed "done" template that hides what changed.
+          answer = buildCodeResponse(
+            projectName,
+            latestProposal.files,
+            validationRuns,
+            latestProposal.summary,
+            latestApplied.checkpoint?.snapshotRef,
+          );
+          const failedValidationRuns = validationRuns.filter((item) => item.status === 'failed');
+          if (failedValidationRuns.length) {
+            answer = [
+              answer,
+              '',
+              'Validation still needs attention:',
+              ...failedValidationRuns.map((item) => `- ${item.command}: ${item.output}`),
+            ].join('\n');
+          }
           emit({ type: 'todo_updated', todoId: `todo:${runId}:2`, done: true });
           emit({ type: 'todo_updated', todoId: `todo:${runId}:3`, done: true });
         }
@@ -220,13 +297,23 @@ export async function POST(req: NextRequest) {
         }
         await emitRuntime('message.assistant.completed', { content: answer });
 
-        const validationStatus = mode === 'code' && filesChanged.length ? 'skipped' : 'passed';
+        const validationStatus =
+          mode === 'code'
+            ? validationRuns.some((item) => item.status === 'failed')
+              ? 'failed'
+              : validation.commands.every((command) => command.command === 'manual review')
+                ? 'skipped'
+                : 'passed'
+            : 'passed';
         emit({
           type: 'validation_result',
           id: `validation:${runId}:strategy`,
           command: validation.commands.map((command) => command.command).join(', ') || 'validation strategy discovery',
           status: validationStatus,
-          output: mode === 'code' && filesChanged.length ? 'Changes were applied with checkpoint protection. Run validation commands against the updated workspace.' : `Detected ${validation.commands.length} validation command(s).`,
+          output:
+            mode === 'code'
+              ? validationRuns.map((item) => `${item.command}: ${item.status}`).join('\n') || 'Validation ran with no captured output.'
+              : `Detected ${validation.commands.length} validation command(s).`,
         });
         await emitRuntime('validation.completed', { status: validationStatus, validation });
         await emitRuntime('run.completed', { status: 'completed', filesChanged });
@@ -632,6 +719,36 @@ async function detectValidationCommands(root: string): Promise<{ commands: Array
   return { commands, packageManager };
 }
 
+async function runValidationCommands(
+  root: string,
+  commands: Array<{ kind: 'typecheck' | 'lint' | 'test' | 'build'; command: string; reason: string }>,
+): Promise<Array<{ command: string; status: 'passed' | 'failed' | 'skipped'; output: string }>> {
+  const results: Array<{ command: string; status: 'passed' | 'failed' | 'skipped'; output: string }> = [];
+  for (const entry of commands) {
+    if (entry.command === 'manual review') {
+      results.push({ command: entry.command, status: 'skipped', output: entry.reason });
+      continue;
+    }
+    try {
+      const { stdout, stderr } = await execFileAsync('bash', ['-lc', entry.command], {
+        cwd: root,
+        env: { ...process.env },
+        maxBuffer: 1024 * 1024 * 10,
+      });
+      const output = [stdout, stderr].filter(Boolean).join('\n').trim();
+      results.push({ command: entry.command, status: 'passed', output: output || entry.reason });
+    } catch (error) {
+      const execError = error as Error & { stdout?: string; stderr?: string };
+      const output = [execError.stdout ?? '', execError.stderr ?? '', execError.message ?? 'Command failed']
+        .filter(Boolean)
+        .join('\n')
+        .trim();
+      results.push({ command: entry.command, status: 'failed', output: output || entry.reason });
+    }
+  }
+  return results;
+}
+
 async function findFirst(root: string, relativePaths: string[]): Promise<string | null> {
   for (const relativePath of relativePaths) if (await exists(path.join(root, relativePath))) return relativePath.includes('/') ? relativePath : `./${relativePath}`.replace(/^\.\//, '');
   return null;
@@ -677,6 +794,7 @@ async function writePlanArtifact(root: string, sessionId: string, projectName: s
 }
 
 // Motivation vs Logic: plan artifacts need to be authored by the selected model from real repository evidence, not assembled as a shallow template.
+// The artifact itself should stay artifact-like: no mirrored prompt transcript, no chatty closing offer, and no extra request section that just repeats the user input.
 // The deterministic document remains only as a safe fallback when the provider is unavailable.
 async function buildModelBackedStrategyDocument(
   root: string,
@@ -695,11 +813,12 @@ async function buildModelBackedStrategyDocument(
   const system = [
     'You are Code Space Plan Mode: a senior implementation planner for a coding agent.',
     'Write markdown only. Do not include code fences around the whole document.',
-    'Create an operator-ready implementation plan that a Code mode agent can execute without re-planning from scratch.',
-    'Ground every claim in the provided repository evidence. Do not invent files or pretend separate agents actually ran; represent them as review lanes or agent perspectives.',
-    'Do not include MCQ questions, option menus, A/B/C choices, or questionnaire transcripts in the markdown plan.',
+    'Create a concise, execution-oriented implementation plan that a Code mode agent can follow directly.',
+    'Ground every claim in the provided repository evidence. Do not invent files or describe work that was not supported by the inspected code.',
+    'Do not include MCQ questions, option menus, A/B/C choices, questionnaire transcripts, or conversational closing offers.',
     'If sidebar answers were provided, summarize only the selected inputs as concise planning constraints without reproducing the original question text.',
     'Prefer concrete file paths, sequencing, checkpoints, tests, fallback behavior, and acceptance criteria over generic advice.',
+    'End the document after the Build Instructions section and keep the output strictly to the plan artifact.',
   ].join('\n');
   const evidence = input.context.files
     .slice(0, 16)
@@ -709,7 +828,7 @@ async function buildModelBackedStrategyDocument(
     `Project: ${input.projectName}`,
     `Request: ${input.prompt}`,
     '',
-    'Sidebar-selected planning inputs:',
+    'Planning inputs and assumptions:',
     input.answers.length ? input.answers.map((answer, index) => `- Input ${index + 1}: ${answer.answer}`).join('\n') : '- No sidebar answers were provided; encode assumptions explicitly without inventing MCQ choices.',
     '',
     'Validation commands discovered:',
@@ -717,18 +836,15 @@ async function buildModelBackedStrategyDocument(
     '',
     'Required markdown shape:',
     '# Code Space Plan — <project>',
-    '## Request',
     '## Planning Decisions And Assumptions',
-    '## Multi-Agent Exploration Brief',
-    'Include review lanes for repository mapper, implementation architect, test strategist, and risk reviewer.',
-    '## Execution Blueprint',
-    'Give ordered coding checkpoints with exact files/areas to inspect or edit.',
+    '## Context Already Inspected',
+    '## Implementation Plan',
     '## File-Level Change Plan',
-    '## Validation Plan',
-    '## Risks, Rollback, And Edge Cases',
+    '## Validation and Testing',
+    '## Risks and Acceptance Criteria',
     '## Definition Of Done',
     '## Build Instructions',
-    'Say explicitly that Build must read this plan artifact first and then run Code mode implementation.',
+    'Keep the plan focused on implementation, validation, and risks only.',
     '',
     'Repository evidence:',
     evidence || '(No readable evidence was found.)',
@@ -816,23 +932,20 @@ function buildPlanClarificationResponse(projectName: string, context: ContextSea
   ].join('\n');
 }
 
-function buildPlanResponse(projectName: string, planPath: string, context: ContextSearchResult, validation: Awaited<ReturnType<typeof detectValidationCommands>>): string {
-  return [`Plan ready for ${projectName}.`, '', `View plan: ${planPath}`, '', `I inspected ${context.files.length} relevant file${context.files.length === 1 ? '' : 's'} and summarized the implementation surfaces in the plan. It includes concrete TODOs, validation commands, acceptance criteria, and remaining risks.`, '', `Primary validation: ${validation.commands.map((command) => command.command).join(', ') || 'manual review'}.`, '', 'Use Build when you are ready for Code mode to implement it.'].join('\n');
-}
-
-function buildCodeResponse(projectName: string, files: ProposedPatchFile[], validation: Awaited<ReturnType<typeof detectValidationCommands>>, summary?: string, checkpointRef?: string): string {
-  if (!files.length) {
-    return ['I could not safely make a code change yet.', '', userFacingPlannerSummary(summary), '', 'No files were changed.'].filter(Boolean).join('\n');
-  }
-  return [
-    `Done — I updated ${files.length} file${files.length === 1 ? '' : 's'} in ${projectName}.`,
-    '',
-    'Changed:',
-    ...files.map((file) => `- ${file.path}: ${file.explanation}`),
-    '',
-    checkpointRef ? 'A rollback checkpoint was created.' : 'The change was checkpointed before writing.',
-    `Next: ${validation.commands.map((command) => command.command).join(', ') || 'run your usual validation'}.`,
-  ].join('\n');
+function buildPlanResponse(
+  projectName: string,
+  planPath: string,
+  planContent: string,
+  context: ContextSearchResult,
+  validation: Awaited<ReturnType<typeof detectValidationCommands>>,
+): string {
+  return buildPlanCompletionResponse({
+    projectName,
+    planPath,
+    planContent,
+    inspectedFiles: context.files.map((file) => ({ path: file.path, summary: file.summary })),
+    validationCommands: validation.commands,
+  });
 }
 
 function userFacingPlannerSummary(summary?: string): string {
@@ -841,6 +954,25 @@ function userFacingPlannerSummary(summary?: string): string {
     return 'The selected model provider was not available for this run, so I stopped instead of creating unrelated fallback files.';
   }
   return summary;
+}
+
+function buildCodeResponse(
+  projectName: string,
+  files: ProposedPatchFile[],
+  validationRuns: Array<{ command: string; status: 'passed' | 'failed' | 'skipped'; output: string }>,
+  summary?: string,
+  checkpointRef?: string,
+): string {
+  if (!files.length) {
+    return ['No files were changed.', userFacingPlannerSummary(summary)].filter(Boolean).join(' ');
+  }
+  return buildCodeCompletionResponse({
+    projectName,
+    files: files.map((file) => ({ path: file.path, explanation: file.explanation })),
+    validationRuns,
+    summary,
+    checkpointRef,
+  });
 }
 
 function findOriginalPlanPrompt(messages: AgentRequest['messages'], fallback: string): string {
@@ -862,21 +994,11 @@ function extractPlanClarificationAnswers(messages: AgentRequest['messages']): Pl
 }
 
 export function buildStrategyDocument({ projectName, prompt, context, validation, codeMode, reason, answers = [] }: { projectName: string; prompt: string; context: ContextSearchResult; validation: Awaited<ReturnType<typeof detectValidationCommands>>; codeMode: boolean; reason?: string; answers?: PlanClarificationAnswer[] }): string {
-  const evidence = formatInspectedEvidence(context);
-  const architecture = buildCurrentArchitectureSummary(context, prompt);
   const implementationTasks = buildImplementationTodos(prompt, context);
   const riskItems = buildRiskItems(context, prompt);
-  const clarifiedSection = answers.length ? ['## Sidebar-selected planning inputs', ...answers.map((answer, index) => `- **Input ${index + 1}:** ${answer.answer}`), ''] : [];
   const noteSection = reason ? ['## Note', reason, ''] : [];
-  return [
-    `# Code Space Plan — ${projectName}`,
-    '',
-    '## Request',
-    prompt,
-    '',
-    ...noteSection,
-    ...clarifiedSection,
-    '## Planning inputs and assumptions',
+  const planningAssumptionsSection = [
+    '## Planning Decisions And Assumptions',
     ...(answers.length
       ? answers.map((answer, index) => `- **Input ${index + 1}:** ${answer.answer}`)
       : [
@@ -884,40 +1006,42 @@ export function buildStrategyDocument({ projectName, prompt, context, validation
           '- **Assumption:** The implementation agent should read this plan artifact before editing and treat repository evidence as stronger than generic workflow rules.',
         ]),
     '',
-    '## Context already inspected',
-    'The agent inspected the repository files below before writing this plan. Each item is summarized by implementation responsibility rather than internal ranking metadata.',
-    ...evidence,
+  ];
+  // Motivation vs Logic: keep plan artifacts tight and execution-first so Code mode sees only the information
+  // needed to implement, validate, and review the change. The logic stays in the helper blocks below instead
+  // of spreading into extra narrative sections that do not help the build flow act.
+  return [
+    `# Code Space Plan — ${projectName}`,
     '',
-    '## Multi-Agent Exploration Brief',
-    '- **Repository mapper lane:** Re-open the listed source files, confirm the request path through UI/API/runtime boundaries, and record any missing files before editing.',
-    '- **Implementation architect lane:** Convert the strategy into checkpointed file changes that reuse existing utilities, state transitions, event types, and validation managers.',
-    '- **Test strategist lane:** Add or update focused tests before production changes, then run the strongest detected validation commands after each correction pass.',
-    '- **Risk reviewer lane:** Check for stale plan assumptions, hidden generated files, provider/network fallbacks, and user-facing failure modes before marking work complete.',
+    '## Request Summary',
+    prompt,
     '',
-    '## Current behavior inferred from the codebase',
-    ...architecture,
+    ...noteSection,
+    ...planningAssumptionsSection,
+    '## Implementation Plan',
+    '### Current system',
+    ...buildCurrentSystemFindings(context),
     '',
-    '## Recommended implementation strategy',
-    ...buildRecommendedStrategy(prompt, context),
+    '### Implementation plan',
+    ...buildRecommendedStrategy(prompt),
     '',
-    '## Execution Blueprint',
+    '## File-Level Change Plan',
     '- Checkpoint 1: Re-open the plan, target files, and nearest tests so implementation starts from fresh evidence rather than this summarized artifact alone.',
     '- Checkpoint 2: Add failing tests or update existing tests around the workflow seam that will change.',
     '- Checkpoint 3: Implement the smallest modular change that satisfies the plan while preserving existing service boundaries.',
     '- Checkpoint 4: Run validation, repair failures from root cause, and document any residual risk in the final response.',
     '',
-    '## File-Level Change Plan',
     ...implementationTasks.map((task, index) => `${index + 1}. ${task}`),
     '',
-    '## Testing and validation strategy',
+    '## Validation and Testing',
     ...(validation.commands.length ? validation.commands.map((command) => `- ${command.command} — ${command.reason}`) : ['- Manual review — no project-specific validation command was detected.']),
     '- Add focused unit or integration coverage around the changed service boundary where an existing test pattern is present.',
     '- Run validation after each correction pass and record unresolved risks before marking the session complete.',
     '',
-    '## Risks and acceptance criteria',
+    '## Risks and Acceptance Criteria',
     ...riskItems,
     '',
-    '## Definition of done',
+    '## Definition Of Done',
     '- The final implementation follows the inspected service boundaries instead of introducing a parallel workflow.',
     '- Public user-facing chat remains concise while tool/audit details stay in structured panels or plan artifacts.',
     '- The plan can be opened directly in the Code Space editor through View plan.',
@@ -928,28 +1052,21 @@ export function buildStrategyDocument({ projectName, prompt, context, validation
     '- Build must switch to Code mode explicitly; do not submit another Plan-mode request from this button.',
     '- Code mode must read this plan artifact first, load the referenced source/test files, implement the ordered tasks, and validate before summarizing.',
     '- If the workspace has drifted since planning, prefer the current code and explain the adjustment instead of regenerating a dummy plan.',
-    '',
-    codeMode ? '## Code behavior\nChanges should be applied through checkpointed Code mode.\n' : '## Plan behavior\nThis file is an editable planning artifact. Review or edit it before choosing Build.\n',
   ].join('\n');
 }
 
-function formatInspectedEvidence(context: ContextSearchResult): string[] {
-  if (!context.files.length) return ['- No readable files were discovered before this plan was created.'];
-  return context.files.slice(0, 32).map((file) => `- **${file.path}** — ${file.summary}`);
-}
-
-function buildCurrentArchitectureSummary(context: ContextSearchResult, prompt: string): string[] {
-  const lines: string[] = [];
+function buildCurrentSystemFindings(context: ContextSearchResult): string[] {
   const files = context.files.map((file) => file.path.toLowerCase());
-  if (files.some((file) => /routes?|app/.test(file))) lines.push('- Request routing is handled through API entrypoints before reaching orchestration/search/retrieval services.');
-  if (files.some((file) => /chatbot|coordinator|agent/.test(file))) lines.push('- Agent coordination appears separated from low-level retrieval/search utilities, so strategy changes should be introduced at the orchestration boundary rather than inside every engine.');
-  if (files.some((file) => /search|engine|duckduckgo|medical|multilingual|video/.test(file))) lines.push('- Search capability is engine-oriented: query construction, external lookup, multilingual/medical specialization, extraction, and result post-processing are implemented as separate surfaces.');
-  if (files.some((file) => /retrieval|evidence|source/.test(file))) lines.push('- Evidence/retrieval layers are responsible for ranking, provenance, grounding, and selecting context for the final response.');
-  if (/web|search|evidence|api|lookup/i.test(prompt)) lines.push('- The requested improvement should therefore add a decision policy for when to search, how to expand queries, how to rank clinical evidence, and how to expose evidence provenance to downstream agents.');
-  return lines.length ? lines : ['- The selected files define the implementation surfaces that should be changed; no reliable architecture summary could be inferred beyond the inspected evidence.'];
+  const findings: string[] = [];
+  if (!files.length) return ['- No readable files were discovered before this plan was created.'];
+  if (files.some((file) => /routes?|app/.test(file))) findings.push('- Request routing is handled through API entrypoints before reaching orchestration/search/retrieval services.');
+  if (files.some((file) => /chatbot|coordinator|agent/.test(file))) findings.push('- Agent coordination appears separated from low-level retrieval/search utilities, so strategy changes should be introduced at the orchestration boundary rather than inside every engine.');
+  if (files.some((file) => /search|engine|duckduckgo|medical|multilingual|video/.test(file))) findings.push('- Search capability is engine-oriented: query construction, external lookup, multilingual/medical specialization, extraction, and result post-processing are implemented as separate surfaces.');
+  if (files.some((file) => /retrieval|evidence|source/.test(file))) findings.push('- Evidence/retrieval layers are responsible for ranking, provenance, grounding, and selecting context for the final response.');
+  return findings.length ? findings : ['- The selected files define the implementation surfaces that should be changed; no reliable architecture summary could be inferred beyond the inspected evidence.'];
 }
 
-function buildRecommendedStrategy(prompt: string, context: ContextSearchResult): string[] {
+function buildRecommendedStrategy(prompt: string): string[] {
   if (/search|web|evidence|clinical|lookup|api/i.test(prompt)) {
     return [
       '- Introduce a search decision policy that classifies the query intent, required freshness, clinical specificity, source quality requirement, and whether local retrieval is sufficient before web lookup.',

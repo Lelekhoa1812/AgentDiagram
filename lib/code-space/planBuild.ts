@@ -2,13 +2,14 @@ import type { CodeSpaceAgentMode } from './agentModes';
 
 export interface CodeSpacePromptOptions {
   modeOverride?: CodeSpaceAgentMode;
+  buildPlanPath?: string;
 }
 
 export function buildPlanImplementationPrompt(filePath: string): string {
   return [
     `Build from the approved plan at ${filePath}.`,
     '',
-    'Read that plan artifact first, treat it as the source of truth, implement its TODOs end-to-end, and run the validation strategy before summarising the result.',
+    'Read that plan artifact first, treat it as the source of truth, implement its TODOs end-to-end, keep iterating until the requested code changes and validation work are actually finished, and run the validation strategy before summarising the result.',
     'If the plan is outdated or conflicts with the current workspace, explain the conflict and make the smallest safe adjustment instead of generating another plan.',
   ].join('\n');
 }

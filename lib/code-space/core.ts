@@ -144,6 +144,7 @@ export interface CodeSpaceAgentSession {
     filePath: string;
     content: string;
     createdAt: number;
+    buildStatus?: 'available' | 'running' | 'completed' | 'failed';
   };
   todos: Array<{ id: string; text: string; done: boolean }>;
   changesets: CodeSpaceChangeset[];

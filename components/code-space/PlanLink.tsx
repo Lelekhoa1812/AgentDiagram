@@ -3,12 +3,15 @@
 interface PlanLinkProps {
   filePath?: string;
   disabled?: boolean;
+  buildStatus?: 'available' | 'running' | 'completed' | 'failed';
   onView: (filePath: string) => void;
   onRun: (filePath: string) => void;
 }
 
-export function PlanLink({ filePath, disabled = false, onView, onRun }: PlanLinkProps) {
+export function PlanLink({ filePath, disabled = false, buildStatus = 'available', onView, onRun }: PlanLinkProps) {
   if (!filePath) return null;
+  const showBuildButton = buildStatus !== 'completed';
+  const buildDisabled = disabled || buildStatus === 'running';
   return (
     <div className="rounded border border-[#8957e566] bg-[#160f24] p-2">
       <div className="flex items-start justify-between gap-2">
@@ -16,14 +19,16 @@ export function PlanLink({ filePath, disabled = false, onView, onRun }: PlanLink
           <div className="text-[10px] font-semibold text-[#f0e6ff]">Editable plan generated</div>
           <div className="mt-0.5 truncate text-[9px] text-[#8b949e]" title={filePath}>{filePath}</div>
         </div>
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => onRun(filePath)}
-          className="rounded bg-[#8957e5] px-2 py-1 text-[10px] font-semibold text-white hover:bg-[#a371f7] disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          Build
-        </button>
+        {showBuildButton && (
+          <button
+            type="button"
+            disabled={buildDisabled}
+            onClick={() => onRun(filePath)}
+            className="rounded bg-[#8957e5] px-2 py-1 text-[10px] font-semibold text-white hover:bg-[#a371f7] disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {buildStatus === 'running' ? 'Building…' : 'Build'}
+          </button>
+        )}
       </div>
       <button
         type="button"

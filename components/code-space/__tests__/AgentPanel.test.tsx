@@ -34,6 +34,7 @@ function createSession(): CodeSpaceAgentSession {
       filePath: '.agent/plans/session-1.md',
       content: '# Plan',
       createdAt: Date.now(),
+      buildStatus: 'available',
     },
     todos: [],
     changesets: [],
@@ -49,7 +50,10 @@ function createSession(): CodeSpaceAgentSession {
   };
 }
 
-function renderPanel(onOpenPlanFile = vi.fn()) {
+function renderPanel(
+  onOpenPlanFile = vi.fn(),
+  overrides: Partial<React.ComponentProps<typeof AgentPanel>> = {},
+) {
   const session = createSession();
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -63,6 +67,7 @@ function renderPanel(onOpenPlanFile = vi.fn()) {
         isRunning={false}
         toolBudget={50}
         pendingDiffs={[]}
+        appliedDiffs={[]}
         providerSummary="foundry/gpt-5-mini"
         agentMode={'plan' as CodeSpaceAgentMode}
         executionPolicy={'manual' as CodeSpaceExecutionPolicy}
@@ -80,6 +85,7 @@ function renderPanel(onOpenPlanFile = vi.fn()) {
         onAcceptDiff={vi.fn()}
         onRejectDiff={vi.fn()}
         onOpenPlanFile={onOpenPlanFile}
+        {...overrides}
       />,
     );
   });
@@ -108,5 +114,61 @@ describe('AgentPanel', () => {
     });
 
     expect(onOpenPlanFile).toHaveBeenCalledWith('.agent/plans/session-1.md');
+  });
+
+  it('hides the build button once the plan has been built', () => {
+    const session = createSession();
+    session.planMarkdown = { ...session.planMarkdown!, buildStatus: 'completed' };
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    act(() => {
+      root?.render(
+        <AgentPanel
+          session={session}
+          sessions={[session]}
+          isRunning={false}
+          toolBudget={50}
+          pendingDiffs={[]}
+          appliedDiffs={[]}
+          providerSummary="foundry/gpt-5-mini"
+          agentMode={'plan' as CodeSpaceAgentMode}
+          executionPolicy={'manual' as CodeSpaceExecutionPolicy}
+          onOpenModelConfig={vi.fn()}
+          onGenerateDiagram={vi.fn()}
+          onOpenAppPlanner={vi.fn()}
+          onAgentModeChange={vi.fn()}
+          onExecutionPolicyChange={vi.fn()}
+          canGenerateDiagram={false}
+          onSelectSession={vi.fn()}
+          onRenameSession={vi.fn()}
+          onDeleteSession={vi.fn()}
+          onSubmitPrompt={vi.fn()}
+          onCancelRun={vi.fn()}
+          onAcceptDiff={vi.fn()}
+          onRejectDiff={vi.fn()}
+          onOpenPlanFile={vi.fn()}
+        />,
+      );
+    });
+
+    const buildButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('Build'));
+    expect(buildButton).toBeUndefined();
+  });
+
+  it('keeps applied patch containers visible in the code changes rail', () => {
+    const appliedDiffs = [
+      {
+        filePath: 'components/example.tsx',
+        beforeContent: 'old',
+        afterContent: 'new',
+        acceptedAt: Date.now(),
+      },
+    ];
+    const { container } = renderPanel(vi.fn(), { appliedDiffs });
+    expect(container.textContent).toContain('Code changes');
+    expect(container.textContent).toContain('components/example.tsx');
+    expect(container.textContent).toContain('Applied change');
   });
 });

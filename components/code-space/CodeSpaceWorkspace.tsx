@@ -34,8 +34,9 @@ import {
 } from 'lucide-react';
 import { useDiagramStore } from '@/lib/state/store';
 import { writeUiPreference } from '@/lib/state/uiPreferences';
+import { configureMonacoForCodeFiles } from '@/components/editor/monacoDefaults';
 import {
-  createCodeSpaceProject,
+    createCodeSpaceProject,
   dedupeCodeSpaceProjects,
   detectCodeSpaceLanguage,
   getCodeSpaceProjectDedupKey,
@@ -78,7 +79,7 @@ import type { AgentSSEEvent } from '@/lib/code-space/agent/types';
 import { nameSessionAsync } from '@/lib/code-space/sessionNaming';
 import { useMentionIndex } from '@/lib/code-space/mentions/useMentionIndex';
 import type { SelectedMention } from '@/lib/code-space/mentions/types';
-import type { CodeSpacePromptOptions } from '@/lib/code-space/planBuild';
+import { extractBuildPlanPath, type CodeSpacePromptOptions } from '@/lib/code-space/planBuild';
 
 interface FilePayload {
   path: string;
@@ -1310,6 +1311,7 @@ export function CodeSpaceWorkspace() {
     const project = projects.find((item) => item.id === activeProjectId);
     if (!project || !project.rootPath) return;
     const requestedMode = options.modeOverride ?? agentMode;
+    const buildPlanPath = options.buildPlanPath ?? extractBuildPlanPath(userPrompt);
 
     const session = ensureSession();
     const now = Date.now();
@@ -1327,6 +1329,10 @@ export function CodeSpaceWorkspace() {
       messages: [...session.messages, userMessage],
       toolCallCount: 0,
       clarifyingQuestions: [],
+      planMarkdown:
+        buildPlanPath && session.planMarkdown?.filePath === buildPlanPath
+          ? { ...session.planMarkdown, buildStatus: 'running' }
+          : session.planMarkdown,
       updatedAt: now,
     };
 
@@ -1339,6 +1345,24 @@ export function CodeSpaceWorkspace() {
     setAgentRunning(true);
     setTerminalStream('');
     setPendingDiffs([]);
+
+    // Root Cause vs Logic: the plan card used to keep its Build affordance forever because build completion was never
+    // persisted on the session; track the build lifecycle here so the right sidebar can hide the action when done.
+    let buildValidationFailed = false;
+    const setPlanBuildStatus = (buildStatus: 'available' | 'running' | 'completed' | 'failed') => {
+      if (!buildPlanPath) return;
+      patchSession(sessionWithPrompt.id, (current) => {
+        if (!current.planMarkdown || current.planMarkdown.filePath !== buildPlanPath) return current;
+        return {
+          ...current,
+          planMarkdown: {
+            ...current.planMarkdown,
+            buildStatus,
+          },
+          updatedAt: Date.now(),
+        };
+      });
+    };
 
     const openTabs = tabs.map((tab) => tab.path).filter((path): path is string => Boolean(path));
     const model =
@@ -1503,6 +1527,14 @@ export function CodeSpaceWorkspace() {
                 ],
                 updatedAt: Date.now(),
               }));
+              if (buildPlanPath) {
+                if (event.status === 'failed') {
+                  buildValidationFailed = true;
+                  setPlanBuildStatus('failed');
+                } else if (event.status === 'passed' || event.status === 'skipped') {
+                  setPlanBuildStatus('completed');
+                }
+              }
             } else if (event.type === 'tool_start') {
               const toolMessageId = nowId('msg');
               liveToolMessageIds.set(event.toolCallId, toolMessageId);
@@ -1590,6 +1622,9 @@ export function CodeSpaceWorkspace() {
                 status: 'finalized',
                 updatedAt: Date.now(),
               }));
+              if (buildPlanPath && !buildValidationFailed) {
+                setPlanBuildStatus('completed');
+              }
             } else if (event.type === 'agent_error') {
               appendSessionMessage(sessionWithPrompt.id, {
                 id: nowId('msg'),
@@ -1602,6 +1637,7 @@ export function CodeSpaceWorkspace() {
                 status: 'blocked',
                 updatedAt: Date.now(),
               }));
+              setPlanBuildStatus('available');
             }
           } catch {
             // Ignore malformed SSE chunks.
@@ -1621,6 +1657,7 @@ export function CodeSpaceWorkspace() {
           status: 'blocked',
           updatedAt: Date.now(),
         }));
+        setPlanBuildStatus('available');
       }
     } finally {
       setAgentRunning(false);
@@ -1731,6 +1768,7 @@ export function CodeSpaceWorkspace() {
   const onEditorMount: OnMount = (editor, monaco) => {
     editorRef.current = editor as Monaco.editor.IStandaloneCodeEditor;
     monacoRef.current = monaco;
+    configureMonacoForCodeFiles(monaco);
     registerDslLanguage(monaco);
     monaco.editor.setTheme(theme === 'light' ? 'agentdiagram-light' : 'agentdiagram-dark');
   };
@@ -2165,6 +2203,7 @@ export function CodeSpaceWorkspace() {
             isRunning={agentRunning}
             toolBudget={activeSession?.toolBudget ?? 50}
             pendingDiffs={pendingDiffs}
+            appliedDiffs={agentChangesets}
             providerSummary={`${provider.provider}/${provider.provider === 'foundry' ? provider.customModel ?? provider.model : provider.model}`}
             agentMode={agentMode}
             executionPolicy={executionPolicy}
