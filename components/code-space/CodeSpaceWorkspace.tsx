@@ -1141,8 +1141,16 @@ export function CodeSpaceWorkspace() {
     setPendingDiffs([]);
 
     const openTabs = tabs.map((tab) => tab.path).filter((path): path is string => Boolean(path));
-    const model = provider.provider === 'foundry' ? (provider.customModel ?? provider.model) : provider.model;
-    const apiKey = provider.apiKey || getApiKey(provider.provider);
+    const model =
+      provider.provider === 'foundry'
+        ? (provider.customModel ?? provider.model)
+        : provider.provider === 'local'
+          ? (provider.localModelName ?? '')
+          : provider.model;
+    const apiKey =
+      provider.provider === 'local'
+        ? (provider.localApiKey ?? '')
+        : (provider.apiKey || getApiKey(provider.provider));
     const enableThinking = provider.provider === 'anthropic';
     const latestHistory = sessionWithPrompt.messages;
     let liveAssistantMessageId: string | null = null;
@@ -1169,7 +1177,9 @@ export function CodeSpaceWorkspace() {
           model,
           providerId: provider.provider,
           apiKey,
-          endpoint: provider.endpoint,
+          endpoint: provider.provider === 'local' ? provider.localBaseUrl : provider.endpoint,
+          localTemperature: provider.provider === 'local' ? provider.localTemperature : undefined,
+          localContextLength: provider.provider === 'local' ? provider.localContextLength : undefined,
           openTabs,
           mode: agentMode,
           toolBudget: sessionWithPrompt.toolBudget,
@@ -1401,6 +1411,11 @@ export function CodeSpaceWorkspace() {
     provider.apiKey,
     provider.customModel,
     provider.endpoint,
+    provider.localApiKey,
+    provider.localBaseUrl,
+    provider.localContextLength,
+    provider.localModelName,
+    provider.localTemperature,
     provider.model,
     provider.provider,
     tabs,
