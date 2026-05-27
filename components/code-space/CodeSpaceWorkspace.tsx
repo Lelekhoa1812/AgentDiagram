@@ -69,6 +69,7 @@ import { registerDslLanguage } from '@/components/editor/dslLanguage';
 import { ProviderConfig } from '@/components/agent/ProviderConfig';
 import { AgentPanel } from '@/components/code-space/AgentPanel';
 import type { AgentSSEEvent } from '@/lib/code-space/agent/types';
+import { nameSessionAsync } from '@/lib/code-space/sessionNaming';
 
 interface FilePayload {
   path: string;
@@ -271,6 +272,8 @@ export function CodeSpaceWorkspace() {
   const [folderBrowserManualPath, setFolderBrowserManualPath] = useState('');
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
+  const fileContentsRef = useRef<Record<string, FilePayload>>({});
+  const loadingFileIdsRef = useRef<Set<string>>(new Set());
   const projectsRef = useRef<CodeSpaceProject[]>([]);
   const autoDeletingProjectIds = useRef<Set<string>>(new Set());
   // Root Cause vs Logic: Hidden-only roots (e.g. `.git`) look empty in the explorer; only run the empty-folder check once per project so we do not re-trigger loadTree in a loop.
@@ -304,6 +307,10 @@ export function CodeSpaceWorkspace() {
   }, [projects]);
 
   useEffect(() => {
+    fileContentsRef.current = fileContents;
+  }, [fileContents]);
+
+  useEffect(() => {
     setProjectNameInput(activeProject?.name ?? '');
   }, [activeProject?.name]);
 
@@ -316,6 +323,7 @@ export function CodeSpaceWorkspace() {
     const preferences = readCodeSpacePreferences();
     setActiveProjectId(preferences.activeProjectId ?? null);
     setActiveSessionId(preferences.activeSessionId ?? null);
+    setActiveTabId(preferences.activeTabId ?? null);
     setAgentMode(normalizeCodeSpaceAgentMode(preferences.agentMode));
     setLeftVisible(preferences.leftSidebarVisible ?? true);
     setRightVisible(preferences.rightSidebarVisible ?? true);
@@ -351,6 +359,15 @@ export function CodeSpaceWorkspace() {
         if (!preferences.activeSessionId && firstSession) {
           setActiveSessionId((prev) => prev ?? firstSession.id);
         }
+        const preferredProjectId = preferences.activeProjectId ?? firstProject?.id ?? null;
+        const preferredTab =
+          (preferences.activeTabId ? storedTabs.find((tab) => tab.id === preferences.activeTabId) : null) ??
+          (preferredProjectId ? storedTabs.find((tab) => tab.projectId === preferredProjectId) : null) ??
+          storedTabs[0] ??
+          null;
+        if (preferredTab) {
+          setActiveTabId((prev) => prev ?? preferredTab.id);
+        }
       },
     );
   }, []);
@@ -359,6 +376,7 @@ export function CodeSpaceWorkspace() {
     writeCodeSpacePreferences({
       activeProjectId,
       activeSessionId,
+      activeTabId,
       agentMode,
       leftSidebarVisible: leftVisible,
       rightSidebarVisible: rightVisible,
@@ -373,6 +391,7 @@ export function CodeSpaceWorkspace() {
   }, [
     activeProjectId,
     activeSessionId,
+    activeTabId,
     agentMode,
     bottomVisible,
     bottomActiveTab,
@@ -588,6 +607,38 @@ export function CodeSpaceWorkspace() {
       // Git status is opportunistic; non-git folders still work as editable projects.
     }
   }, []);
+
+  const loadFilePayload = useCallback(async (project: CodeSpaceProject, filePath: string): Promise<FilePayload> => {
+    if (!project.rootPath) {
+      throw new Error('Unable to open a file without a project root');
+    }
+    const res = await fetch('/api/code-space/files', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'read', rootPath: project.rootPath, path: filePath }),
+    });
+    const data = (await res.json()) as FilePayload & { error?: string };
+    if (!res.ok) throw new Error(data.error ?? 'Could not open file');
+    return data;
+  }, []);
+
+  const ensureFileContent = useCallback(
+    async (project: CodeSpaceProject, tab: CodeSpaceEditorTab) => {
+      if (!project.rootPath) return null;
+      const cached = fileContentsRef.current[tab.id];
+      if (cached) return cached;
+      if (loadingFileIdsRef.current.has(tab.id)) return null;
+      loadingFileIdsRef.current.add(tab.id);
+      try {
+        const data = await loadFilePayload(project, tab.path);
+        setFileContents((current) => (current[tab.id] ? current : { ...current, [tab.id]: data }));
+        return data;
+      } finally {
+        loadingFileIdsRef.current.delete(tab.id);
+      }
+    },
+    [loadFilePayload],
+  );
 
   const finalizeProjectRemoval = useCallback((projectId: string) => {
     emptyAutoDeleteCheckedIds.current.delete(projectId);
@@ -989,17 +1040,12 @@ export function CodeSpaceWorkspace() {
       const existing = tabs.find((tab) => tab.projectId === project.id && tab.path === filePath);
       if (existing) {
         setActiveTabId(existing.id);
+        void ensureFileContent(project, existing);
         return;
       }
       setError(null);
       try {
-        const res = await fetch('/api/code-space/files', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'read', rootPath: project.rootPath, path: filePath }),
-        });
-        const data = (await res.json()) as FilePayload & { error?: string };
-        if (!res.ok) throw new Error(data.error ?? 'Could not open file');
+        const data = await loadFilePayload(project, filePath);
         const tab: CodeSpaceEditorTab = {
           id: nowId('tab'),
           projectId: project.id,
@@ -1019,7 +1065,7 @@ export function CodeSpaceWorkspace() {
         setError(err instanceof Error ? err.message : String(err));
       }
     },
-    [tabs],
+    [ensureFileContent, loadFilePayload, tabs],
   );
 
   const saveActiveFile = useCallback(async () => {
@@ -1155,6 +1201,24 @@ export function CodeSpaceWorkspace() {
     const latestHistory = sessionWithPrompt.messages;
     let liveAssistantMessageId: string | null = null;
     const liveToolMessageIds = new Map<string, string>();
+
+    // Fire-and-forget: auto-name the session on the first message, in parallel with the agent run.
+    if (session.messages.length === 0 && session.title === 'New coding session') {
+      void nameSessionAsync(
+        session.id,
+        userPrompt.slice(0, 100),
+        {
+          providerId: provider.provider,
+          model,
+          apiKey,
+          endpoint: provider.provider === 'local' ? (provider.localBaseUrl ?? undefined) : provider.endpoint,
+        },
+        (id, title) => {
+          patchSession(id, (s) => ({ ...s, title, updatedAt: Date.now() }));
+        },
+        'code-space',
+      );
+    }
 
     const stringifyPreview = (value: unknown) => {
       try {
@@ -1657,12 +1721,22 @@ export function CodeSpaceWorkspace() {
   };
 
   const activeContent = activeTab ? fileContents[activeTab.id]?.content ?? '' : '';
+  const activeTabProject = activeTab ? projects.find((project) => project.id === activeTab.projectId) ?? activeProject : null;
+  const activeTabPayload = activeTab ? fileContents[activeTab.id] : null;
+  const activeTabIsLoading = activeTab ? loadingFileIdsRef.current.has(activeTab.id) : false;
   const breadcrumbs = activeProject && activeTab ? [activeProject.name, ...activeTab.path.split('/').filter(Boolean)] : [];
   // Motivation vs Logic: showing a quick snapshot of the root entries keeps the preview actionable before any file is opened.
   const activeProjectPreviewKey = activeProject ? `${activeProject.id}:` : '';
   const activeProjectPreviewNodes = activeProjectPreviewKey ? treeChildren[activeProjectPreviewKey] ?? [] : [];
   const activeProjectPreviewLoading = activeProjectPreviewKey ? Boolean(loadingTree[activeProjectPreviewKey]) : false;
   const activeProjectPreviewSnapshot = activeProjectPreviewNodes.slice(0, 5);
+
+  // Root Cause vs Logic: after a refresh, the tab list can rehydrate before its file payload does, which left Monaco mounted against an empty string until the user reselected the file. We restore the file payload as soon as the active tab is known so the editor always comes back with the real content instead of a blank surface.
+  useEffect(() => {
+    if (!activeTab || !activeTabProject?.rootPath) return;
+    if (fileContentsRef.current[activeTab.id]) return;
+    void ensureFileContent(activeTabProject, activeTab);
+  }, [activeTab, activeTabProject, ensureFileContent]);
 
   return (
     <main className="code-space-workbench flex min-h-0 flex-1 overflow-hidden bg-[#181818] text-[#d4d4d4]">
@@ -1824,29 +1898,35 @@ export function CodeSpaceWorkspace() {
 
         <div className="min-h-0 flex-1 bg-[#1e1e1e]">
           {activeTab ? (
-            <Editor
-              height="100%"
-              theme={theme === 'light' ? 'agentdiagram-light' : 'agentdiagram-dark'}
-              language={activeTab.language}
-              path={`${activeTab.projectId}/${activeTab.path}`}
-              value={activeContent}
-              onChange={onEditorChange}
-              onMount={onEditorMount}
-              options={{
-                readOnly: activeTab.path.includes('/generated/'),
-                minimap: { enabled: minimapEnabled },
-                wordWrap: wordWrap ? 'on' : 'off',
-                fontSize: 13,
-                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                lineNumbers: 'on',
-                folding: true,
-                bracketPairColorization: { enabled: true },
-                guides: { indentation: true, bracketPairs: true },
-                renderWhitespace: 'selection',
-                scrollBeyondLastLine: false,
-                automaticLayout: true,
-              }}
-            />
+            activeTabPayload ? (
+              <Editor
+                height="100%"
+                theme={theme === 'light' ? 'agentdiagram-light' : 'agentdiagram-dark'}
+                language={activeTab.language}
+                path={`${activeTab.projectId}/${activeTab.path}`}
+                value={activeContent}
+                onChange={onEditorChange}
+                onMount={onEditorMount}
+                options={{
+                  readOnly: activeTab.path.includes('/generated/'),
+                  minimap: { enabled: minimapEnabled },
+                  wordWrap: wordWrap ? 'on' : 'off',
+                  fontSize: 13,
+                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                  lineNumbers: 'on',
+                  folding: true,
+                  bracketPairColorization: { enabled: true },
+                  guides: { indentation: true, bracketPairs: true },
+                  renderWhitespace: 'selection',
+                  scrollBeyondLastLine: false,
+                  automaticLayout: true,
+                }}
+              />
+            ) : (
+              <div className="flex h-full items-center justify-center text-sm text-[#8b8b8b]">
+                {activeTabIsLoading ? 'Loading file…' : 'Restoring file…'}
+              </div>
+            )
           ) : activeProject ? (
             <div className="flex h-full items-center justify-center p-8">
               <div className="max-w-3xl rounded-xl border border-[#2a2a2a] bg-[#181818] p-6 shadow-2xl">
