@@ -29,7 +29,12 @@ export function SessionListSection({
   onDeleteSession,
 }: SessionListSectionProps) {
   return (
-    <CollapsibleSection title="Session" rightSlot={<span className="text-[10px] text-[#6d6d6d]">{sessions.length}</span>}>
+    <CollapsibleSection
+      title="Session"
+      defaultOpen={false}
+      compact
+      rightSlot={<span className="text-[9px] text-[#6d6d6d]">{sessions.length}</span>}
+    >
       <div className="max-h-64 overflow-y-auto rounded border border-[#2a2a2a] bg-[#111111] p-1">
         {sessions.length === 0 ? (
           <div className="px-2 py-3 text-[11px] text-[#8b8b8b]">No sessions yet.</div>

@@ -1,6 +1,7 @@
 'use client';
 
 import type { CodeSpaceAgentSession, CodeSpaceBottomTab, CodeSpaceEditorTab, CodeSpaceProject } from './core';
+import { normalizeCodeSpaceAgentMode, type CodeSpaceAgentMode } from './agentModes';
 
 const DB_NAME = 'agentdiagram-code-space';
 const DB_VERSION = 1;
@@ -12,6 +13,7 @@ const PREFERENCES_KEY = 'agentdiagram:code-space:preferences:v1';
 export interface CodeSpaceLayoutPreferences {
   activeProjectId?: string | null;
   activeSessionId?: string | null;
+  agentMode?: CodeSpaceAgentMode;
   leftSidebarVisible?: boolean;
   rightSidebarVisible?: boolean;
   leftWidth?: number;
@@ -113,7 +115,12 @@ export async function deleteCodeSpaceProject(projectId: string): Promise<void> {
 
 export async function readCodeSpaceSessions(): Promise<CodeSpaceAgentSession[]> {
   const sessions = await getAllFromStore<CodeSpaceAgentSession>(SESSION_STORE);
-  return sessions.sort((a, b) => b.updatedAt - a.updatedAt);
+  return sessions
+    .map((session): CodeSpaceAgentSession => ({
+      ...session,
+      mode: session.mode === 'fresh-start' ? 'fresh-start' : normalizeCodeSpaceAgentMode(session.mode),
+    }))
+    .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 export async function saveCodeSpaceSession(session: CodeSpaceAgentSession): Promise<void> {

@@ -100,7 +100,7 @@ export class AgentOrchestrator {
     files: Array<{ path: string; truncated: boolean }>,
     validationCommands: string[],
   ): string {
-    const modeLabel = run.mode === 'ask' ? 'Ask' : run.mode === 'plan' ? 'Plan' : 'Agent';
+    const modeLabel = run.mode === 'ask' ? 'Ask' : run.mode === 'plan' ? 'Plan' : 'Code';
     const citations = files.length
       ? files.slice(0, 6).map((file) => `- ${file.path}${file.truncated ? ' (partial)' : ''}`).join('\n')
       : '- No matching readable source files were found.';
@@ -128,4 +128,3 @@ function chunkText(text: string): string[] {
   for (let index = 0; index < text.length; index += 220) chunks.push(text.slice(index, index + 220));
   return chunks;
 }
-

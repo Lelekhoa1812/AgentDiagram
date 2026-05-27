@@ -1,4 +1,4 @@
-export type ProviderId = 'openai' | 'anthropic' | 'gemini' | 'foundry' | 'grok';
+export type ProviderId = 'openai' | 'anthropic' | 'gemini' | 'foundry' | 'grok' | 'local';
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -27,6 +27,8 @@ export interface RetryNotice {
 export interface ProviderConfig {
   apiKey: string;
   endpoint?: string;
+  temperature?: number;
+  maxTokens?: number;
 }
 
 export interface Provider {

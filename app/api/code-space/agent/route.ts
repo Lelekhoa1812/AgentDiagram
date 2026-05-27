@@ -5,6 +5,7 @@ import path from 'node:path';
 import fg from 'fast-glob';
 import { classifyCodeSpaceIntent } from '@/lib/code-space/core';
 import type { AgentSSEEvent } from '@/lib/code-space/agent/types';
+import { normalizeCodeSpaceAgentMode, type CodeSpaceAgentMode } from '@/lib/code-space/agentModes';
 import { createAgentEvent, createDefaultToolRegistry, encodeSseEvent, getEventStore } from '@/lib/code-space/runtime';
 import type { AgentEventType } from '@/lib/code-space/runtime';
 import { guardPath } from '@/lib/security/pathGuard';
@@ -24,6 +25,7 @@ const BodySchema = z.object({
   apiKey: z.string().optional().default(''),
   endpoint: z.string().optional(),
   openTabs: z.array(z.string()).default([]),
+  mode: z.enum(['ask', 'plan', 'code']).optional().default('code'),
   toolBudget: z.number().default(50),
   enableThinking: z.boolean().default(true),
 });
@@ -33,6 +35,7 @@ export async function POST(req: NextRequest) {
   if (!body.success) return Response.json({ error: body.error.message }, { status: 400 });
 
   const { messages, projectName, projectRoot, sessionId, toolBudget, openTabs } = body.data;
+  const mode = normalizeCodeSpaceAgentMode(body.data.mode);
   const latestUserMessage = [...messages].reverse().find((message) => message.role === 'user');
   if (!latestUserMessage) {
     return Response.json({ error: 'A user message is required to start the agent.' }, { status: 400 });
@@ -70,10 +73,10 @@ export async function POST(req: NextRequest) {
       };
 
       try {
-        await emitRuntime('run.created', { mode: 'agent', toolBudget });
+        await emitRuntime('run.created', { mode, toolBudget });
         await emitRuntime('run.started', { projectName });
 
-        const plan = buildPlan(intents, latestUserMessage.content);
+        const plan = buildPlan(mode, intents, latestUserMessage.content);
         emit({ type: 'plan_created', items: plan });
         await emitRuntime('plan.created', { items: plan });
         plan.forEach((text, index) => emit({ type: 'todo_created', todo: { id: `todo:${runId}:${index}`, text, done: false } }));
@@ -103,12 +106,41 @@ export async function POST(req: NextRequest) {
         await emitRuntime('context.search.completed', { selectedFiles: context.files.map((file) => file.path) });
         emit({ type: 'todo_updated', todoId: `todo:${runId}:1`, done: true });
 
+        const clarifyingQuestions = buildClarifyingQuestions(mode, latestUserMessage.content, intents);
+        if (clarifyingQuestions.length) {
+          emit({ type: 'clarifying_questions_created', questions: clarifyingQuestions });
+          await emitRuntime('plan.updated', { clarifyingQuestions });
+        }
+
+        let planMarkdownPath: string | null = null;
+        let planMarkdownContent = '';
+        if (mode === 'plan') {
+          const planMarkdown = await writePlanMarkdown({
+            root: guarded.resolved,
+            sessionId,
+            projectName,
+            prompt: latestUserMessage.content,
+            intents,
+            contextFiles: context.files,
+            plan,
+            clarifyingQuestions,
+          });
+          planMarkdownPath = planMarkdown.filePath;
+          planMarkdownContent = planMarkdown.content;
+          emit({ type: 'plan_markdown_created', filePath: planMarkdown.filePath, content: planMarkdown.content });
+          await emitRuntime('plan.updated', { filePath: planMarkdown.filePath });
+        }
+
         const answer = buildGroundedResponse({
+          mode,
           projectName,
           prompt: latestUserMessage.content,
           intents,
           contextFiles: context.files,
           plan,
+          planMarkdownPath,
+          planMarkdownContent,
+          clarifyingQuestions,
         });
         for (const chunk of chunkText(answer)) {
           emit({ type: 'text_delta', delta: chunk });
@@ -119,17 +151,19 @@ export async function POST(req: NextRequest) {
         emit({
           type: 'validation_result',
           id: `validation:${runId}:static`,
-          command: 'static context/read-only check',
+          command: mode === 'plan' ? 'plan markdown write check' : 'static context/read-only check',
           status: 'passed',
-          output: 'The run used safe read/search tooling only. No workspace files were changed.',
+          output: mode === 'plan'
+            ? `Plan mode only created or updated ${planMarkdownPath}. Source files were not changed.`
+            : 'The run used safe read/search tooling only. No workspace files were changed.',
         });
         emit({ type: 'todo_updated', todoId: `todo:${runId}:2`, done: true });
-        await emitRuntime('validation.completed', { command: 'static context/read-only check', status: 'passed' });
-        await emitRuntime('run.completed', { status: 'completed', filesChanged: [] });
+        await emitRuntime('validation.completed', { command: mode === 'plan' ? 'plan markdown write check' : 'static context/read-only check', status: 'passed' });
+        await emitRuntime('run.completed', { status: 'completed', filesChanged: planMarkdownPath ? [planMarkdownPath] : [] });
         emit({
           type: 'agent_done',
           summary: answer,
-          filesChanged: [],
+          filesChanged: planMarkdownPath ? [planMarkdownPath] : [],
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -150,9 +184,8 @@ export async function POST(req: NextRequest) {
   });
 }
 
-function buildPlan(intents: string[], prompt: string): string[] {
-  const readOnly = intents.includes('repository_explanation') || intents.includes('answer/question');
-  if (readOnly) {
+export function buildPlan(mode: CodeSpaceAgentMode, _intents: string[], _prompt: string): string[] {
+  if (mode === 'ask') {
     return [
       'Classify the request and keep this run read-only.',
       'Search and read the most relevant project files.',
@@ -160,10 +193,39 @@ function buildPlan(intents: string[], prompt: string): string[] {
     ];
   }
 
+  if (mode === 'plan') {
+    return [
+      'Classify the request and identify ambiguity before implementation.',
+      'Search and read the most relevant project files.',
+      'Write an editable markdown plan with assumptions, strategy, TODOs, and validation steps.',
+    ];
+  }
+
   return [
     'Classify the implementation/debugging request and identify likely scope.',
     'Search and read relevant project files before proposing edits.',
     'Prepare a visible plan, validation strategy, and approval-gated patch path.',
+  ];
+}
+
+export function buildClarifyingQuestions(mode: CodeSpaceAgentMode, prompt: string, intents: string[]) {
+  if (mode !== 'plan') return [];
+  const ambiguous =
+    prompt.trim().length < 120 ||
+    intents.includes('answer/question') ||
+    !/\b(test|verify|ui|api|backend|frontend|bug|feature|refactor|design|database|auth|deploy)\b/i.test(prompt);
+  if (!ambiguous) return [];
+  return [
+    {
+      id: 'scope',
+      question: 'What scope should the implementation plan optimize for?',
+      choices: ['Smallest safe change', 'Production-ready feature pass', 'Deep refactor plus feature work'],
+    },
+    {
+      id: 'validation',
+      question: 'What validation should be treated as the acceptance gate?',
+      choices: ['Typecheck and unit tests', 'Build plus targeted tests', 'Full build, tests, and browser verification'],
+    },
   ];
 }
 
@@ -214,27 +276,117 @@ async function collectProjectContext(root: string, prompt: string, openTabs: str
   return { filesConsidered: candidates.length, files };
 }
 
-function buildGroundedResponse({
+export async function writePlanMarkdown({
+  root,
+  sessionId,
   projectName,
   prompt,
   intents,
   contextFiles,
   plan,
+  clarifyingQuestions,
 }: {
+  root: string;
+  sessionId: string;
   projectName: string;
   prompt: string;
   intents: string[];
   contextFiles: Array<{ path: string; content: string; truncated: boolean }>;
   plan: string[];
+  clarifyingQuestions: Array<{ id: string; question: string; choices: string[] }>;
+}) {
+  const safeSessionId = sessionId.replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 96) || 'session';
+  const filePath = `.codex/plans/${safeSessionId}.md`;
+  const absolute = path.resolve(root, filePath);
+  if (absolute !== root && !absolute.startsWith(`${root}${path.sep}`)) {
+    throw new Error('Plan markdown path escapes project root');
+  }
+  const contextList = contextFiles.length
+    ? contextFiles.map((file) => `- \`${file.path}\`${file.truncated ? ' (partial)' : ''}`).join('\n')
+    : '- No matching readable source files were found.';
+  const questions = clarifyingQuestions.length
+    ? clarifyingQuestions
+        .map((question, index) => [
+          `${index + 1}. ${question.question}`,
+          ...question.choices.map((choice, choiceIndex) => `   ${String.fromCharCode(65 + choiceIndex)}. ${choice}`),
+          '   Other. Replace this line with a custom answer.',
+        ].join('\n'))
+        .join('\n\n')
+    : 'No blocking clarification questions were detected.';
+  const content = [
+    `# ${projectName} Agent Plan`,
+    '',
+    `Prompt: ${prompt}`,
+    '',
+    `Intents: ${intents.join(', ')}`,
+    '',
+    '## Clarifying Questions',
+    '',
+    questions,
+    '',
+    '## Context Reviewed',
+    '',
+    contextList,
+    '',
+    '## Strategy',
+    '',
+    ...plan.map((item, index) => `${index + 1}. ${item}`),
+    '',
+    '## Acceptance Criteria',
+    '',
+    '- User confirms or edits the clarifying answers above.',
+    '- Implementation tasks are traceable to the strategy.',
+    '- Validation commands are listed before source-file edits begin.',
+    '',
+    '## Validation Plan',
+    '',
+    '- Run `npm run typecheck` for TypeScript correctness.',
+    '- Run targeted tests for changed modules.',
+    '- Run a production build or browser verification when UI behavior changes.',
+    '',
+  ].join('\n');
+
+  // Motivation vs Logic: Plan mode needs an editable artifact the user can refine in Monaco, so we write only this hidden markdown plan and leave source files untouched until Code mode runs.
+  await fs.mkdir(path.dirname(absolute), { recursive: true });
+  await fs.writeFile(absolute, content, 'utf8');
+  return { filePath, content };
+}
+
+function buildGroundedResponse({
+  mode,
+  projectName,
+  prompt,
+  intents,
+  contextFiles,
+  plan,
+  planMarkdownPath,
+  planMarkdownContent,
+  clarifyingQuestions,
+}: {
+  mode: CodeSpaceAgentMode;
+  projectName: string;
+  prompt: string;
+  intents: string[];
+  contextFiles: Array<{ path: string; content: string; truncated: boolean }>;
+  plan: string[];
+  planMarkdownPath: string | null;
+  planMarkdownContent: string;
+  clarifyingQuestions: Array<{ id: string; question: string; choices: string[] }>;
 }) {
   const citations = contextFiles
     .slice(0, 5)
     .map((file) => `- ${file.path}${file.truncated ? ' (partial)' : ''}`)
     .join('\n');
-  const primaryMode = intents.includes('repository_explanation') || intents.includes('answer/question') ? 'Ask' : 'Plan';
+  const primaryMode = mode === 'ask' ? 'Ask' : mode === 'plan' ? 'Plan' : 'Code';
   const contextSummary = contextFiles.length
     ? `I inspected these files:\n${citations}`
     : 'I did not find readable source files that matched the prompt.';
+  const clarifyingSummary = clarifyingQuestions.length
+    ? `Clarifying questions were added to ${planMarkdownPath ?? 'the visible plan'} with an Other option for custom answers.`
+    : 'No blocking clarification questions were needed for this pass.';
+  const planFileSummary = planMarkdownPath
+    ? `Editable plan file: ${planMarkdownPath} (${planMarkdownContent.length} characters).`
+    : '';
 
   return [
     `Mode: ${primaryMode}`,
@@ -246,9 +398,13 @@ function buildGroundedResponse({
     'Visible plan:',
     ...plan.map((item, index) => `${index + 1}. ${item}`),
     '',
+    planFileSummary,
+    primaryMode === 'Plan' ? clarifyingSummary : '',
     primaryMode === 'Ask'
       ? `Answer: based on the available context, this is a read-only codebase question. Prompt: "${prompt}". No file edits or commands were performed.`
-      : 'Next step: approve an edit/debug run to let the agent create checkpointed patch proposals and run validation commands.',
+      : primaryMode === 'Plan'
+        ? 'Next step: edit the markdown plan directly or reply with clarifications, then switch to Code mode when ready to implement.'
+        : 'Next step: proceed with checkpointed patch proposals and validation commands as implementation support becomes available.',
   ].join('\n');
 }
 

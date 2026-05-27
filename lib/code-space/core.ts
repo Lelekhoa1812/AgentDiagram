@@ -1,4 +1,5 @@
 import { isHiddenByDefault } from '@/lib/agent/repo/ignoreDefaults';
+import type { CodeSpaceAgentMode } from './agentModes';
 import type { RepoSourceConfig, RepoSourceType } from '@/lib/agent/repo/repoTypes';
 
 export type CodeSpaceProjectSourceType = RepoSourceType | 'browser-folder' | 'zip';
@@ -127,7 +128,7 @@ export interface CodeSpaceAgentSession {
   projectId: string | null;
   title: string;
   status: 'idle' | 'planning' | 'applying' | 'reviewing' | 'checking' | 'finalized' | 'blocked' | 'running' | 'waiting_review' | 'verified' | 'needs_review';
-  mode: 'chat' | 'agent' | 'fresh-start';
+  mode: CodeSpaceAgentMode | 'fresh-start';
   messages: CodeSpaceMessage[];
   toolCalls: CodeSpaceToolCall[];
   plan: string[];

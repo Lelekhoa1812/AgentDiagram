@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { AgentEvent, AgentEventType } from '@/lib/code-space/runtime/events';
 import type { ToolRiskLevel } from '@/lib/code-space/runtime/toolRegistry';
 
-export const AgentModeSchema = z.enum(['ask', 'plan', 'edit', 'debug', 'review', 'agent']);
+export const AgentModeSchema = z.enum(['ask', 'plan', 'code', 'edit', 'debug', 'review', 'agent']);
 export const AutonomyLevelSchema = z.enum([
   'suggest_only',
   'approval_required',
@@ -175,4 +175,3 @@ export const StructuredEventEnvelopeSchema = z.object({
   createdAt: z.number(),
   sequence: z.number().optional(),
 });
-

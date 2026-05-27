@@ -9,7 +9,7 @@ export default defineConfig({
   },
   test: {
     environment: 'happy-dom',
-    include: ['lib/**/*.test.ts', 'tests/**/*.spec.ts'],
+    include: ['lib/**/*.test.ts', 'app/**/*.test.ts', 'components/**/*.test.tsx', 'tests/**/*.spec.ts'],
     exclude: ['tests/e2e/**', 'node_modules/**', '.next/**'],
     globals: false,
   },
