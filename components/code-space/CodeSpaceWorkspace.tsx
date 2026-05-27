@@ -52,6 +52,10 @@ import {
   normalizeCodeSpaceAgentMode,
   type CodeSpaceAgentMode,
 } from '@/lib/code-space/agentModes';
+import {
+  DEFAULT_CODE_SPACE_EXECUTION_POLICY,
+  type CodeSpaceExecutionPolicy,
+} from '@/lib/code-space/executionPolicy';
 import { BottomPanel } from '@/components/code-space/BottomPanel';
 import {
     deleteCodeSpaceProject,
@@ -311,6 +315,7 @@ export function CodeSpaceWorkspace() {
     explanation?: string;
     unifiedDiff?: string;
   }>>([]);
+  const [executionPolicy, setExecutionPolicy] = useState<CodeSpaceExecutionPolicy>(DEFAULT_CODE_SPACE_EXECUTION_POLICY);
   const [terminalStream, setTerminalStream] = useState('');
   const [agentChangesets, setAgentChangesets] = useState<Array<{
     filePath: string;
@@ -352,6 +357,7 @@ export function CodeSpaceWorkspace() {
     setMinimapEnabled(preferences.minimapEnabled ?? false);
     setWordWrap(preferences.wordWrap ?? true);
     setRevealHidden(preferences.revealHiddenFiles ?? false);
+    setExecutionPolicy(preferences.executionPolicy ?? DEFAULT_CODE_SPACE_EXECUTION_POLICY);
 
     void Promise.all([readCodeSpaceProjects(), readCodeSpaceSessions(), readCodeSpaceTabs()]).then(
       ([storedProjects, storedSessions, storedTabs]) => {
@@ -396,6 +402,7 @@ export function CodeSpaceWorkspace() {
       activeSessionId,
       activeTabId,
       agentMode,
+      executionPolicy,
       leftSidebarVisible: leftVisible,
       rightSidebarVisible: rightVisible,
       leftWidth,
@@ -420,6 +427,7 @@ export function CodeSpaceWorkspace() {
     rightVisible,
     rightWidth,
     wordWrap,
+    executionPolicy,
   ]);
 
   const updateSession = useCallback((session: CodeSpaceAgentSession) => {
@@ -1549,6 +1557,11 @@ export function CodeSpaceWorkspace() {
     [activeSession, patchSession],
   );
 
+  // Root Cause vs Logic: The selector assumed the workspace would own execution policy state, so provide the missing handler so onChange is never undefined.
+  const handleExecutionPolicyChange = useCallback((nextPolicy: CodeSpaceExecutionPolicy) => {
+    setExecutionPolicy(nextPolicy);
+  }, []);
+
   const acceptPendingDiff = useCallback(
     async (diffId: string) => {
       const diff = pendingDiffs.find((item) => item.diffId === diffId);
@@ -2077,6 +2090,8 @@ export function CodeSpaceWorkspace() {
             pendingDiffs={pendingDiffs}
             providerSummary={`${provider.provider}/${provider.provider === 'foundry' ? provider.customModel ?? provider.model : provider.model}`}
             agentMode={agentMode}
+            executionPolicy={executionPolicy}
+            onExecutionPolicyChange={handleExecutionPolicyChange}
             onOpenModelConfig={() => setProviderConfigOpen(true)}
             onGenerateDiagram={routeToSystemDiagram}
             onOpenAppPlanner={() => setMode('custom-prompt')}

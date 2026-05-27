@@ -299,10 +299,10 @@ export function CodeSpaceWorkspaceEnhancements() {
         Edit name
       </button>
       <button type="button" className="block w-full px-3 py-1.5 text-left hover:bg-[#2a2d2e]" onClick={() => void createFileInDirectory(target)} role="menuitem">
-        Create file here
+        Create file
       </button>
       <button type="button" className="block w-full px-3 py-1.5 text-left hover:bg-[#2a2d2e]" onClick={() => void createFolderInDirectory(target)} role="menuitem">
-        Create folder here
+        Create folder
       </button>
       <button type="button" className="block w-full px-3 py-1.5 text-left hover:bg-[#2a2d2e]" onClick={() => void duplicateTarget(target)} role="menuitem">
         Duplicate

@@ -2,6 +2,7 @@
 
 import type { CodeSpaceAgentSession, CodeSpaceBottomTab, CodeSpaceEditorTab, CodeSpaceProject } from './core';
 import { normalizeCodeSpaceAgentMode, type CodeSpaceAgentMode } from './agentModes';
+import type { CodeSpaceExecutionPolicy } from './executionPolicy';
 
 const DB_NAME = 'agentdiagram-code-space';
 const DB_VERSION = 1;
@@ -24,6 +25,7 @@ export interface CodeSpaceLayoutPreferences {
   wordWrap?: boolean;
   revealHiddenFiles?: boolean;
   bottomActiveTab?: CodeSpaceBottomTab;
+  executionPolicy?: CodeSpaceExecutionPolicy;
 }
 
 function canUseIndexedDb(): boolean {

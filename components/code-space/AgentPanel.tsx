@@ -233,7 +233,7 @@ export function AgentPanel({
                   <div className="flex items-center gap-2 border-b border-[#1f1f1f] px-2 py-1">
                     <span className="truncate text-[10px] text-[#e6edf3]">{diff.filePath}</span>
                     <span className="ml-auto text-[9px] uppercase tracking-wider text-[#facc15]">
-                      {executionPolicy === 'auto' ? 'auto apply enabled' : 'approval required'}
+                      {executionPolicy === 'auto' ? 'auto mode enabled' : 'confirm mode required'}
                     </span>
                   </div>
                   {diff.explanation && <p className="px-2 pt-2 text-[10px] leading-4 text-[#8b949e]">{diff.explanation}</p>}
@@ -321,8 +321,9 @@ export function AgentPanel({
             </button>
           )}
         </div>
-        <div className="mt-1 flex items-center justify-between px-0.5">
-          <div className="flex items-center gap-3 text-[10px]">
+        <div className="mt-1 flex items-center justify-between gap-2 px-0.5">
+          {/* Motivation vs Logic: Keep the quick links and selectors on one line so the sidebar stays compact even when it narrows. */}
+          <div className="flex items-center gap-3 text-[10px] whitespace-nowrap">
             <button
               type="button"
               onClick={onGenerateDiagram}
@@ -340,7 +341,7 @@ export function AgentPanel({
               App Planner
             </button>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 whitespace-nowrap">
             <ExecutionPolicySelector
               policy={executionPolicy}
               disabled={isRunning}

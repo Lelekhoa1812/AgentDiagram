@@ -16,7 +16,7 @@ export const DEFAULT_CODE_SPACE_EXECUTION_POLICY: CodeSpaceExecutionPolicy = 'ma
 export const CODE_SPACE_EXECUTION_POLICY_META: Record<CodeSpaceExecutionPolicy, CodeSpaceExecutionPolicyMeta> = {
   auto: {
     policy: 'auto',
-    label: 'Auto apply',
+    label: 'Auto',
     description: 'Apply agent changes automatically without asking.',
     accentClassName: 'text-[#3fb950]',
     buttonClassName: 'border-[#23863666] bg-[#0f2a1a] text-[#7ee787] hover:bg-[#12331f]',
@@ -24,7 +24,7 @@ export const CODE_SPACE_EXECUTION_POLICY_META: Record<CodeSpaceExecutionPolicy, 
   },
   manual: {
     policy: 'manual',
-    label: 'Approval required',
+    label: 'Confirm',
     description: 'Require manual confirmation before applying code changes.',
     accentClassName: 'text-[#f85149]',
     buttonClassName: 'border-[#be123c66] bg-[#2d1217] text-[#fb7185] hover:bg-[#3b151f]',
