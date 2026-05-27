@@ -96,7 +96,7 @@ export function createDefaultToolRegistry(): ToolRegistry {
   registry.register(
     baseTool({
       name: 'search_text',
-      description: 'Search text across files in the active workspace, returning match locations and nearby context.',
+      description: 'Search text across files in the active workspace, returning match locations and nearby context. Use this before refactors to find file names, imports, exports, call sites, and other references that must be updated.',
       inputSchema: objectSchema({ query: { type: 'string' }, glob: { type: 'string' }, contextLines: { type: 'number' } }, ['query']),
       riskLevel: 'safe',
       permission: 'auto',
@@ -106,7 +106,7 @@ export function createDefaultToolRegistry(): ToolRegistry {
   registry.register(
     baseTool({
       name: 'dependency_trace',
-      description: 'Trace imports, exports, related files, and unresolved edges around selected implementation surfaces.',
+      description: 'Trace imports, exports, related files, and unresolved edges around selected implementation surfaces. Use this after a file move or rename to find every importer, re-export, and downstream usage that needs repair.',
       inputSchema: objectSchema({ paths: { type: 'array', items: { type: 'string' } }, direction: { type: 'string' } }, ['paths']),
       riskLevel: 'safe',
       permission: 'auto',
@@ -220,7 +220,7 @@ export function createDefaultToolRegistry(): ToolRegistry {
   registry.register(
     baseTool({
       name: 'run_command',
-      description: 'Run an approved terminal command in the workspace and stream output to the terminal panel. Full output should be stored as an artifact for bounded reads.',
+      description: 'Run an approved terminal command in the workspace and stream output to the terminal panel. Prefer this for shell-native refactors and maintenance tasks such as mv, cp, rg, find, git status, and validation commands after a rename or move. Full output should be stored as an artifact for bounded reads.',
       inputSchema: objectSchema({ command: { type: 'string' }, args: { type: 'array', items: { type: 'string' } }, reason: { type: 'string' } }, ['command', 'reason']),
       riskLevel: 'high',
       permission: 'approval_required',

@@ -68,7 +68,8 @@ function firstDifference(a: string, b: string): { index: number; line: number; c
     if (a[index] === b[index]) continue;
     const prefix = a.slice(0, index);
     const lines = prefix.split('\n');
-    return { index, line: lines.length, column: lines[lines.length - 1].length + 1 };
+    const lastLine = lines[lines.length - 1] ?? '';
+    return { index, line: lines.length, column: lastLine.length + 1 };
   }
   return null;
 }

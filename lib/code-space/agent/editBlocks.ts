@@ -205,7 +205,9 @@ export function parseSearchReplaceBlocks(raw: string): EditBlock[] {
   for (const match of raw.matchAll(pattern)) {
     const path = match[1]?.trim();
     if (!path) continue;
-    edits.push({ path, search: match[2], replace: match[3], reason: 'Model-generated SEARCH/REPLACE block' });
+    const search = match[2] ?? '';
+    const replace = match[3] ?? '';
+    edits.push({ path, search, replace, reason: 'Model-generated SEARCH/REPLACE block' });
   }
   return edits;
 }

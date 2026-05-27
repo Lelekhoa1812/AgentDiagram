@@ -182,9 +182,10 @@ The system prompt is the primary lever for coding quality. Key instructions:
 
 1. **Read before write** — always call `read_file` before `write_file` on a file you haven't read this session
 2. **Search before invent** — use `search_code` to find existing patterns, utilities, types before writing new ones
-3. **Lint after write** — the loop calls `lint_check` automatically; if errors are returned, fix them before proceeding
-4. **Incremental commits** — after each logical unit of work, offer to run `git add` + `git commit` (configurable)
-5. **Explain reasoning** — write a brief plan in the chat before starting tool calls; keeps user informed
+3. **Refactor like a shell user** — for renames or folder moves, prefer `run_terminal` with `mv`, `cp`, or `git mv`, then search and repair every affected import or re-export before writing replacement content
+4. **Lint after write** — the loop calls `lint_check` automatically; if errors are returned, fix them before proceeding
+5. **Incremental commits** — after each logical unit of work, offer to run `git add` + `git commit` (configurable)
+6. **Explain reasoning** — write a brief plan in the chat before starting tool calls; keeps user informed
 
 **Extended thinking (Anthropic only):** On the first LLM turn (planning turn), enable `thinking: { type: "enabled", budget_tokens: 8000 }`. Subsequent turns use standard mode to reduce latency.
 

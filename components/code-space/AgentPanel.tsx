@@ -241,12 +241,18 @@ export function AgentPanel({
                     {renderDiff(diff.unifiedDiff ?? `${diff.oldContent}\n---\n${diff.newContent}`)}
                   </div>
                   <div className="flex justify-end gap-2 border-t border-[#1f1f1f] px-2 py-1.5">
-                    <button type="button" onClick={() => onRejectDiff(diff.diffId)} className="rounded border border-[#30363d] px-2 py-1 text-[10px] text-[#f85149] hover:bg-[#2d1517]">
-                      Reject
-                    </button>
-                    <button type="button" onClick={() => onAcceptDiff(diff.diffId)} className="rounded bg-[#238636] px-2 py-1 text-[10px] text-white hover:bg-[#2ea043]">
-                      Apply
-                    </button>
+                    {executionPolicy === 'auto' ? (
+                      <span className="text-[9px] uppercase tracking-wider text-[#3fb950]">Applied automatically</span>
+                    ) : (
+                      <>
+                        <button type="button" onClick={() => onRejectDiff(diff.diffId)} className="rounded border border-[#30363d] px-2 py-1 text-[10px] text-[#f85149] hover:bg-[#2d1517]">
+                          Reject
+                        </button>
+                        <button type="button" onClick={() => onAcceptDiff(diff.diffId)} className="rounded bg-[#238636] px-2 py-1 text-[10px] text-white hover:bg-[#2ea043]">
+                          Apply
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               ))}

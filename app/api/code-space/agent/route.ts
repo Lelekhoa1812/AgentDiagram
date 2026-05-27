@@ -217,6 +217,7 @@ export async function POST(req: NextRequest) {
 export function buildPlan(mode: CodeSpaceAgentMode, intents: string[], prompt: string): string[] {
   if (mode === 'ask') return ['Classify read-only request', 'Autonomously discover relevant context', 'Answer with evidence and no file mutation'];
   if (mode === 'plan') return ['Classify implementation intent', 'Autonomously discover files, folders, and validation surfaces', 'Write a reusable planning artifact'];
+  if (isRefactorTask(prompt, intents)) return ['Inspect the current file, imports, exports, and references', 'Move or rename files on disk with shell-native operations instead of duplicating them', 'Search and repair every affected importer, export, and test', 'Run validation commands to confirm the refactor compiles cleanly'];
   const complex = shouldUseMultiAgent(prompt, intents);
   return ['Understand the requested change', complex ? 'Explore likely implementation paths' : 'Inspect relevant source and tests', 'Apply the smallest safe change', 'Report changed files and validation'];
 }
@@ -228,7 +229,10 @@ export function buildClarifyingQuestions(): CodeSpaceClarifyingQuestion[] {
 function describeModeContract(mode: CodeSpaceAgentMode): string {
   if (mode === 'ask') return 'Ask mode is read-only: inspect, explain, and cite evidence without creating patches.';
   if (mode === 'plan') return 'Plan mode creates a markdown implementation plan artifact and does not edit product source files.';
-  return 'Code mode explores context, chooses target files, applies checkpointed changes, and summarizes the result conversationally.';
+  return [
+    'Code mode explores context, chooses target files, applies checkpointed changes, and summarizes the result conversationally.',
+    buildTerminalDecisionGuide(),
+  ].join('\n');
 }
 
 function promptTerms(prompt: string): string[] {
@@ -237,6 +241,29 @@ function promptTerms(prompt: string): string[] {
 
 const STOP_WORDS = new Set(['the', 'and', 'for', 'with', 'this', 'that', 'you', 'your', 'are', 'can', 'into', 'from', 'mode', 'code', 'make', 'please', 'need']);
 const CONTEXT_GLOBS = ['**/*.{ts,tsx,js,jsx,json,md,css,scss,py,go,rs,java,kt,php,rb,sh,yml,yaml,toml}', '!node_modules/**', '!.git/**', '!dist/**', '!build/**', '!.next/**', '!coverage/**', '!__pycache__/**'];
+// Motivation vs Logic: rename-heavy tasks fail when the agent invents replacement files, so refactors must be treated as on-disk moves followed by a reference sweep and validation.
+const REFACTOR_WORKFLOW = [
+  'Refactor workflow:',
+  '1. Inspect the current file, all imports, exports, and call sites before changing paths.',
+  '2. Prefer shell-native moves and copies for renames or folder reorganizations instead of creating a brand-new duplicate file.',
+  '3. Search every affected file, update imports, re-exports, and references, and keep the move atomic where possible.',
+  '4. Run the detected typecheck, lint, test, and build commands after the refactor so import paths and compilation are verified.',
+].join('\n');
+
+// Motivation vs Logic: the agent should choose the terminal for real filesystem, search, and validation work instead of simulating those actions in chat.
+const TERMINAL_DECISION_GUIDE = [
+  'Terminal decision guide:',
+  '- Use terminal commands for refactors that need real file moves or copies (`mv`, `cp`, `git mv`) and then sweep imports with `rg` or `grep`.',
+  '- Use terminal commands when you need to reproduce bugs, inspect logs, run tests, typecheck, lint, or build after a change.',
+  '- Use terminal commands for dependency or lockfile work, package-manager commands, and environment checks that cannot be inferred safely from source alone.',
+  '- Use terminal commands for repo inspection tasks like `git status`, `git diff`, `git log`, file discovery, and path checks before or after edits.',
+  '- Use terminal commands for bulk text replacement, search-and-repair loops, and any situation where editing one file implies updating many references.',
+  '- Prefer `rg`/`grep` for searches, `find`/`ls` for tree inspection, and `npm`/`pnpm`/`yarn`/`bun` commands when the project manifest indicates they are the right validation or install tool.',
+].join('\n');
+
+function buildTerminalDecisionGuide(): string {
+  return TERMINAL_DECISION_GUIDE;
+}
 
 function normalizeRelativePath(filePath: string): string {
   return filePath.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '');
@@ -397,7 +424,8 @@ async function proposeAutonomousPatch(root: string, prompt: string, context: Con
     }
     if (beforeContent === file.afterContent) continue;
     const diagnostics = validateSyntaxLightweight(relativePath, file.afterContent);
-    if (diagnostics.length) throw new Error(`Generated patch for ${relativePath} failed syntax pre-validation: ${diagnostics[0].message}`);
+    const firstDiagnostic = diagnostics[0];
+    if (firstDiagnostic) throw new Error(`Generated patch for ${relativePath} failed syntax pre-validation: ${firstDiagnostic.message}`);
     files.push({ path: relativePath, beforeContent, afterContent: file.afterContent, explanation: file.explanation || modelResult.summary || 'Code change', unifiedDiff: createUnifiedDiff(relativePath, beforeContent, file.afterContent) });
   }
   return { summary: modelResult.summary || 'Planning completed.', files };
@@ -406,7 +434,15 @@ async function proposeAutonomousPatch(root: string, prompt: string, context: Con
 async function callPatchPlannerModel(root: string, prompt: string, context: ContextSearchResult, request: AgentRequest): Promise<PatchModelResult> {
   const credentials = await resolveProviderCredentials(root, request);
   if (!credentials.apiKey && request.providerId !== 'local') return { summary: 'The selected model provider is not configured yet.', files: [] };
-  const system = ['You are Code Space Autonomous Patch Planner.', 'Choose files from repository evidence. Do not ask the user to provide an exact @File.', 'Return only JSON. No markdown. No code fences.', 'Schema: {"summary":"string","files":[{"path":"relative/path","afterContent":"complete full file content","explanation":"why changed"}],"validationCommands":["optional command"]}.', 'Preserve existing style, keep the smallest safe change, and include complete afterContent for every changed or new file.'].join('\n');
+  const system = [
+    'You are Code Space Autonomous Patch Planner.',
+    'Choose files from repository evidence. Do not ask the user to provide an exact @File.',
+    'Return only JSON. No markdown. No code fences.',
+    'Schema: {"summary":"string","files":[{"path":"relative/path","afterContent":"complete full file content","explanation":"why changed"}],"validationCommands":["optional command"]}.',
+    'Preserve existing style, keep the smallest safe change, and include complete afterContent for every changed or new file.',
+    REFACTOR_WORKFLOW,
+    TERMINAL_DECISION_GUIDE,
+  ].join('\n');
   const contextBlock = context.files.map((file) => [`--- FILE ${file.path} (${file.reasons.join(', ') || 'selected'}) ---`, file.content, file.truncated ? '\n[TRUNCATED]' : ''].join('\n')).join('\n\n');
   const user = [`Task: ${prompt}`, '', 'Repository evidence:', contextBlock].join('\n');
   const text = await chatWithRetry(
@@ -469,9 +505,11 @@ function parseEnv(raw: string): Record<string, string> {
     if (!trimmed || trimmed.startsWith('#')) continue;
     const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
     if (!match) continue;
-    let value = match[2].trim();
+    const [, key, rawValue] = match;
+    if (typeof key !== 'string' || typeof rawValue !== 'string') continue;
+    let value = rawValue.trim();
     if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
-    env[match[1]] = value;
+    env[key] = value;
   }
   return env;
 }
@@ -517,6 +555,10 @@ function parsePlannerJson(raw: string): PatchModelResult {
 
 function shouldUseMultiAgent(prompt: string, intents: string[]): boolean {
   return /architecture|multi[- ]?agent|agentic|migration|refactor|cursor|claude code|orchestration/i.test(prompt) || intents.includes('refactor') || intents.includes('feature_build');
+}
+
+function isRefactorTask(prompt: string, intents: string[]): boolean {
+  return /(?:rename|move|relocat|reorgani[sz]e|folder|file|path|import|export)/i.test(prompt) && (intents.includes('refactor') || /(?:rename|move|folder|path)/i.test(prompt));
 }
 
 function chunkText(text: string): string[] {

@@ -37,6 +37,15 @@ export function normalizeCodeSpaceExecutionPolicy(value: unknown): CodeSpaceExec
   return DEFAULT_CODE_SPACE_EXECUTION_POLICY;
 }
 
+export function isCodeSpaceAutoExecutionPolicy(policy: unknown): boolean {
+  return normalizeCodeSpaceExecutionPolicy(policy) === 'auto';
+}
+
+// Root Cause vs Logic: auto mode only changed the persisted preference; the review UI still treated every diff as manual, so proposals continued to wait for a user click instead of flowing through the existing apply path.
+export function shouldAutoApplyCodeSpaceDiffs(policy: unknown, autoApplied = false): boolean {
+  return autoApplied || isCodeSpaceAutoExecutionPolicy(policy);
+}
+
 export function getCodeSpaceExecutionPolicyMeta(policy: unknown): CodeSpaceExecutionPolicyMeta {
   return CODE_SPACE_EXECUTION_POLICY_META[normalizeCodeSpaceExecutionPolicy(policy)];
 }

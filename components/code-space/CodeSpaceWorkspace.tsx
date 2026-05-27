@@ -54,6 +54,7 @@ import {
 } from '@/lib/code-space/agentModes';
 import {
   DEFAULT_CODE_SPACE_EXECUTION_POLICY,
+  shouldAutoApplyCodeSpaceDiffs,
   type CodeSpaceExecutionPolicy,
 } from '@/lib/code-space/executionPolicy';
 import { BottomPanel } from '@/components/code-space/BottomPanel';
@@ -325,6 +326,8 @@ export function CodeSpaceWorkspace() {
   }>>([]);
   const agentAbortRef = useRef<AbortController | null>(null);
   const runningSessionIdRef = useRef<string | null>(null);
+  const applyingDiffIdsRef = useRef<Set<string>>(new Set());
+  const executionPolicyRef = useRef<CodeSpaceExecutionPolicy>(executionPolicy);
 
   useEffect(() => {
     projectsRef.current = projects;
@@ -333,6 +336,10 @@ export function CodeSpaceWorkspace() {
   useEffect(() => {
     fileContentsRef.current = fileContents;
   }, [fileContents]);
+
+  useEffect(() => {
+    executionPolicyRef.current = executionPolicy;
+  }, [executionPolicy]);
 
   useEffect(() => {
     setProjectNameInput(activeProject?.name ?? '');
@@ -1194,6 +1201,81 @@ export function CodeSpaceWorkspace() {
     void deleteCodeSpaceTab(tabIdToRemove);
   }, [activeTab, runFileAction]);
 
+  // Root Cause vs Logic: auto mode only changed how diffs were labeled; the workspace still held them in a manual review queue. Reuse the existing apply path so auto mode can commit the patch immediately and manual mode can keep the same confirmation flow.
+  const applyPendingDiff = useCallback(
+    async (
+      diff: {
+        diffId: string;
+        filePath: string;
+        oldContent: string;
+        newContent: string;
+        explanation?: string;
+        unifiedDiff?: string;
+      },
+      options?: { removeOnFailure?: boolean },
+    ) => {
+      if (applyingDiffIdsRef.current.has(diff.diffId) || !activeProject?.rootPath) return;
+      applyingDiffIdsRef.current.add(diff.diffId);
+      const session = activeSession ?? ensureSession();
+      try {
+        const response = await fetch('/api/code-space/patches', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'apply',
+            rootPath: activeProject.rootPath,
+            projectId: activeProject.id,
+            runId: session.id,
+            patchId: diff.diffId,
+            files: [
+              {
+                path: diff.filePath,
+                beforeContent: diff.oldContent,
+                afterContent: diff.newContent,
+              },
+            ],
+          }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error ?? 'Patch apply failed');
+        const acceptedAt = Date.now();
+        setPendingDiffs((current) => current.filter((item) => item.diffId !== diff.diffId));
+        setAgentChangesets((current) => [
+          ...current,
+          {
+            filePath: diff.filePath,
+            beforeContent: diff.oldContent,
+            afterContent: diff.newContent,
+            acceptedAt,
+          },
+        ]);
+        patchSession(session.id, (current) => ({
+          ...current,
+          filesChanged: Array.from(new Set([...current.filesChanged, diff.filePath])),
+          agentChangesets: [
+            ...current.agentChangesets,
+            {
+              filePath: diff.filePath,
+              beforeContent: diff.oldContent,
+              afterContent: diff.newContent,
+              acceptedAt,
+            },
+          ],
+          updatedAt: Date.now(),
+        }));
+        await refreshGitStatus(activeProject);
+      } catch (error) {
+        setError(error instanceof Error ? error.message : String(error));
+        if (options?.removeOnFailure) {
+          setPendingDiffs((current) => current.filter((item) => item.diffId !== diff.diffId));
+        }
+      } finally {
+        applyingDiffIdsRef.current.delete(diff.diffId);
+      }
+    },
+    [activeProject, activeSession, ensureSession, patchSession, refreshGitStatus],
+  );
+
   const handleRunAgent = useCallback(async (userPrompt: string, attachments: SelectedMention[] = []) => {
     const project = projects.find((item) => item.id === activeProjectId);
     if (!project || !project.rootPath) return;
@@ -1324,14 +1406,19 @@ export function CodeSpaceWorkspace() {
           try {
             const event: AgentSSEEvent = JSON.parse(line.slice(6));
             if (event.type === 'diff_proposed') {
-              setPendingDiffs((prev) => [...prev, {
+              const diff = {
                 diffId: event.diffId,
                 filePath: event.filePath,
                 oldContent: event.oldContent,
                 newContent: event.newContent,
                 explanation: event.explanation,
                 unifiedDiff: event.unifiedDiff,
-              }]);
+              };
+              if (shouldAutoApplyCodeSpaceDiffs(executionPolicyRef.current, event.autoApplied)) {
+                void applyPendingDiff(diff, { removeOnFailure: true });
+              } else {
+                setPendingDiffs((prev) => [...prev, diff]);
+              }
             } else if (event.type === 'plan_markdown_created') {
               patchSession(sessionWithPrompt.id, (current) => ({
                 ...current,
@@ -1527,10 +1614,18 @@ export function CodeSpaceWorkspace() {
     provider.model,
     provider.provider,
     tabs,
+    applyPendingDiff,
     updateSession,
     updateSessionMessage,
     upsertSessionToolCall,
   ]);
+
+  useEffect(() => {
+    if (executionPolicy !== 'auto' || pendingDiffs.length === 0) return;
+    for (const diff of pendingDiffs) {
+      void applyPendingDiff(diff, { removeOnFailure: true });
+    }
+  }, [applyPendingDiff, executionPolicy, pendingDiffs]);
 
   const handleCancelRun = useCallback(() => {
     agentAbortRef.current?.abort();
@@ -1565,60 +1660,10 @@ export function CodeSpaceWorkspace() {
   const acceptPendingDiff = useCallback(
     async (diffId: string) => {
       const diff = pendingDiffs.find((item) => item.diffId === diffId);
-      if (!diff || !activeProject?.rootPath) return;
-      const session = activeSession ?? ensureSession();
-      try {
-        const response = await fetch('/api/code-space/patches', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'apply',
-            rootPath: activeProject.rootPath,
-            projectId: activeProject.id,
-            runId: session.id,
-            patchId: diff.diffId,
-            files: [
-              {
-                path: diff.filePath,
-                beforeContent: diff.oldContent,
-                afterContent: diff.newContent,
-              },
-            ],
-          }),
-        });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error ?? 'Patch apply failed');
-        const acceptedAt = Date.now();
-        setPendingDiffs((current) => current.filter((item) => item.diffId !== diffId));
-        setAgentChangesets((current) => [
-          ...current,
-          {
-            filePath: diff.filePath,
-            beforeContent: diff.oldContent,
-            afterContent: diff.newContent,
-            acceptedAt,
-          },
-        ]);
-        patchSession(session.id, (current) => ({
-          ...current,
-          filesChanged: Array.from(new Set([...current.filesChanged, diff.filePath])),
-          agentChangesets: [
-            ...current.agentChangesets,
-            {
-              filePath: diff.filePath,
-              beforeContent: diff.oldContent,
-              afterContent: diff.newContent,
-              acceptedAt,
-            },
-          ],
-          updatedAt: Date.now(),
-        }));
-        await refreshGitStatus(activeProject);
-      } catch (error) {
-        setError(error instanceof Error ? error.message : String(error));
-      }
+      if (!diff) return;
+      await applyPendingDiff(diff);
     },
-    [activeProject, activeSession, ensureSession, patchSession, pendingDiffs, refreshGitStatus],
+    [applyPendingDiff, pendingDiffs],
   );
 
   const rejectPendingDiff = useCallback((diffId: string) => {

@@ -1,79 +1,45 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { buildClarifyingQuestions, buildGroundedResponse, buildPlan, writePlanMarkdown } from '../route';
+import { buildClarifyingQuestions, buildPlan } from '../route';
 
 describe('Code Space agent route mode helpers', () => {
   it('builds a read-only Ask plan', () => {
     expect(buildPlan('ask', ['repository_explanation'], 'explain this repo')).toEqual([
-      'Classify the request and keep this run read-only.',
-      'Search and read the most relevant project files.',
-      'Answer with file-grounded citations and note that no edits were made.',
+      'Classify read-only request',
+      'Autonomously discover relevant context',
+      'Answer with evidence and no file mutation',
     ]);
   });
 
   it('builds a scan-first Plan plan and asks MCQ clarifiers for ambiguous prompts', () => {
     const plan = buildPlan('plan', ['feature_build'], 'make this better');
-    expect(plan[0]).toContain('Scan');
-    expect(plan[1]).toContain('read');
-    expect(plan[2]).toContain('final planning doc');
+    expect(plan).toEqual([
+      'Classify implementation intent',
+      'Autonomously discover files, folders, and validation surfaces',
+      'Write a reusable planning artifact',
+    ]);
 
-    const questions = buildClarifyingQuestions('plan', 'make this better', ['feature_build']);
-    expect(questions).toHaveLength(2);
-    expect(questions[0]?.choices).toContain('Smallest safe change');
+    const questions = buildClarifyingQuestions();
+    expect(questions).toEqual([]);
   });
 
   it('keeps Code mode implementation-oriented without clarifying questions', () => {
-    expect(buildPlan('code', ['bug_fix'], 'fix the failing build and run tests')[2]).toContain('approval-gated patch path');
-    expect(buildClarifyingQuestions('code', 'fix the failing build and run tests', ['bug_fix'])).toEqual([]);
+    expect(buildPlan('code', ['bug_fix'], 'fix the failing build and run tests')).toEqual([
+      'Understand the requested change',
+      'Inspect relevant source and tests',
+      'Apply the smallest safe change',
+      'Report changed files and validation',
+    ]);
+    expect(buildClarifyingQuestions()).toEqual([]);
   });
 
-  it('writes Plan mode markdown under .codex/plans', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'agentdiagram-plan-'));
-    try {
-      const result = await writePlanMarkdown({
-        root,
-        sessionId: 'session:abc/123',
-        projectName: 'Demo',
-        prompt: 'Plan a safer implementation',
-        intents: ['feature_build'],
-        contextFiles: [{ path: 'src/App.tsx', content: 'export default function App() {}', truncated: false }],
-        plan: ['Review current UI', 'Write tests', 'Implement the feature'],
-        clarifyingQuestions: [
-          {
-            id: 'scope',
-            question: 'What scope should this plan use?',
-            choices: ['Smallest safe change', 'Production-ready feature pass'],
-          },
-        ],
-      });
+  it('treats refactor tasks as move-first workflows before updating imports and validation', () => {
+    const plan = buildPlan('code', ['refactor'], 'rename the widgets folder and update imports');
 
-      expect(result.filePath).toMatch(/^\.codex\/plans\/session-abc-123\.md$/);
-      const content = await readFile(path.join(root, result.filePath), 'utf8');
-      expect(content).toContain('# Demo Agent Plan');
-      expect(content).toContain('Other. Replace this line with a custom answer.');
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  it('keeps Plan mode chat concise and defers the full planning doc to the final artifact', () => {
-    const answer = buildGroundedResponse({
-      mode: 'plan',
-      projectName: 'Demo',
-      prompt: 'Improve this workflow',
-      intents: ['feature_build'],
-      contextFiles: [{ path: 'src/App.tsx', content: 'export default function App() {}', truncated: false }],
-      plan: ['Scan the repo', 'Ask targeted MCQs', 'Write the final planning doc'],
-      planMarkdownPath: '.codex/plans/session.md',
-      planMarkdownContent: '# Demo Agent Plan',
-      clarifyingQuestions: [{ id: 'scope', question: 'What scope?', choices: ['Smallest safe change'] }],
-    });
-
-    expect(answer).toContain('Full planning doc is ready at .codex/plans/session.md');
-    expect(answer).not.toContain('Visible plan:');
-    expect(answer).not.toContain('1. Scan the repo');
-    expect(answer).toContain('Answer the sidebar clarifying questions');
+    expect(plan).toEqual([
+      'Inspect the current file, imports, exports, and references',
+      'Move or rename files on disk with shell-native operations instead of duplicating them',
+      'Search and repair every affected importer, export, and test',
+      'Run validation commands to confirm the refactor compiles cleanly',
+    ]);
   });
 });

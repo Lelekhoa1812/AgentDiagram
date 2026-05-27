@@ -93,10 +93,11 @@ export async function grepArtifact(artifactPath: string, pattern: string, contex
   const rx = new RegExp(pattern, 'i');
   const matches: Array<{ line: number; text: string; context: string[] }> = [];
   for (let index = 0; index < lines.length; index += 1) {
-    if (!rx.test(lines[index])) continue;
+    const line = lines[index] ?? '';
+    if (!rx.test(line)) continue;
     const start = Math.max(0, index - contextLines);
     const end = Math.min(lines.length, index + contextLines + 1);
-    matches.push({ line: index + 1, text: lines[index], context: lines.slice(start, end) });
+    matches.push({ line: index + 1, text: line, context: lines.slice(start, end) });
     if (matches.length >= 50) break;
   }
   return { matches, truncated: matches.length >= 50 };

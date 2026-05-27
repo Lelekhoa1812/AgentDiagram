@@ -60,6 +60,7 @@ Code Space must behave like a real coding agent surface with Cursor-style Ask / 
 - Repair turns stay scoped to changed or failing files.
 - Repair loops stop after a bounded retry budget and mark the session `needs_review` when failures remain.
 - A session is marked `verified` only when required validation passes after accepted changes.
+- Refactor turns that rename or move files/folders must follow a move-first sequence: use shell-native operations (`mv`, `cp`, or `git mv` when available), search every affected importer and re-export, update references, then run the detected validation commands before the turn is considered complete.
 
 ## DoD 7 — Checkpoint and rollback
 
@@ -72,6 +73,7 @@ Code Space must behave like a real coding agent surface with Cursor-style Ask / 
 ## DoD 8 — Terminal safety
 
 - Terminal commands are executed with command/args, not arbitrary shell strings, whenever possible.
+- Shell-backed refactors should use `rg`/`grep` to find references, `mv`/`cp` for file moves and copies, and validation commands to confirm the workspace still compiles after path changes.
 - Risky commands require approval.
 - Network, install, delete, git push, migration, and credential-adjacent operations are approval-gated or blocked.
 - Terminal logs are redacted for secrets before display or storage.
