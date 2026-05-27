@@ -3,18 +3,13 @@ import { z } from 'zod';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import fg from 'fast-glob';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { classifyCodeSpaceIntent, type CodeSpaceClarifyingQuestion } from '@/lib/code-space/core';
 import type { AgentSSEEvent } from '@/lib/code-space/agent/types';
 import { normalizeCodeSpaceAgentMode, type CodeSpaceAgentMode } from '@/lib/code-space/agentModes';
 import { createAgentEvent, createDefaultToolRegistry, encodeSseEvent, getEventStore } from '@/lib/code-space/runtime';
 import type { AgentEventType } from '@/lib/code-space/runtime';
 import { createUnifiedDiff, validateSyntaxLightweight } from '@/lib/code-space/agent/editBlocks';
-import { writeAgentArtifact } from '@/lib/code-space/agent/artifacts';
 import { guardPath } from '@/lib/security/pathGuard';
-
-const execFileAsync = promisify(execFile);
 
 const MessageSchema = z.object({
   role: z.enum(['user', 'assistant', 'system', 'tool']),
