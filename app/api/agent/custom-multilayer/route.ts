@@ -7,10 +7,12 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const Body = z.object({
-  provider: z.enum(['openai', 'anthropic', 'gemini', 'foundry', 'grok']),
+  provider: z.enum(['openai', 'anthropic', 'gemini', 'foundry', 'grok', 'local']),
   model: z.string(),
   apiKey: z.string().optional(),
   endpoint: z.string().optional(),
+  temperature: z.number().min(0).max(2).optional(),
+  maxTokens: z.number().int().positive().optional(),
   prompt: z.string().min(4),
   intentSummary: z.string().optional(),
   answers: z
@@ -59,7 +61,7 @@ export async function POST(req: Request) {
 
   runCustomMultiLayerPlan(
     {
-      session: { id: cfg.provider, model: cfg.model, apiKey, endpoint },
+      session: { id: cfg.provider, model: cfg.model, apiKey, endpoint, temperature: cfg.temperature, maxTokens: cfg.maxTokens },
       prompt: cfg.prompt,
       intentSummary: cfg.intentSummary,
       answers: cfg.answers,

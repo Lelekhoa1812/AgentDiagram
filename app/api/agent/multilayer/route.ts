@@ -11,10 +11,12 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const Body = z.object({
-  provider: z.enum(['openai', 'anthropic', 'gemini', 'foundry', 'grok']),
+  provider: z.enum(['openai', 'anthropic', 'gemini', 'foundry', 'grok', 'local']),
   model: z.string(),
   apiKey: z.string().optional(),
   endpoint: z.string().optional(),
+  temperature: z.number().min(0).max(2).optional(),
+  maxTokens: z.number().int().positive().optional(),
   rootPath: z.string().optional(),
   allowSensitive: z.boolean().optional(),
   focus: z.string().default(''),
@@ -103,7 +105,7 @@ export async function POST(req: Request) {
   runMultiLayerPipeline(
     {
       repoSource,
-      session: { id: cfg.provider, model: cfg.model, apiKey, endpoint },
+      session: { id: cfg.provider, model: cfg.model, apiKey, endpoint, temperature: cfg.temperature, maxTokens: cfg.maxTokens },
       focus: cfg.focus,
       topK: cfg.topK,
       ignoredFolders: cfg.ignoredFolders,
