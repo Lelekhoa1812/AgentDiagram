@@ -78,6 +78,7 @@ import type { AgentSSEEvent } from '@/lib/code-space/agent/types';
 import { nameSessionAsync } from '@/lib/code-space/sessionNaming';
 import { useMentionIndex } from '@/lib/code-space/mentions/useMentionIndex';
 import type { SelectedMention } from '@/lib/code-space/mentions/types';
+import type { CodeSpacePromptOptions } from '@/lib/code-space/planBuild';
 
 interface FilePayload {
   path: string;
@@ -1114,6 +1115,29 @@ export function CodeSpaceWorkspace() {
     [ensureFileContent, loadFilePayload, tabs],
   );
 
+  const openPlanFile = useCallback(
+    async (filePath: string) => {
+      if (!activeProject) return;
+      await openFile(activeProject, filePath);
+    },
+    [activeProject, openFile],
+  );
+
+  useEffect(() => {
+    // Root Cause vs Logic: the plan card already falls back to dispatching a custom event when no direct callback is supplied,
+    // but the workspace never subscribed to that event, so "View plan..." was a dead click. Reuse the normal file opener here
+    // so plan artifacts open in the editor tab just like files from the tree, and keep the custom-event bridge for compatibility.
+    const onOpenPlanFile = (event: Event) => {
+      const customEvent = event as CustomEvent<{ filePath?: string }>;
+      const filePath = customEvent.detail?.filePath;
+      if (!filePath) return;
+      void openPlanFile(filePath);
+    };
+
+    window.addEventListener('code-space:open-plan-file', onOpenPlanFile as EventListener);
+    return () => window.removeEventListener('code-space:open-plan-file', onOpenPlanFile as EventListener);
+  }, [openPlanFile]);
+
   const saveActiveFile = useCallback(async () => {
     if (!activeProject?.rootPath || !activeTab) return;
     const payload = fileContents[activeTab.id];
@@ -1282,9 +1306,10 @@ export function CodeSpaceWorkspace() {
     [activeProject, activeSession, ensureSession, patchSession, refreshGitStatus],
   );
 
-  const handleRunAgent = useCallback(async (userPrompt: string, attachments: SelectedMention[] = []) => {
+  const handleRunAgent = useCallback(async (userPrompt: string, attachments: SelectedMention[] = [], options: CodeSpacePromptOptions = {}) => {
     const project = projects.find((item) => item.id === activeProjectId);
     if (!project || !project.rootPath) return;
+    const requestedMode = options.modeOverride ?? agentMode;
 
     const session = ensureSession();
     const now = Date.now();
@@ -1298,7 +1323,7 @@ export function CodeSpaceWorkspace() {
       ...session,
       title: session.messages.length ? session.title : userPrompt.slice(0, 56),
       status: 'running',
-      mode: agentMode,
+      mode: requestedMode,
       messages: [...session.messages, userMessage],
       toolCallCount: 0,
       clarifyingQuestions: [],
@@ -1380,7 +1405,7 @@ export function CodeSpaceWorkspace() {
           localTemperature: provider.provider === 'local' ? provider.localTemperature : undefined,
           localContextLength: provider.provider === 'local' ? provider.localContextLength : undefined,
           openTabs,
-          mode: agentMode,
+          mode: requestedMode,
           toolBudget: sessionWithPrompt.toolBudget,
           enableThinking,
           attachments: attachments.map((mention) => ({
@@ -2149,6 +2174,7 @@ export function CodeSpaceWorkspace() {
             onOpenAppPlanner={() => setMode('custom-prompt')}
             onAgentModeChange={handleAgentModeChange}
             canGenerateDiagram={!!activeProject}
+            onOpenPlanFile={openPlanFile}
             onSelectSession={(sessionId) => setActiveSessionId((current) => (current === sessionId ? null : sessionId))}
             onRenameSession={renameSession}
             onDeleteSession={(session) => void deleteSession(session)}

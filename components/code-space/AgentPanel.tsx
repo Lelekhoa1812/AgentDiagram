@@ -5,6 +5,7 @@ import { Bot, Loader2, Zap } from 'lucide-react';
 import type { CodeSpaceAgentSession, CodeSpaceMessage } from '@/lib/code-space/core';
 import type { CodeSpaceAgentMode } from '@/lib/code-space/agentModes';
 import { getCodeSpaceExecutionPolicyMeta, type CodeSpaceExecutionPolicy } from '@/lib/code-space/executionPolicy';
+import { buildPlanImplementationPrompt, type CodeSpacePromptOptions } from '@/lib/code-space/planBuild';
 import { AgentModeSelector } from './AgentModeSelector';
 import { ExecutionPolicySelector } from './ExecutionPolicySelector';
 import { CollapsibleSection } from './CollapsibleSection';
@@ -42,7 +43,7 @@ interface AgentPanelProps {
   onSelectSession: (sessionId: string | null) => void;
   onRenameSession: (session: CodeSpaceAgentSession) => void;
   onDeleteSession: (session: CodeSpaceAgentSession) => void;
-  onSubmitPrompt: (prompt: string, attachments?: SelectedMention[]) => void;
+  onSubmitPrompt: (prompt: string, attachments?: SelectedMention[], options?: CodeSpacePromptOptions) => void;
   onCancelRun: () => void;
   onAcceptDiff: (diffId: string) => void;
   onRejectDiff: (diffId: string) => void;
@@ -189,13 +190,9 @@ export function AgentPanel({
       return;
     }
     onAgentModeChange('code');
-    window.setTimeout(() => {
-      onSubmitPrompt([
-        `Build from the approved plan at ${filePath}.`,
-        '',
-        'Use the plan as the source of truth, implement its TODOs end-to-end, and run the validation strategy before summarising the result.',
-      ].join('\n'));
-    }, 50);
+    // Root Cause vs Logic: React state updates are asynchronous, so submitting after `onAgentModeChange('code')`
+    // could still call the previous Plan-mode callback and regenerate the plan. Pass an explicit mode override.
+    onSubmitPrompt(buildPlanImplementationPrompt(filePath), [], { modeOverride: 'code' });
   };
 
   return (

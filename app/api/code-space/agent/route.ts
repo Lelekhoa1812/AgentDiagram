@@ -7,6 +7,10 @@ import fg from 'fast-glob';
 import { classifyCodeSpaceIntent, type CodeSpaceClarifyingQuestion } from '@/lib/code-space/core';
 import type { AgentSSEEvent } from '@/lib/code-space/agent/types';
 import { normalizeCodeSpaceAgentMode, type CodeSpaceAgentMode } from '@/lib/code-space/agentModes';
+import {
+  buildPlanImplementationPrompt,
+  extractBuildPlanPath,
+} from '@/lib/code-space/planBuild';
 import { createAgentEvent, createDefaultToolRegistry, createFileCheckpoint, encodeSseEvent, getEventStore } from '@/lib/code-space/runtime';
 import type { AgentEventType } from '@/lib/code-space/runtime';
 import { createUnifiedDiff, validateSyntaxLightweight } from '@/lib/code-space/agent/editBlocks';
@@ -45,6 +49,8 @@ const BodySchema = z.object({
 type AgentRequest = z.infer<typeof BodySchema>;
 type ProviderId = AgentRequest['providerId'];
 type PlanClarificationAnswer = { question: string; answer: string };
+
+export { buildPlanImplementationPrompt, extractBuildPlanPath };
 
 interface AgentAttachment {
   kind: 'file' | 'folder';
@@ -171,11 +177,11 @@ export async function POST(req: NextRequest) {
           const shouldAskClarification = questions.length > 0 && clarificationAnswers.length === 0;
           if (shouldAskClarification) {
             emit({ type: 'clarifying_questions_created', questions });
-            await emitRuntime('plan.clarification.created', { questions: questions.map((question) => question.question) });
+            await emitRuntime('plan.updated', { phase: 'clarification', questions: questions.map((question) => question.question) });
             answer = buildPlanClarificationResponse(projectName, context, questions);
           } else {
             const planArtifact = await emitTool('write_plan_artifact', { projectName, prompt: planningPrompt, inspectedFiles: context.files.map((file) => file.path), answers: clarificationAnswers }, async () =>
-              writePlanArtifact(guarded.resolved, sessionId, projectName, planningPrompt, context, validation, clarificationAnswers),
+              writePlanArtifact(guarded.resolved, sessionId, projectName, planningPrompt, context, validation, clarificationAnswers, body.data),
             );
             filesChanged = [planArtifact.filePath];
             emit({ type: 'plan_markdown_created', filePath: planArtifact.filePath, content: planArtifact.content });
@@ -234,7 +240,7 @@ export async function POST(req: NextRequest) {
 
 export function buildPlan(mode: CodeSpaceAgentMode, intents: string[], prompt: string): string[] {
   if (mode === 'ask') return ['Understand the question', 'Gather relevant project context', 'Answer directly'];
-  if (mode === 'plan') return ['Understand the implementation goal', 'Inspect files and summarize existing behavior', 'Clarify critical decisions when needed', 'Write the final editable plan'];
+  if (mode === 'plan') return ['Map request intent and planning depth', 'Run multi-perspective repository exploration', 'Ask detailed MCQ decisions when execution strategy is ambiguous', 'Write an operator-ready implementation plan artifact'];
   if (isRefactorTask(prompt, intents)) return ['Inspect the current file, imports, exports, and references', 'Move or rename files on disk with shell-native operations instead of duplicating them', 'Search and repair every affected importer, export, and test', 'Run validation commands to confirm the refactor compiles cleanly'];
   const complex = shouldUseMultiAgent(prompt, intents);
   return ['Understand the requested change', complex ? 'Explore likely implementation paths' : 'Inspect relevant source and tests', 'Apply the smallest safe change', 'Report changed files and validation'];
@@ -247,6 +253,45 @@ export function buildClarifyingQuestions(prompt = '', intents: string[] = [], co
   const hasBackend = files.some((file) => /api|server|backend|route|controller|service/i.test(file));
   const hasFrontend = files.some((file) => /component|page|app|ui|style|css|tsx$/i.test(file));
   const featureLike = intents.some((intent) => ['feature_build', 'refactor', 'dependency/setup', 'styling/ui_change'].includes(intent));
+
+  if (featureLike || /plan|implement|build|improve|agent|workflow/i.test(text)) {
+    questions.push({
+      id: 'planning-depth',
+      question: 'How deep should Plan mode go before it writes the final plan artifact?',
+      choices: [
+        'Max-depth exploration (Recommended) — inspect broad context, summarize multiple implementation lanes, include risks, tests, and execution checkpoints.',
+        'Balanced product pass — inspect key files and write a practical implementation plan without exhaustive alternatives.',
+        'Fast tactical plan — focus only on the most likely files and keep the plan short.',
+      ],
+    });
+    questions.push({
+      id: 'build-execution',
+      question: 'What should the Build button do after a plan is approved?',
+      choices: [
+        'Implement from the plan immediately in Code mode (Recommended) — read the plan artifact, edit files, and validate.',
+        'Create a checkpointed patch proposal first — show diffs for review before applying.',
+        'Re-open planning only if the plan is stale — otherwise proceed to implementation.',
+      ],
+    });
+    questions.push({
+      id: 'agent-review-loop',
+      question: 'Which review loop should be represented in the plan before coding starts?',
+      choices: [
+        'Explorer → planner → reviewer → implementer (Recommended) — separate context gathering, execution design, risk review, and coding checkpoints.',
+        'Planner → implementer — keep the workflow lean while preserving validation steps.',
+        'Reviewer-heavy — emphasize pre-build critique, edge cases, and rollback criteria before code changes.',
+      ],
+    });
+    questions.push({
+      id: 'validation-gate',
+      question: 'What validation gate should Code mode treat as acceptance?',
+      choices: [
+        'Detected tests plus typecheck/build where available (Recommended) — run the strongest local checks discovered from the repo.',
+        'Focused tests only — prefer fast targeted checks around changed files.',
+        'Manual validation notes are acceptable — use when automated checks are missing or too expensive.',
+      ],
+    });
+  }
 
   if (featureLike && (hasBackend || hasFrontend) && !/only|frontend|backend|api|full[- ]?stack|end[- ]?to[- ]?end/i.test(text)) {
     questions.push({
@@ -284,7 +329,7 @@ export function buildClarifyingQuestions(prompt = '', intents: string[] = [], co
     });
   }
 
-  return questions.slice(0, 2);
+  return questions.slice(0, 6);
 }
 
 function describeModeContract(mode: CodeSpaceAgentMode): string {
@@ -331,7 +376,10 @@ function normalizeRelativePath(filePath: string): string {
 }
 
 async function collectProjectContext(root: string, prompt: string, openTabs: string[], attachments: AgentAttachment[] = []): Promise<ContextSearchResult> {
-  const candidates = await fg(CONTEXT_GLOBS, { cwd: root, onlyFiles: true, dot: true, absolute: false, unique: true });
+  const discoveredCandidates = await fg(CONTEXT_GLOBS, { cwd: root, onlyFiles: true, dot: true, absolute: false, unique: true });
+  const candidates = [...discoveredCandidates];
+  const buildPlanPath = extractBuildPlanPath(prompt);
+  if (buildPlanPath && !candidates.includes(buildPlanPath)) candidates.unshift(buildPlanPath);
   const terms = promptTerms(prompt);
   const attachedFiles = new Set(attachments.filter((item) => item.kind === 'file').map((item) => normalizeRelativePath(item.relativePath)));
   const attachedFolders = attachments.filter((item) => item.kind === 'folder').map((item) => normalizeRelativePath(item.relativePath));
@@ -346,6 +394,9 @@ async function collectProjectContext(root: string, prompt: string, openTabs: str
       score += amount;
       reasons.push(reason);
     };
+    // Root Cause vs Logic: Build-from-plan prompts point at `.agent/plans/*`, but the regular repo scan hides `.agent/**`.
+    // Load the approved plan explicitly so Code mode implements the artifact instead of falling back into another plan-shaped response.
+    add(buildPlanPath === normalizedFile ? 500 : 0, 'approved plan artifact');
     add(attachedFiles.has(normalizedFile) ? 150 : 0, '@File exact scope');
     const folderScope = attachedFolders.find((folder) => normalizedFile === folder || normalizedFile.startsWith(`${folder}/`));
     add(folderScope ? 120 - Math.min(normalizedFile.split('/').length, 12) : 0, folderScope ? `@Folder scope: ${folderScope}` : '');
@@ -380,7 +431,7 @@ async function collectProjectContext(root: string, prompt: string, openTabs: str
       });
     } catch {}
   }
-  return { filesConsidered: candidates.length, files, terms, omittedRelevantFiles: [] };
+  return { filesConsidered: discoveredCandidates.length, files, terms, omittedRelevantFiles: [] };
 }
 
 function lowerContentHint(filePath: string): string {
@@ -492,13 +543,84 @@ async function exists(filePath: string): Promise<boolean> {
   }
 }
 
-async function writePlanArtifact(root: string, sessionId: string, projectName: string, prompt: string, context: ContextSearchResult, validation: Awaited<ReturnType<typeof detectValidationCommands>>, answers: PlanClarificationAnswer[] = []): Promise<{ filePath: string; content: string }> {
+async function writePlanArtifact(root: string, sessionId: string, projectName: string, prompt: string, context: ContextSearchResult, validation: Awaited<ReturnType<typeof detectValidationCommands>>, answers: PlanClarificationAnswer[] = [], request?: AgentRequest): Promise<{ filePath: string; content: string }> {
   const filePath = `.agent/plans/${sessionId.replace(/[^a-zA-Z0-9_.-]+/g, '-')}.md`;
   const absolute = path.join(root, filePath);
-  const content = buildStrategyDocument({ projectName, prompt, context, validation, codeMode: false, answers });
+  const fallback = buildStrategyDocument({ projectName, prompt, context, validation, codeMode: false, answers });
+  const content = request
+    ? await buildModelBackedStrategyDocument(root, { projectName, prompt, context, validation, answers, fallback, request }).catch(() => fallback)
+    : fallback;
   await fs.mkdir(path.dirname(absolute), { recursive: true });
   await fs.writeFile(absolute, content, 'utf8');
   return { filePath, content };
+}
+
+// Motivation vs Logic: plan artifacts need to be authored by the selected model from real repository evidence, not assembled as a shallow template.
+// The deterministic document remains only as a safe fallback when the provider is unavailable.
+async function buildModelBackedStrategyDocument(
+  root: string,
+  input: {
+    projectName: string;
+    prompt: string;
+    context: ContextSearchResult;
+    validation: Awaited<ReturnType<typeof detectValidationCommands>>;
+    answers: PlanClarificationAnswer[];
+    fallback: string;
+    request: AgentRequest;
+  },
+): Promise<string> {
+  const credentials = await resolveProviderCredentials(root, input.request);
+  if (!credentials.apiKey && input.request.providerId !== 'local') return input.fallback;
+  const system = [
+    'You are Code Space Plan Mode: a senior implementation planner for a coding agent.',
+    'Write markdown only. Do not include code fences around the whole document.',
+    'Create an operator-ready implementation plan that a Code mode agent can execute without re-planning from scratch.',
+    'Ground every claim in the provided repository evidence. Do not invent files or pretend separate agents actually ran; represent them as review lanes or agent perspectives.',
+    'Include detailed MCQ decisions and selected answers when provided.',
+    'Prefer concrete file paths, sequencing, checkpoints, tests, fallback behavior, and acceptance criteria over generic advice.',
+  ].join('\n');
+  const evidence = input.context.files
+    .slice(0, 16)
+    .map((file) => [`--- FILE ${file.path} (${file.summary}) ---`, file.content.slice(0, 10_000), file.truncated ? '\n[TRUNCATED]' : ''].join('\n'))
+    .join('\n\n');
+  const user = [
+    `Project: ${input.projectName}`,
+    `Request: ${input.prompt}`,
+    '',
+    'Clarified MCQ decisions:',
+    input.answers.length ? input.answers.map((answer) => `- ${answer.question}\n  Selected: ${answer.answer}`).join('\n') : '- No answers were provided; encode assumptions explicitly.',
+    '',
+    'Validation commands discovered:',
+    ...input.validation.commands.map((command) => `- ${command.command} — ${command.reason}`),
+    '',
+    'Required markdown shape:',
+    '# Code Space Plan — <project>',
+    '## Request',
+    '## Planning Decisions And Assumptions',
+    '## Multi-Agent Exploration Brief',
+    'Include review lanes for repository mapper, implementation architect, test strategist, and risk reviewer.',
+    '## Execution Blueprint',
+    'Give ordered coding checkpoints with exact files/areas to inspect or edit.',
+    '## File-Level Change Plan',
+    '## Validation Plan',
+    '## Risks, Rollback, And Edge Cases',
+    '## Definition Of Done',
+    '## Build Instructions',
+    'Say explicitly that Build must read this plan artifact first and then run Code mode implementation.',
+    '',
+    'Repository evidence:',
+    evidence || '(No readable evidence was found.)',
+  ].join('\n');
+  const text = await chatWithRetry(
+    { id: input.request.providerId, model: input.request.model, endpoint: credentials.endpoint, apiKey: credentials.apiKey || 'local' },
+    [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+  );
+  const trimmed = text.trim();
+  if (!trimmed || !trimmed.startsWith('#')) return input.fallback;
+  return trimmed;
 }
 
 async function buildAskResponse(root: string, projectName: string, prompt: string, context: ContextSearchResult, validation: Awaited<ReturnType<typeof detectValidationCommands>>, request: AgentRequest): Promise<string> {
@@ -624,9 +746,23 @@ function buildStrategyDocument({ projectName, prompt, context, validation, codeM
     '',
     ...noteSection,
     ...clarifiedSection,
+    '## Planning questions and assumptions',
+    ...(answers.length
+      ? answers.map((answer) => `- **Decision:** ${answer.question} **Selected:** ${answer.answer}`)
+      : [
+          '- **Assumption:** No MCQ answers were supplied, so Code mode should preserve the narrowest safe scope and pause only on conflicts that would change product behavior.',
+          '- **Assumption:** The implementation agent should read this plan artifact before editing and treat repository evidence as stronger than generic workflow rules.',
+        ]),
+    '',
     '## Context already inspected',
     'The agent inspected the repository files below before writing this plan. Each item is summarized by implementation responsibility rather than internal ranking metadata.',
     ...evidence,
+    '',
+    '## Multi-Agent Exploration Brief',
+    '- **Repository mapper lane:** Re-open the listed source files, confirm the request path through UI/API/runtime boundaries, and record any missing files before editing.',
+    '- **Implementation architect lane:** Convert the strategy into checkpointed file changes that reuse existing utilities, state transitions, event types, and validation managers.',
+    '- **Test strategist lane:** Add or update focused tests before production changes, then run the strongest detected validation commands after each correction pass.',
+    '- **Risk reviewer lane:** Check for stale plan assumptions, hidden generated files, provider/network fallbacks, and user-facing failure modes before marking work complete.',
     '',
     '## Current behavior inferred from the codebase',
     ...architecture,
@@ -634,7 +770,13 @@ function buildStrategyDocument({ projectName, prompt, context, validation, codeM
     '## Recommended implementation strategy',
     ...buildRecommendedStrategy(prompt, context),
     '',
-    '## TODO tasks',
+    '## Execution Blueprint',
+    '- Checkpoint 1: Re-open the plan, target files, and nearest tests so implementation starts from fresh evidence rather than this summarized artifact alone.',
+    '- Checkpoint 2: Add failing tests or update existing tests around the workflow seam that will change.',
+    '- Checkpoint 3: Implement the smallest modular change that satisfies the plan while preserving existing service boundaries.',
+    '- Checkpoint 4: Run validation, repair failures from root cause, and document any residual risk in the final response.',
+    '',
+    '## File-Level Change Plan',
     ...implementationTasks.map((task, index) => `${index + 1}. ${task}`),
     '',
     '## Testing and validation strategy',
@@ -651,6 +793,11 @@ function buildStrategyDocument({ projectName, prompt, context, validation, codeM
     '- The plan can be opened directly in the Code Space editor through View plan.',
     '- Code mode can use this plan as the source of truth and apply checkpointed changes with validation.',
     '- Validation passes, or remaining failures are explicitly summarized with next actions.',
+    '',
+    '## Build Instructions',
+    '- Build must switch to Code mode explicitly; do not submit another Plan-mode request from this button.',
+    '- Code mode must read this plan artifact first, load the referenced source/test files, implement the ordered tasks, and validate before summarizing.',
+    '- If the workspace has drifted since planning, prefer the current code and explain the adjustment instead of regenerating a dummy plan.',
     '',
     codeMode ? '## Code behavior\nChanges should be applied through checkpointed Code mode.\n' : '## Plan behavior\nThis file is an editable planning artifact. Review or edit it before choosing Build.\n',
   ].join('\n');
