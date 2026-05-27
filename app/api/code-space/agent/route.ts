@@ -10,6 +10,7 @@ import { normalizeCodeSpaceAgentMode, type CodeSpaceAgentMode } from '@/lib/code
 import { createAgentEvent, createDefaultToolRegistry, createFileCheckpoint, encodeSseEvent, getEventStore } from '@/lib/code-space/runtime';
 import type { AgentEventType } from '@/lib/code-space/runtime';
 import { createUnifiedDiff, validateSyntaxLightweight } from '@/lib/code-space/agent/editBlocks';
+import { chatWithRetry } from '@/lib/agent/providers';
 import { guardPath } from '@/lib/security/pathGuard';
 
 const MessageSchema = z.object({
@@ -95,16 +96,12 @@ export async function POST(req: NextRequest) {
   const { messages, projectName, projectRoot, sessionId, toolBudget, openTabs, attachments } = body.data;
   const mode = normalizeCodeSpaceAgentMode(body.data.mode);
   const latestUserMessage = [...messages].reverse().find((message) => message.role === 'user');
-  if (!latestUserMessage) {
-    return Response.json({ error: 'A user message is required to start the agent.' }, { status: 400 });
-  }
+  if (!latestUserMessage) return Response.json({ error: 'A user message is required to start the agent.' }, { status: 400 });
 
   const intents = classifyCodeSpaceIntent(latestUserMessage.content);
   const registry = createDefaultToolRegistry();
   const guarded = guardPath(projectRoot);
-  if (!guarded.ok) {
-    return Response.json({ error: guarded.reason ?? 'Invalid project path' }, { status: 400 });
-  }
+  if (!guarded.ok) return Response.json({ error: guarded.reason ?? 'Invalid project path' }, { status: 400 });
 
   const runId = `run:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
   const encoder = new TextEncoder();
@@ -112,9 +109,7 @@ export async function POST(req: NextRequest) {
 
   const stream = new ReadableStream({
     async start(controller) {
-      const emit = (event: AgentSSEEvent) => {
-        controller.enqueue(encoder.encode(encodeSseEvent(event)));
-      };
+      const emit = (event: AgentSSEEvent) => controller.enqueue(encoder.encode(encodeSseEvent(event)));
       const emitRuntime = async (type: AgentEventType, payload: unknown) => {
         const event = await eventStore.append(createAgentEvent({ type, sessionId, runId, projectId: projectName, payload }));
         emit({ type: 'structured_event', event });
@@ -169,23 +164,14 @@ export async function POST(req: NextRequest) {
           emit({ type: 'plan_markdown_created', filePath: planArtifact.filePath, content: planArtifact.content });
           answer = buildPlanResponse(projectName, planArtifact.filePath, context, validation);
         } else {
-          const proposal = await emitTool('autonomous_patch_planner', { prompt: latestUserMessage.content, contextFiles: context.files.map((file) => file.path), folderScopes: attachments.filter((item) => item.kind === 'folder').map((item) => item.relativePath) }, async () =>
+          const proposal = await emitTool('autonomous_patch_planner', { provider: body.data.providerId, model: body.data.model, prompt: latestUserMessage.content, contextFiles: context.files.map((file) => file.path), folderScopes: attachments.filter((item) => item.kind === 'folder').map((item) => item.relativePath) }, async () =>
             proposeAutonomousPatch(guarded.resolved, latestUserMessage.content, context, body.data),
           );
           const applied = await emitTool('apply_autonomous_patch', { files: proposal.files.map((file) => file.path), checkpointed: true }, async () =>
             applyGeneratedPatch({ root: guarded.resolved, projectId: projectName, runId, files: proposal.files }),
           );
           for (const file of proposal.files) {
-            emit({
-              type: 'diff_proposed',
-              diffId: `patch:${runId}:${file.path}`,
-              filePath: file.path,
-              oldContent: file.beforeContent,
-              newContent: file.afterContent,
-              explanation: file.explanation,
-              unifiedDiff: file.unifiedDiff,
-              autoApplied: true,
-            });
+            emit({ type: 'diff_proposed', diffId: `patch:${runId}:${file.path}`, filePath: file.path, oldContent: file.beforeContent, newContent: file.afterContent, explanation: file.explanation, unifiedDiff: file.unifiedDiff, autoApplied: true });
             await emitRuntime('patch.proposed', { path: file.path, explanation: file.explanation, autoApplied: true });
           }
           for (const file of applied.files) {
@@ -208,10 +194,7 @@ export async function POST(req: NextRequest) {
           id: `validation:${runId}:strategy`,
           command: validation.commands.map((command) => command.command).join(', ') || 'validation strategy discovery',
           status: validationStatus,
-          output:
-            mode === 'code' && filesChanged.length
-              ? 'Autonomous patch was applied with checkpoint protection. Run validation commands against the updated workspace.'
-              : `Detected ${validation.commands.length} validation command(s).`,
+          output: mode === 'code' && filesChanged.length ? 'Changes were applied with checkpoint protection. Run validation commands against the updated workspace.' : `Detected ${validation.commands.length} validation command(s).`,
         });
         await emitRuntime('validation.completed', { status: validationStatus, validation });
         await emitRuntime('run.completed', { status: 'completed', filesChanged });
@@ -227,11 +210,7 @@ export async function POST(req: NextRequest) {
   });
 
   return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-    },
+    headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
   });
 }
 
@@ -239,12 +218,7 @@ export function buildPlan(mode: CodeSpaceAgentMode, intents: string[], prompt: s
   if (mode === 'ask') return ['Classify read-only request', 'Autonomously discover relevant context', 'Answer with evidence and no file mutation'];
   if (mode === 'plan') return ['Classify implementation intent', 'Autonomously discover files, folders, and validation surfaces', 'Write a reusable planning artifact'];
   const complex = shouldUseMultiAgent(prompt, intents);
-  return [
-    'Classify implementation request and blast radius',
-    complex ? 'Run multi-agent style exploration checklist' : 'Autonomously explore source, tests, configs, and mentioned folders',
-    'Let the agent choose target files and prepare the smallest safe patch',
-    'Apply generated changes with checkpoint protection and emit diffs for visibility',
-  ];
+  return ['Understand the requested change', complex ? 'Explore likely implementation paths' : 'Inspect relevant source and tests', 'Apply the smallest safe change', 'Report changed files and validation'];
 }
 
 export function buildClarifyingQuestions(): CodeSpaceClarifyingQuestion[] {
@@ -254,7 +228,7 @@ export function buildClarifyingQuestions(): CodeSpaceClarifyingQuestion[] {
 function describeModeContract(mode: CodeSpaceAgentMode): string {
   if (mode === 'ask') return 'Ask mode is read-only: inspect, explain, and cite evidence without creating patches.';
   if (mode === 'plan') return 'Plan mode creates a markdown implementation plan artifact and does not edit product source files.';
-  return 'Code mode autonomously explores context, chooses target files, applies checkpointed changes, and emits diffs plus file_applied events.';
+  return 'Code mode explores context, chooses target files, applies checkpointed changes, and summarizes the result conversationally.';
 }
 
 function promptTerms(prompt: string): string[] {
@@ -339,9 +313,7 @@ async function detectValidationCommands(root: string): Promise<{ commands: Array
 }
 
 async function findFirst(root: string, relativePaths: string[]): Promise<string | null> {
-  for (const relativePath of relativePaths) {
-    if (await exists(path.join(root, relativePath))) return relativePath.includes('/') ? relativePath : `./${relativePath}`.replace(/^\.\//, '');
-  }
+  for (const relativePath of relativePaths) if (await exists(path.join(root, relativePath))) return relativePath.includes('/') ? relativePath : `./${relativePath}`.replace(/^\.\//, '');
   return null;
 }
 
@@ -379,19 +351,38 @@ async function writePlanArtifact(root: string, sessionId: string, projectName: s
 }
 
 function buildAskResponse(projectName: string, prompt: string, context: ContextSearchResult, validation: Awaited<ReturnType<typeof detectValidationCommands>>): string {
-  return ['Mode: Ask', '', `For ${projectName}, I autonomously inspected relevant project context without mutating files.`, '', 'Evidence reviewed:', ...(context.files.length ? context.files.slice(0, 12).map((file) => `- ${file.path}`) : ['- No readable source files were selected.']), '', `Request interpreted as: ${prompt}`, '', `Available validation: ${validation.commands.map((command) => command.command).join(', ') || 'none detected'}.`, '', 'Ask mode is read-only. Switch to Plan or Code for applied changes.'].join('\n');
+  return ['I looked through the relevant project files.', '', context.files.length ? `Reviewed ${context.files.length} file${context.files.length === 1 ? '' : 's'} in ${projectName}.` : `I could not find readable project files for ${projectName}.`, '', `Validation available: ${validation.commands.map((command) => command.command).join(', ') || 'manual review'}.`].join('\n');
 }
 
 function buildPlanResponse(projectName: string, planPath: string, context: ContextSearchResult, validation: Awaited<ReturnType<typeof detectValidationCommands>>): string {
-  return ['Mode: Plan', '', `Created an implementation plan for ${projectName}:`, `- ${planPath}`, '', 'The plan includes autonomous context discovery, DoDs, implementation sequence, validation gates, and rollback expectations.', '', `Context files considered: ${context.files.length}. Validation commands: ${validation.commands.length}.`].join('\n');
+  return [`I created a plan for ${projectName}.`, '', `Plan: ${planPath}`, `Reviewed ${context.files.length} relevant file${context.files.length === 1 ? '' : 's'}.`, `Validation: ${validation.commands.map((command) => command.command).join(', ') || 'manual review'}.`].join('\n');
 }
 
 function buildCodeResponse(projectName: string, files: ProposedPatchFile[], validation: Awaited<ReturnType<typeof detectValidationCommands>>, summary?: string, checkpointRef?: string): string {
-  return ['Mode: Code', '', `Applied ${files.length} autonomous, checkpointed change(s) for ${projectName}.`, summary ? `\nPlanner summary: ${summary}\n` : '', 'Changed files:', ...files.map((file) => `- ${file.path}: ${file.explanation}`), '', checkpointRef ? `Checkpoint: ${checkpointRef}` : 'Checkpoint created before write.', '', `Run validation: ${validation.commands.map((command) => command.command).join(', ') || 'manual review'}.`].join('\n');
+  if (!files.length) {
+    return ['I could not safely make a code change yet.', '', userFacingPlannerSummary(summary), '', 'No files were changed.'].filter(Boolean).join('\n');
+  }
+  return [
+    `Done — I updated ${files.length} file${files.length === 1 ? '' : 's'} in ${projectName}.`,
+    '',
+    'Changed:',
+    ...files.map((file) => `- ${file.path}: ${file.explanation}`),
+    '',
+    checkpointRef ? 'A rollback checkpoint was created.' : 'The change was checkpointed before writing.',
+    `Next: ${validation.commands.map((command) => command.command).join(', ') || 'run your usual validation'}.`,
+  ].join('\n');
+}
+
+function userFacingPlannerSummary(summary?: string): string {
+  if (!summary) return 'The planner did not return a concrete edit.';
+  if (/OpenAI-compatible|Model-backed|404|Resource not found|API key|rate limit|cooling down|failed/i.test(summary)) {
+    return 'The selected model provider was not available for this run, so I stopped instead of creating unrelated fallback files.';
+  }
+  return summary;
 }
 
 async function proposeAutonomousPatch(root: string, prompt: string, context: ContextSearchResult, request: AgentRequest): Promise<{ summary: string; files: ProposedPatchFile[] }> {
-  const modelResult = await callPatchPlannerModel(root, prompt, context, request).catch((error) => deterministicPlannerResult(root, prompt, context, `Model-backed planning failed: ${error instanceof Error ? error.message : String(error)}`));
+  const modelResult = await callPatchPlannerModel(root, prompt, context, request).catch((error) => deterministicPlannerResult(error));
   const files: ProposedPatchFile[] = [];
   for (const file of modelResult.files ?? []) {
     const relativePath = normalizeRelativePath(file.path);
@@ -407,57 +398,46 @@ async function proposeAutonomousPatch(root: string, prompt: string, context: Con
     if (beforeContent === file.afterContent) continue;
     const diagnostics = validateSyntaxLightweight(relativePath, file.afterContent);
     if (diagnostics.length) throw new Error(`Generated patch for ${relativePath} failed syntax pre-validation: ${diagnostics[0].message}`);
-    files.push({ path: relativePath, beforeContent, afterContent: file.afterContent, explanation: file.explanation || modelResult.summary || 'Autonomous code patch', unifiedDiff: createUnifiedDiff(relativePath, beforeContent, file.afterContent) });
+    files.push({ path: relativePath, beforeContent, afterContent: file.afterContent, explanation: file.explanation || modelResult.summary || 'Code change', unifiedDiff: createUnifiedDiff(relativePath, beforeContent, file.afterContent) });
   }
-  if (files.length) return { summary: modelResult.summary || 'Autonomous patch planner completed.', files };
-  const fallback = await deterministicPlannerResult(root, prompt, context, modelResult.summary || 'Planner produced no file edits; deterministic fallback generated a project strategy artifact.');
-  return proposeAutonomousPatchFromModelResult(root, fallback);
-}
-
-async function proposeAutonomousPatchFromModelResult(root: string, modelResult: PatchModelResult): Promise<{ summary: string; files: ProposedPatchFile[] }> {
-  const files: ProposedPatchFile[] = [];
-  for (const file of modelResult.files) {
-    const relativePath = normalizeRelativePath(file.path);
-    const target = path.resolve(root, relativePath);
-    if (target !== root && !target.startsWith(`${root}${path.sep}`)) continue;
-    let beforeContent = '';
-    try {
-      beforeContent = await fs.readFile(target, 'utf8');
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    }
-    files.push({ path: relativePath, beforeContent, afterContent: file.afterContent, explanation: file.explanation, unifiedDiff: createUnifiedDiff(relativePath, beforeContent, file.afterContent) });
-  }
-  return { summary: modelResult.summary, files };
+  return { summary: modelResult.summary || 'Planning completed.', files };
 }
 
 async function callPatchPlannerModel(root: string, prompt: string, context: ContextSearchResult, request: AgentRequest): Promise<PatchModelResult> {
   const credentials = await resolveProviderCredentials(root, request);
-  if (!credentials.apiKey && request.providerId !== 'local') return deterministicPlannerResult(root, prompt, context, `No ${request.providerId} API key was found in UI config, process.env, .env.local, .env, or common backend env files; deterministic fallback applied instead.`);
-  const system = ['You are Code Space Autonomous Patch Planner.', 'You choose files yourself from repository evidence. Do not ask the user to provide an exact @File.', 'If @Folder context is present, treat it as an exact directory scope and prefer files inside it.', 'Return only JSON. No markdown. No code fences.', 'Schema: {"summary":"string","files":[{"path":"relative/path","afterContent":"complete full file content","explanation":"why changed"}],"validationCommands":["optional command"]}.', 'Rules: preserve existing style, keep the smallest safe change, and include complete afterContent for every changed or new file.'].join('\n');
+  if (!credentials.apiKey && request.providerId !== 'local') return { summary: 'The selected model provider is not configured yet.', files: [] };
+  const system = ['You are Code Space Autonomous Patch Planner.', 'Choose files from repository evidence. Do not ask the user to provide an exact @File.', 'Return only JSON. No markdown. No code fences.', 'Schema: {"summary":"string","files":[{"path":"relative/path","afterContent":"complete full file content","explanation":"why changed"}],"validationCommands":["optional command"]}.', 'Preserve existing style, keep the smallest safe change, and include complete afterContent for every changed or new file.'].join('\n');
   const contextBlock = context.files.map((file) => [`--- FILE ${file.path} (${file.reasons.join(', ') || 'selected'}) ---`, file.content, file.truncated ? '\n[TRUNCATED]' : ''].join('\n')).join('\n\n');
   const user = [`Task: ${prompt}`, '', 'Repository evidence:', contextBlock].join('\n');
-  if (request.providerId === 'anthropic') {
-    const response = await fetch(credentials.endpoint ?? request.endpoint ?? 'https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': credentials.apiKey, 'anthropic-version': '2023-06-01' }, body: JSON.stringify({ model: request.model, max_tokens: 8096, system, messages: [{ role: 'user', content: user }] }) });
-    if (!response.ok) throw new Error(`Anthropic patch planner failed: ${response.status} ${await response.text()}`);
-    const json = (await response.json()) as { content?: Array<{ type: string; text?: string }> };
-    return parsePlannerJson(json.content?.map((block) => block.text ?? '').join('\n') ?? '');
-  }
-  const baseUrl = request.providerId === 'local' ? request.endpoint || credentials.endpoint || 'http://localhost:11434/v1' : request.endpoint || credentials.endpoint || 'https://api.openai.com/v1';
-  const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', ...(credentials.apiKey ? { authorization: `Bearer ${credentials.apiKey}` } : {}) }, body: JSON.stringify({ model: request.model, temperature: request.localTemperature ?? 0.2, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], response_format: { type: 'json_object' } }) });
-  if (!response.ok) throw new Error(`OpenAI-compatible patch planner failed: ${response.status} ${await response.text()}`);
-  const json = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
-  return parsePlannerJson(json.choices?.[0]?.message?.content ?? '');
+  const text = await chatWithRetry(
+    { id: request.providerId, model: request.model, endpoint: credentials.endpoint, apiKey: credentials.apiKey || 'local' },
+    [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+  );
+  return parsePlannerJson(text);
 }
 
 async function resolveProviderCredentials(root: string, request: AgentRequest): Promise<{ apiKey: string; endpoint?: string; source: string }> {
-  if (request.apiKey) return { apiKey: request.apiKey, endpoint: request.endpoint, source: 'ui' };
   const env = await loadWorkspaceEnv(root);
+  const endpoint = request.endpoint ?? providerEndpointFromEnv(request.providerId, env);
+  if (request.apiKey) return { apiKey: request.apiKey, endpoint, source: 'ui' };
   for (const key of providerApiKeyNames(request.providerId)) {
     const value = env[key] ?? process.env[key];
-    if (value) return { apiKey: value, endpoint: request.endpoint ?? env.OPENAI_BASE_URL ?? env.ANTHROPIC_BASE_URL ?? env.LOCAL_MODEL_BASE_URL, source: key };
+    if (value) return { apiKey: value, endpoint, source: key };
   }
-  return { apiKey: '', endpoint: request.endpoint ?? env.OPENAI_BASE_URL ?? env.ANTHROPIC_BASE_URL ?? env.LOCAL_MODEL_BASE_URL, source: 'missing' };
+  return { apiKey: '', endpoint, source: 'missing' };
+}
+
+function providerEndpointFromEnv(provider: ProviderId, env: Record<string, string>): string | undefined {
+  const read = (keys: string[]) => keys.map((key) => env[key] ?? process.env[key]).find(Boolean);
+  if (provider === 'foundry') return read(['FOUNDRY_ENDPOINT', 'AZURE_AI_FOUNDRY_ENDPOINT', 'AZURE_OPENAI_ENDPOINT', 'AZURE_OPENAI_BASE_URL']);
+  if (provider === 'anthropic') return read(['ANTHROPIC_BASE_URL', 'ANTHROPIC_ENDPOINT']);
+  if (provider === 'gemini') return read(['GEMINI_BASE_URL', 'GOOGLE_GENERATIVE_AI_BASE_URL']);
+  if (provider === 'grok') return read(['XAI_BASE_URL', 'GROK_BASE_URL']);
+  if (provider === 'local') return read(['LOCAL_MODEL_BASE_URL', 'LOCAL_BASE_URL', 'OLLAMA_BASE_URL', 'LM_STUDIO_BASE_URL', 'OPENAI_BASE_URL']);
+  return read(['OPENAI_BASE_URL', 'OPENAI_ENDPOINT']);
 }
 
 function providerApiKeyNames(provider: ProviderId): string[] {
@@ -465,8 +445,8 @@ function providerApiKeyNames(provider: ProviderId): string[] {
   if (provider === 'openai') return ['OPENAI_API_KEY'];
   if (provider === 'gemini') return ['GOOGLE_GENERATIVE_AI_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY'];
   if (provider === 'grok') return ['XAI_API_KEY', 'GROK_API_KEY'];
-  if (provider === 'foundry') return ['FOUNDRY_API_KEY', 'AZURE_OPENAI_API_KEY', 'OPENAI_API_KEY'];
-  return ['LOCAL_API_KEY', 'OLLAMA_API_KEY'];
+  if (provider === 'foundry') return ['FOUNDRY_API_KEY', 'AZURE_OPENAI_API_KEY', 'AZURE_AI_FOUNDRY_API_KEY'];
+  return ['LOCAL_API_KEY', 'OLLAMA_API_KEY', 'LM_STUDIO_API_KEY'];
 }
 
 async function loadWorkspaceEnv(root: string): Promise<Record<string, string>> {
@@ -496,21 +476,13 @@ function parseEnv(raw: string): Record<string, string> {
   return env;
 }
 
-async function deterministicPlannerResult(root: string, prompt: string, context: ContextSearchResult, reason: string): Promise<PatchModelResult> {
-  const validation = await detectValidationCommands(root);
-  const files: PatchModelResult['files'] = [{ path: 'docs/agentic-web-search-evidence-strategy.md', afterContent: buildStrategyDocument({ projectName: path.basename(root), prompt, context, validation, codeMode: true, reason }), explanation: 'Create an implementation strategy artifact covering web search, evidence reasoning, and multi-agent analysis loops.' }];
-  if (context.files.some((file) => file.path.startsWith('backend/api/') && file.path.endsWith('.py'))) {
-    files.push({ path: 'backend/api/agentic_research_strategy.py', afterContent: buildPythonResearchStrategyModule(), explanation: 'Add a dependency-free Python strategy module for evidence-first multi-agent research workflow planning.' });
-  }
-  return { summary: `${reason} Deterministic fallback generated concrete project files instead of returning a dummy message.`, files };
+async function deterministicPlannerResult(error: unknown): Promise<PatchModelResult> {
+  const message = error instanceof Error ? error.message : String(error);
+  return { summary: message, files: [], unableReason: message };
 }
 
 function buildStrategyDocument({ projectName, prompt, context, validation, codeMode, reason }: { projectName: string; prompt: string; context: ContextSearchResult; validation: Awaited<ReturnType<typeof detectValidationCommands>>; codeMode: boolean; reason?: string }): string {
-  return [`# Agentic Web Search and Evidence Reasoning Strategy — ${projectName}`, '', '## Request', prompt, '', reason ? `## Planner note\n${reason}\n` : '', '## Evidence inspected', ...(context.files.length ? context.files.map((file) => `- ${file.path} — ${file.reasons.join(', ') || 'selected'}; ${file.lineCount} lines${file.truncated ? '; truncated' : ''}`) : ['- No readable files were discovered.']), '', '## Gaps to close', '- No central evidence ledger for claims, sources, confidence, and assumption status.', '- No explicit before-answer assumption gate that forces the agent to verify unstable facts before responding.', '- No multi-agent analysis loop for Explorer / Critic / Synthesizer roles around web-search strategy tasks.', '- No normalized search plan that separates broad discovery, targeted retrieval, source-quality scoring, and contradiction checks.', '- No durable artifact that records why a source was accepted or rejected.', '', '## Target workflow', '1. Decompose the user task into claims, unknowns, and assumptions.', '2. Run parallel explorer passes for codebase evidence, web evidence, and risk/contradiction checks.', '3. Require a critic pass to reject unsupported claims before final synthesis.', '4. Store every answerable claim with evidence, confidence, source recency, and verification status.', '5. Answer only after assumptions are explicitly marked verified, rejected, or unresolved.', '', '## Implementation blueprint', '- Add an evidence ledger type with claim, source, quote/summary, confidence, and assumption flag fields.', '- Add a search strategy planner that emits broad queries, targeted queries, and verification queries.', '- Add a source-quality scorer that prefers primary docs, official APIs, papers, changelogs, and project files.', '- Add a multi-agent loop: three explorers collect independent evidence; one critic compares contradictions; one synthesizer writes the response.', '- Persist large logs/search results as artifacts and cite bounded ranges rather than injecting full outputs.', '', '## Validation commands', ...(validation.commands.length ? validation.commands.map((command) => `- ${command.command} — ${command.reason}`) : ['- manual review']), '', codeMode ? '## Applied behavior\nThis file was generated by Code mode as an immediate checkpointed workspace change.\n' : '## Plan behavior\nThis file is a planning artifact.\n'].join('\n');
-}
-
-function buildPythonResearchStrategyModule(): string {
-  return `"""Evidence-first multi-agent research workflow primitives.\n\nThis module is dependency-free so it can be imported by backend services, tests,\nor future API routes without adding package requirements. It models the workflow\nneeded for optimized web searching, assumption checks, and evidence reasoning.\n"""\n\nfrom __future__ import annotations\n\nfrom dataclasses import dataclass, field\nfrom typing import Literal\n\n\nConfidence = Literal["low", "medium", "high"]\nAgentRole = Literal["codebase_explorer", "web_explorer", "contradiction_critic", "synthesizer"]\n\n\n@dataclass(frozen=True)\nclass EvidenceClaim:\n    claim: str\n    source: str\n    confidence: Confidence\n    assumption_status: Literal["verified", "rejected", "unresolved"]\n    rationale: str\n\n\n@dataclass(frozen=True)\nclass SearchPass:\n    role: AgentRole\n    objective: str\n    queries: tuple[str, ...]\n    required_outputs: tuple[str, ...] = (\n        "evidence claims",\n        "source quality notes",\n        "unresolved assumptions",\n    )\n\n\n@dataclass\nclass ResearchStrategy:\n    user_goal: str\n    search_passes: list[SearchPass] = field(default_factory=list)\n    evidence_ledger: list[EvidenceClaim] = field(default_factory=list)\n\n    def add_claim(self, claim: EvidenceClaim) -> None:\n        self.evidence_ledger.append(claim)\n\n    @property\n    def unresolved_assumptions(self) -> list[EvidenceClaim]:\n        return [claim for claim in self.evidence_ledger if claim.assumption_status == "unresolved"]\n\n    def ready_to_answer(self) -> bool:\n        return not self.unresolved_assumptions\n\n\ndef build_default_research_strategy(user_goal: str) -> ResearchStrategy:\n    return ResearchStrategy(\n        user_goal=user_goal,\n        search_passes=[\n            SearchPass(\n                role="codebase_explorer",\n                objective="Find project-local evidence and implementation surfaces before web lookup.",\n                queries=("repo architecture", "existing search utilities", "evidence reasoning flow"),\n            ),\n            SearchPass(\n                role="web_explorer",\n                objective="Gather primary, recent, source-attributed web evidence.",\n                queries=("official documentation", "recent changelog", "known limitations"),\n            ),\n            SearchPass(\n                role="contradiction_critic",\n                objective="Challenge assumptions and reject unsupported claims.",\n                queries=("contradictions", "stale assumptions", "source reliability"),\n            ),\n            SearchPass(\n                role="synthesizer",\n                objective="Produce the final answer only after assumptions are verified or marked unresolved.",\n                queries=("final evidence map",),\n            ),\n        ],\n    )\n`;
+  return [`# Code Space Plan — ${projectName}`, '', '## Request', prompt, '', reason ? `## Note\n${reason}\n` : '', '## Evidence inspected', ...(context.files.length ? context.files.map((file) => `- ${file.path} — ${file.reasons.join(', ') || 'selected'}; ${file.lineCount} lines${file.truncated ? '; truncated' : ''}`) : ['- No readable files were discovered.']), '', '## Implementation workflow', '1. Inspect relevant files and tests.', '2. Generate the smallest safe patch.', '3. Checkpoint before writing.', '4. Run validation and repair failures.', '', '## Validation commands', ...(validation.commands.length ? validation.commands.map((command) => `- ${command.command} — ${command.reason}`) : ['- manual review']), '', codeMode ? '## Code behavior\nChanges should be applied through checkpointed Code mode.\n' : '## Plan behavior\nThis file is a planning artifact.\n'].join('\n');
 }
 
 async function applyGeneratedPatch({ root, projectId, runId, files }: { root: string; projectId: string; runId: string; files: ProposedPatchFile[] }): Promise<{ checkpoint: Awaited<ReturnType<typeof createFileCheckpoint>> | null; files: AppliedFileResult[] }> {
@@ -536,8 +508,11 @@ async function applyGeneratedPatch({ root, projectId, runId, files }: { root: st
 
 function parsePlannerJson(raw: string): PatchModelResult {
   const trimmed = raw.trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
-  const parsed = JSON.parse(trimmed) as Partial<PatchModelResult>;
-  return { summary: String(parsed.summary ?? parsed.unableReason ?? 'Patch planner returned a response.'), files: Array.isArray(parsed.files) ? parsed.files.filter((file) => file && typeof file.path === 'string' && typeof file.afterContent === 'string').map((file) => ({ path: file.path, afterContent: file.afterContent, explanation: String(file.explanation ?? 'Autonomous patch') })) : [], validationCommands: Array.isArray(parsed.validationCommands) ? parsed.validationCommands.map(String) : undefined, unableReason: parsed.unableReason ? String(parsed.unableReason) : undefined };
+  const start = trimmed.indexOf('{');
+  const end = trimmed.lastIndexOf('}');
+  const candidate = start >= 0 && end > start ? trimmed.slice(start, end + 1) : trimmed;
+  const parsed = JSON.parse(candidate) as Partial<PatchModelResult>;
+  return { summary: String(parsed.summary ?? parsed.unableReason ?? 'Patch planner returned a response.'), files: Array.isArray(parsed.files) ? parsed.files.filter((file) => file && typeof file.path === 'string' && typeof file.afterContent === 'string').map((file) => ({ path: file.path, afterContent: file.afterContent, explanation: String(file.explanation ?? 'Code change') })) : [], validationCommands: Array.isArray(parsed.validationCommands) ? parsed.validationCommands.map(String) : undefined, unableReason: parsed.unableReason ? String(parsed.unableReason) : undefined };
 }
 
 function shouldUseMultiAgent(prompt: string, intents: string[]): boolean {
