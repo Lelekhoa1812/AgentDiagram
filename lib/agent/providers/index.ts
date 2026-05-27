@@ -3,6 +3,7 @@ import { AnthropicProvider } from './anthropic';
 import { GeminiProvider } from './gemini';
 import { FoundryProvider } from './foundry';
 import { GrokProvider } from './grok';
+import { LocalModelProvider } from './local';
 import type { Provider, ProviderId, ProviderConfig, ChatParams, ChatMessage, RetryListener, ValidationResult } from './types';
 import { defaultIsRetryable, withRetry, type RetryError } from './retry';
 
@@ -20,11 +21,12 @@ export const PROVIDER_ENV: Record<ProviderId, string> = {
   gemini: 'GEMINI_API_KEY',
   foundry: 'FOUNDRY_API_KEY',
   grok: 'GROK_API_KEY',
+  local: 'LOCAL_MODEL_API_KEY',
 };
 
 export function getDefaultProvider(): ProviderId {
   const env = process.env.AGENTDIAGRAM_DEFAULT_PROVIDER?.toLowerCase();
-  if (env === 'openai' || env === 'anthropic' || env === 'gemini' || env === 'foundry' || env === 'grok') {
+  if (env === 'openai' || env === 'anthropic' || env === 'gemini' || env === 'foundry' || env === 'grok' || env === 'local') {
     return env;
   }
   return 'openai';
@@ -42,6 +44,8 @@ export function makeProvider(id: ProviderId, cfg: ProviderConfig): Provider {
       return new FoundryProvider(cfg);
     case 'grok':
       return new GrokProvider(cfg);
+    case 'local':
+      return new LocalModelProvider(cfg);
   }
 }
 
@@ -50,6 +54,8 @@ export interface ProviderSession {
   model: string;
   endpoint?: string;
   apiKey: string;
+  temperature?: number;
+  maxTokens?: number;
 }
 
 /** Wraps provider validation with the same transient-error retry policy as chat calls. */
@@ -60,7 +66,12 @@ export async function validateWithRetry(
     onRetry?: RetryListener;
   } = {},
 ): Promise<ValidationResult> {
-  const provider = makeProvider(session.id, { apiKey: session.apiKey, endpoint: session.endpoint });
+  const provider = makeProvider(session.id, {
+    apiKey: session.apiKey,
+    endpoint: session.endpoint,
+    temperature: session.temperature,
+    maxTokens: session.maxTokens,
+  });
   return withRetry(
     async () => {
       const result = await provider.validate(session.model);
@@ -84,7 +95,12 @@ export async function chatWithRetry(
     jsonSchema?: Record<string, unknown>;
   } = {},
 ): Promise<string> {
-  const provider = makeProvider(session.id, { apiKey: session.apiKey, endpoint: session.endpoint });
+  const provider = makeProvider(session.id, {
+    apiKey: session.apiKey,
+    endpoint: session.endpoint,
+    temperature: session.temperature,
+    maxTokens: session.maxTokens,
+  });
   return withRetry(
     () => {
       // Motivation vs Logic: Keep payloads minimal so providers don't reject unsupported sampling overrides.

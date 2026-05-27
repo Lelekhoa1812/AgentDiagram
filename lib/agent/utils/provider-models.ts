@@ -19,6 +19,7 @@ export const PROVIDER_DEFAULTS: Record<ProviderId, string> = {
   gemini: 'gemini-2.5-flash',
   foundry: '',
   grok: 'grok-3',
+  local: '',
 };
 
 export const PROVIDER_MODEL_ENV: Record<ProviderId, string> = {
@@ -27,6 +28,7 @@ export const PROVIDER_MODEL_ENV: Record<ProviderId, string> = {
   gemini: 'GEMINI_MODEL',
   foundry: 'FOUNDRY_MODEL',
   grok: 'GROK_MODEL',
+  local: 'LOCAL_MODEL',
 };
 
 export function getProviderDefaultModel(provider: ProviderId): string {
