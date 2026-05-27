@@ -59,6 +59,8 @@ interface ContextFile {
   lineCount: number;
   score: number;
   reasons: string[];
+  summary: string;
+  symbols: string[];
 }
 
 interface ContextSearchResult {
@@ -152,7 +154,7 @@ export async function POST(req: NextRequest) {
         const context = await emitTool('context_search', { openTabs, attachments, tools: registry.list().map((tool) => tool.name) }, async () =>
           collectProjectContext(guarded.resolved, promptForContext, openTabs, attachments),
         );
-        await emitRuntime('context.search.completed', { selectedFiles: context.files.map((file) => file.path), terms: context.terms, attachments });
+        await emitRuntime('context.search.completed', { selectedFiles: context.files.map((file) => file.path), summaries: context.files.map((file) => ({ path: file.path, summary: file.summary })), terms: context.terms, attachments });
         emit({ type: 'todo_updated', todoId: `todo:${runId}:1`, done: true });
 
         const validation = await emitTool('validation_strategy', { mode, changedPaths: context.files.map((file) => file.path) }, async () => detectValidationCommands(guarded.resolved));
@@ -172,7 +174,7 @@ export async function POST(req: NextRequest) {
             await emitRuntime('plan.clarification.created', { questions: questions.map((question) => question.question) });
             answer = buildPlanClarificationResponse(projectName, context, questions);
           } else {
-            const planArtifact = await emitTool('write_plan_artifact', { projectName, prompt: planningPrompt, answers: clarificationAnswers }, async () =>
+            const planArtifact = await emitTool('write_plan_artifact', { projectName, prompt: planningPrompt, inspectedFiles: context.files.map((file) => file.path), answers: clarificationAnswers }, async () =>
               writePlanArtifact(guarded.resolved, sessionId, projectName, planningPrompt, context, validation, clarificationAnswers),
             );
             filesChanged = [planArtifact.filePath];
@@ -232,7 +234,7 @@ export async function POST(req: NextRequest) {
 
 export function buildPlan(mode: CodeSpaceAgentMode, intents: string[], prompt: string): string[] {
   if (mode === 'ask') return ['Understand the question', 'Gather relevant project context', 'Answer directly'];
-  if (mode === 'plan') return ['Understand the implementation goal', 'Inspect relevant files and validation surfaces', 'Clarify critical decisions when needed', 'Write the final editable plan'];
+  if (mode === 'plan') return ['Understand the implementation goal', 'Inspect files and summarize existing behavior', 'Clarify critical decisions when needed', 'Write the final editable plan'];
   if (isRefactorTask(prompt, intents)) return ['Inspect the current file, imports, exports, and references', 'Move or rename files on disk with shell-native operations instead of duplicating them', 'Search and repair every affected importer, export, and test', 'Run validation commands to confirm the refactor compiles cleanly'];
   const complex = shouldUseMultiAgent(prompt, intents);
   return ['Understand the requested change', complex ? 'Explore likely implementation paths' : 'Inspect relevant source and tests', 'Apply the smallest safe change', 'Report changed files and validation'];
@@ -287,7 +289,7 @@ export function buildClarifyingQuestions(prompt = '', intents: string[] = [], co
 
 function describeModeContract(mode: CodeSpaceAgentMode): string {
   if (mode === 'ask') return 'Ask mode is read-only: inspect, explain, and answer directly without creating patches.';
-  if (mode === 'plan') return 'Plan mode inspects relevant context first, asks only critical MCQ clarifications when needed, then creates an editable markdown implementation plan artifact.';
+  if (mode === 'plan') return 'Plan mode inspects relevant files first, asks only critical MCQ clarifications when needed, then creates an editable markdown implementation plan artifact grounded in inspected evidence.';
   return [
     'Code mode explores context, chooses target files, applies checkpointed changes, and summarizes the result conversationally.',
     buildTerminalDecisionGuide(),
@@ -298,8 +300,8 @@ function promptTerms(prompt: string): string[] {
   return Array.from(new Set(prompt.toLowerCase().split(/[^a-z0-9_/-]+/).filter((term) => term.length > 2 && !STOP_WORDS.has(term)))).slice(0, 48);
 }
 
-const STOP_WORDS = new Set(['the', 'and', 'for', 'with', 'this', 'that', 'you', 'your', 'are', 'can', 'into', 'from', 'mode', 'code', 'make', 'please', 'need']);
-const CONTEXT_GLOBS = ['**/*.{ts,tsx,js,jsx,json,md,css,scss,py,go,rs,java,kt,php,rb,sh,yml,yaml,toml}', '!node_modules/**', '!.git/**', '!dist/**', '!build/**', '!.next/**', '!coverage/**', '!__pycache__/**'];
+const STOP_WORDS = new Set(['the', 'and', 'for', 'with', 'this', 'that', 'you', 'your', 'are', 'can', 'into', 'from', 'mode', 'code', 'make', 'please', 'need', 'deeply', 'review', 'comprehensively', 'improve', 'plan']);
+const CONTEXT_GLOBS = ['**/*.{ts,tsx,js,jsx,json,md,css,scss,py,go,rs,java,kt,php,rb,sh,yml,yaml,toml}', '!node_modules/**', '!.git/**', '!.agent/**', '!dist/**', '!build/**', '!.next/**', '!coverage/**', '!__pycache__/**'];
 // Motivation vs Logic: rename-heavy tasks fail when the agent invents replacement files, so refactors must be treated as on-disk moves followed by a reference sweep and validation.
 const REFACTOR_WORKFLOW = [
   'Refactor workflow:',
@@ -350,23 +352,86 @@ async function collectProjectContext(root: string, prompt: string, openTabs: str
     add(normalizedOpenTabs.has(normalizedFile) ? 60 : 0, 'open tab');
     add(/package\.json|requirements\.txt|pyproject\.toml|tsconfig|next\.config|readme|agent|code-space|runtime|route|test|spec/i.test(normalizedFile) ? 18 : 0, 'high-signal project file');
     add(terms.reduce((sum, term) => sum + (lower.includes(term) ? 8 : 0), 0), 'prompt/path overlap');
+    add(terms.reduce((sum, term) => sum + (lowerContentHint(normalizedFile).includes(term) ? 4 : 0), 0), 'semantic filename overlap');
     add(/(__tests__|\.test\.|\.spec\.|tests?\/)/i.test(normalizedFile) ? 10 : 0, 'test surface');
     return { file: normalizedFile, score, reasons };
   });
   const explicitFolderFiles = scored.filter((item) => item.reasons.some((reason) => reason.startsWith('@Folder scope'))).slice(0, 40);
   const selected = [...explicitFolderFiles, ...scored.sort((a, b) => b.score - a.score || a.file.localeCompare(b.file))]
     .filter((item, index, arr) => arr.findIndex((other) => other.file === item.file) === index)
-    .slice(0, 32);
+    .filter((item) => item.score > 0 || item.reasons.length > 0)
+    .slice(0, 40);
   const files: ContextFile[] = [];
   for (const item of selected) {
     const absolute = path.resolve(root, item.file);
     if (absolute !== root && !absolute.startsWith(`${root}${path.sep}`)) continue;
     try {
       const content = await fs.readFile(absolute, 'utf8');
-      files.push({ path: item.file, content: content.slice(0, 18_000), truncated: content.length > 18_000, lineCount: content.split('\n').length, score: item.score, reasons: item.reasons });
+      const symbols = extractSymbols(content).slice(0, 8);
+      files.push({
+        path: item.file,
+        content: content.slice(0, 22_000),
+        truncated: content.length > 22_000,
+        lineCount: content.split('\n').length,
+        score: item.score,
+        reasons: item.reasons,
+        summary: summarizeContextFile(item.file, content, symbols),
+        symbols,
+      });
     } catch {}
   }
   return { filesConsidered: candidates.length, files, terms, omittedRelevantFiles: [] };
+}
+
+function lowerContentHint(filePath: string): string {
+  return filePath
+    .replace(/[-_.\/]/g, ' ')
+    .replace(/api/g, 'api endpoint route service controller request response')
+    .replace(/search/g, 'search web evidence query lookup retrieval source engine')
+    .replace(/retrieval/g, 'retrieval ranking vector similarity evidence')
+    .replace(/evidence/g, 'evidence source citation provenance quality')
+    .replace(/coordinator/g, 'coordinator orchestration strategy planning')
+    .replace(/processor/g, 'processor ranking filtering extraction normalization')
+    .toLowerCase();
+}
+
+function extractSymbols(content: string): string[] {
+  const symbols = new Set<string>();
+  const patterns = [
+    /(?:export\s+)?(?:async\s+)?function\s+([A-Za-z0-9_]+)/g,
+    /(?:export\s+)?const\s+([A-Za-z0-9_]+)\s*=/g,
+    /class\s+([A-Za-z0-9_]+)/g,
+    /interface\s+([A-Za-z0-9_]+)/g,
+    /(?:async\s+)?def\s+([A-Za-z0-9_]+)/g,
+    /class\s+([A-Za-z0-9_]+)\s*[:(]/g,
+  ];
+  for (const pattern of patterns) {
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(content)) && symbols.size < 16) {
+      if (match[1] && !match[1].startsWith('_')) symbols.add(match[1]);
+    }
+  }
+  return Array.from(symbols);
+}
+
+function summarizeContextFile(filePath: string, content: string, symbols: string[]): string {
+  const lowerPath = filePath.toLowerCase();
+  const lower = content.toLowerCase();
+  const symbolHint = symbols.length ? ` Key surfaces: ${symbols.slice(0, 4).join(', ')}.` : '';
+  if (/readme|docs?\//i.test(filePath)) return `Project documentation describing setup, architecture, usage, or operational constraints.${symbolHint}`;
+  if (/routes?\.py|app\.py|route\.ts|controller/i.test(lowerPath)) return `API entrypoints and request routing; useful for understanding how user requests reach backend services.${symbolHint}`;
+  if (/chatbot|agent|orchestrator|coordinator/i.test(lowerPath)) return `Agent orchestration logic, task routing, strategy selection, and service coordination.${symbolHint}`;
+  if (/retrieval|vector|embedding|similarity/i.test(lowerPath)) return `Retrieval services, ranking inputs, similarity scoring, and evidence/context selection.${symbolHint}`;
+  if (/evidence|citation|source|provenance/i.test(lowerPath)) return `Evidence management, source quality handling, citation/provenance shaping, and response grounding.${symbolHint}`;
+  if (/research|strategy|planner/i.test(lowerPath)) return `Planning and research strategy rules that decide how evidence should be collected or expanded.${symbolHint}`;
+  if (/duckduckgo|google|bing|search\.py|engine/i.test(lowerPath)) return `Search engine integration and web lookup behavior, including query execution, result parsing, and fallback handling.${symbolHint}`;
+  if (/medical|clinical|pubmed|mesh|guideline/i.test(lowerPath) || /pubmed|clinical|guideline|mesh/.test(lower)) return `Medical/clinical search specialization, query expansion, source filtering, and evidence quality constraints.${symbolHint}`;
+  if (/multilingual|language|translate/i.test(lowerPath)) return `Multilingual processing, language detection, translation-aware search, and locale-sensitive result handling.${symbolHint}`;
+  if (/processor|extractor|content/i.test(lowerPath)) return `Result processing, content extraction, deduplication, normalization, and ranking preparation.${symbolHint}`;
+  if (/config|settings|env/i.test(lowerPath)) return `Configuration surface for runtime settings, provider credentials, feature toggles, and environment behavior.${symbolHint}`;
+  if (/database|store|repository/i.test(lowerPath)) return `Persistence layer and data access utilities used by the backend services.${symbolHint}`;
+  if (/test|spec/i.test(lowerPath)) return `Validation surface showing expected behavior, test patterns, or executable checks.${symbolHint}`;
+  return `Implementation surface selected from the request and repo context.${symbolHint}`;
 }
 
 async function detectValidationCommands(root: string): Promise<{ commands: Array<{ kind: 'typecheck' | 'lint' | 'test' | 'build'; command: string; reason: string }>; packageManager: string | null }> {
@@ -472,7 +537,7 @@ function buildGroundedFallbackAnswer(projectName: string, prompt: string, contex
   const terms = promptTerms(prompt);
   const evidence = context.files.slice(0, 6).map((file) => {
     const snippet = selectRelevantLine(file.content, terms);
-    return snippet ? `- ${file.path}: ${snippet}` : `- ${file.path}: selected as relevant project evidence.`;
+    return snippet ? `- ${file.path}: ${snippet}` : `- ${file.path}: ${file.summary}`;
   });
   const validationHint = /test|lint|build|typecheck|validate|check/i.test(prompt)
     ? ['', 'Relevant validation commands:', ...validation.commands.map((command) => `- ${command.command} — ${command.reason}`)]
@@ -486,13 +551,13 @@ function selectRelevantLine(content: string, terms: string[]): string | null {
     .map((line) => ({ line, score: terms.reduce((sum, term) => sum + (line.toLowerCase().includes(term) ? 1 : 0), 0) }))
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score);
-  return (scored[0]?.line ?? lines.find((line) => /export |function |class |interface |const /.test(line)) ?? null)?.slice(0, 220) ?? null;
+  return (scored[0]?.line ?? lines.find((line) => /export |function |class |interface |const |def /.test(line)) ?? null)?.slice(0, 220) ?? null;
 }
 
 function buildPlanClarificationResponse(projectName: string, context: ContextSearchResult, questions: CodeSpaceClarifyingQuestion[]): string {
   const fileHint = context.files.slice(0, 4).map((file) => file.path).join(', ');
   return [
-    `I found the likely implementation area in ${projectName}${fileHint ? ` (${fileHint})` : ''}.`,
+    `I inspected the likely implementation area in ${projectName}${fileHint ? ` (${fileHint})` : ''}.`,
     '',
     questions.length === 1 ? 'One decision should be clarified before I write the final plan.' : `${questions.length} decisions should be clarified before I write the final plan.`,
     'Please choose from the clarification panel, then I will generate the editable implementation plan with TODOs and validation steps.',
@@ -500,7 +565,7 @@ function buildPlanClarificationResponse(projectName: string, context: ContextSea
 }
 
 function buildPlanResponse(projectName: string, planPath: string, context: ContextSearchResult, validation: Awaited<ReturnType<typeof detectValidationCommands>>): string {
-  return [`Plan ready for ${projectName}.`, '', `View plan: ${planPath}`, '', `It includes ${context.files.length} inspected evidence item${context.files.length === 1 ? '' : 's'}, implementation TODOs, a definition of done, and validation commands (${validation.commands.map((command) => command.command).join(', ') || 'manual review'}).`, '', 'Use Build when you are ready for Code mode to implement it.'].join('\n');
+  return [`Plan ready for ${projectName}.`, '', `View plan: ${planPath}`, '', `I inspected ${context.files.length} relevant file${context.files.length === 1 ? '' : 's'} and summarized the implementation surfaces in the plan. It includes concrete TODOs, validation commands, acceptance criteria, and remaining risks.`, '', `Primary validation: ${validation.commands.map((command) => command.command).join(', ') || 'manual review'}.`, '', 'Use Build when you are ready for Code mode to implement it.'].join('\n');
 }
 
 function buildCodeResponse(projectName: string, files: ProposedPatchFile[], validation: Awaited<ReturnType<typeof detectValidationCommands>>, summary?: string, checkpointRef?: string): string {
@@ -542,6 +607,122 @@ function extractPlanClarificationAnswers(messages: AgentRequest['messages']): Pl
     }
   }
   return answers;
+}
+
+function buildStrategyDocument({ projectName, prompt, context, validation, codeMode, reason, answers = [] }: { projectName: string; prompt: string; context: ContextSearchResult; validation: Awaited<ReturnType<typeof detectValidationCommands>>; codeMode: boolean; reason?: string; answers?: PlanClarificationAnswer[] }): string {
+  const evidence = formatInspectedEvidence(context);
+  const architecture = buildCurrentArchitectureSummary(context, prompt);
+  const implementationTasks = buildImplementationTodos(prompt, context);
+  const riskItems = buildRiskItems(context, prompt);
+  const clarifiedSection = answers.length ? ['## Clarified decisions', ...answers.map((answer) => `- **${answer.question}** ${answer.answer}`), ''] : [];
+  const noteSection = reason ? ['## Note', reason, ''] : [];
+  return [
+    `# Code Space Plan — ${projectName}`,
+    '',
+    '## Request',
+    prompt,
+    '',
+    ...noteSection,
+    ...clarifiedSection,
+    '## Context already inspected',
+    'The agent inspected the repository files below before writing this plan. Each item is summarized by implementation responsibility rather than internal ranking metadata.',
+    ...evidence,
+    '',
+    '## Current behavior inferred from the codebase',
+    ...architecture,
+    '',
+    '## Recommended implementation strategy',
+    ...buildRecommendedStrategy(prompt, context),
+    '',
+    '## TODO tasks',
+    ...implementationTasks.map((task, index) => `${index + 1}. ${task}`),
+    '',
+    '## Testing and validation strategy',
+    ...(validation.commands.length ? validation.commands.map((command) => `- ${command.command} — ${command.reason}`) : ['- Manual review — no project-specific validation command was detected.']),
+    '- Add focused unit or integration coverage around the changed service boundary where an existing test pattern is present.',
+    '- Run validation after each correction pass and record unresolved risks before marking the session complete.',
+    '',
+    '## Risks and acceptance criteria',
+    ...riskItems,
+    '',
+    '## Definition of done',
+    '- The final implementation follows the inspected service boundaries instead of introducing a parallel workflow.',
+    '- Public user-facing chat remains concise while tool/audit details stay in structured panels or plan artifacts.',
+    '- The plan can be opened directly in the Code Space editor through View plan.',
+    '- Code mode can use this plan as the source of truth and apply checkpointed changes with validation.',
+    '- Validation passes, or remaining failures are explicitly summarized with next actions.',
+    '',
+    codeMode ? '## Code behavior\nChanges should be applied through checkpointed Code mode.\n' : '## Plan behavior\nThis file is an editable planning artifact. Review or edit it before choosing Build.\n',
+  ].join('\n');
+}
+
+function formatInspectedEvidence(context: ContextSearchResult): string[] {
+  if (!context.files.length) return ['- No readable files were discovered before this plan was created.'];
+  return context.files.slice(0, 32).map((file) => `- **${file.path}** — ${file.summary}`);
+}
+
+function buildCurrentArchitectureSummary(context: ContextSearchResult, prompt: string): string[] {
+  const lines: string[] = [];
+  const files = context.files.map((file) => file.path.toLowerCase());
+  if (files.some((file) => /routes?|app/.test(file))) lines.push('- Request routing is handled through API entrypoints before reaching orchestration/search/retrieval services.');
+  if (files.some((file) => /chatbot|coordinator|agent/.test(file))) lines.push('- Agent coordination appears separated from low-level retrieval/search utilities, so strategy changes should be introduced at the orchestration boundary rather than inside every engine.');
+  if (files.some((file) => /search|engine|duckduckgo|medical|multilingual|video/.test(file))) lines.push('- Search capability is engine-oriented: query construction, external lookup, multilingual/medical specialization, extraction, and result post-processing are implemented as separate surfaces.');
+  if (files.some((file) => /retrieval|evidence|source/.test(file))) lines.push('- Evidence/retrieval layers are responsible for ranking, provenance, grounding, and selecting context for the final response.');
+  if (/web|search|evidence|api|lookup/i.test(prompt)) lines.push('- The requested improvement should therefore add a decision policy for when to search, how to expand queries, how to rank clinical evidence, and how to expose evidence provenance to downstream agents.');
+  return lines.length ? lines : ['- The selected files define the implementation surfaces that should be changed; no reliable architecture summary could be inferred beyond the inspected evidence.'];
+}
+
+function buildRecommendedStrategy(prompt: string, context: ContextSearchResult): string[] {
+  if (/search|web|evidence|clinical|lookup|api/i.test(prompt)) {
+    return [
+      '- Introduce a search decision policy that classifies the query intent, required freshness, clinical specificity, source quality requirement, and whether local retrieval is sufficient before web lookup.',
+      '- Add a strategy layer between API/agent orchestration and concrete search engines so query expansion, engine choice, retries, and evidence ranking are deterministic and auditable.',
+      '- Normalize search results into a shared clinical evidence contract with title, URL/source, date, source type, relevance score, quality tier, snippet, extracted content, and provenance metadata.',
+      '- Feed normalized evidence into retrieval/evidence managers for reranking, deduplication, contradiction checks, and final context assembly instead of letting each engine shape output independently.',
+      '- Keep provider/network failures recoverable: return partial evidence with warnings, avoid hallucinated citations, and preserve enough trace detail for the internal tool panel.',
+    ];
+  }
+  return [
+    '- Implement the change at the narrowest service boundary already present in the inspected code.',
+    '- Preserve existing naming, configuration, and validation patterns from the inspected files.',
+    '- Keep the user-facing workflow simple while keeping diagnostics available in internal panels and plan artifacts.',
+  ];
+}
+
+function buildImplementationTodos(prompt: string, context: ContextSearchResult): string[] {
+  const files = context.files.map((file) => file.path);
+  const tasks: string[] = [];
+  const routingFile = files.find((file) => /routes?\.py|app\.py|route\.ts/i.test(file));
+  const coordinatorFile = files.find((file) => /coordinator|chatbot|agent|orchestrator/i.test(file));
+  const searchFiles = files.filter((file) => /search|engine|duckduckgo|medical|multilingual|video/i.test(file)).slice(0, 5);
+  const evidenceFile = files.find((file) => /evidence|retrieval|source/i.test(file));
+
+  if (/search|web|evidence|clinical|lookup|api/i.test(prompt)) {
+    tasks.push(`Map the request flow from ${routingFile ?? 'the API entrypoint'} into ${coordinatorFile ?? 'the agent/search coordinator'} and identify the exact hook where search strategy should be selected.`);
+    tasks.push(`Design a typed SearchStrategy/EvidenceRequest contract covering freshness, clinical source quality, query expansion, engine selection, retries, and provenance.`);
+    tasks.push(`Refactor ${searchFiles.join(', ') || 'the search engine modules'} so engine outputs normalize into one evidence schema before downstream ranking.`);
+    tasks.push(`Update ${evidenceFile ?? 'the retrieval/evidence layer'} to consume normalized web evidence, deduplicate sources, score clinical reliability, and expose citations safely.`);
+    tasks.push('Add tests for strategy selection, engine fallback, source normalization, deduplication, and clinical evidence ranking using mocked search responses.');
+    tasks.push('Add concise user-facing failure behavior for no-results, stale evidence, low-quality sources, and provider/network timeouts.');
+    return tasks;
+  }
+
+  tasks.push(`Use the inspected files (${files.slice(0, 6).join(', ') || 'selected project files'}) as the implementation boundary.`);
+  tasks.push('Apply the change through the existing routing/state/service pattern rather than introducing a duplicate path.');
+  tasks.push('Update tests, fixtures, or documentation where the inspected project pattern shows an existing validation surface.');
+  tasks.push('Run validation and repair issues before summarizing completion.');
+  return tasks;
+}
+
+function buildRiskItems(context: ContextSearchResult, prompt: string): string[] {
+  const risks = ['- Acceptance: the implementation uses inspected files and does not create an unrelated parallel subsystem.'];
+  if (/clinical|medical|evidence|citation|search|web/i.test(prompt)) {
+    risks.push('- Acceptance: clinical/web evidence includes provenance, source quality, recency handling, and clear fallback behavior when evidence is insufficient.');
+    risks.push('- Risk: external search providers may fail or return low-quality results; mitigation is deterministic fallback, partial-result handling, and internal trace capture.');
+  }
+  if (context.files.some((file) => file.truncated)) risks.push('- Risk: some large files were summarized from truncated content; Code mode should re-open the specific sections before editing them.');
+  risks.push('- Acceptance: validation commands complete successfully or unresolved failures are listed with file-level next steps.');
+  return risks;
 }
 
 async function proposeAutonomousPatch(root: string, prompt: string, context: ContextSearchResult, request: AgentRequest): Promise<{ summary: string; files: ProposedPatchFile[] }> {
@@ -590,7 +771,7 @@ async function callPatchPlannerModel(root: string, prompt: string, context: Cont
     REFACTOR_WORKFLOW,
     TERMINAL_DECISION_GUIDE,
   ].join('\n');
-  const contextBlock = context.files.map((file) => [`--- FILE ${file.path} (${file.reasons.join(', ') || 'selected'}) ---`, file.content, file.truncated ? '\n[TRUNCATED]' : ''].join('\n')).join('\n\n');
+  const contextBlock = context.files.map((file) => [`--- FILE ${file.path} (${file.summary}) ---`, file.content, file.truncated ? '\n[TRUNCATED]' : ''].join('\n')).join('\n\n');
   const user = [`Task: ${prompt}`, '', 'Repository evidence:', contextBlock].join('\n');
   const text = await chatWithRetry(
     { id: request.providerId, model: request.model, endpoint: credentials.endpoint, apiKey: credentials.apiKey || 'local' },
@@ -664,61 +845,6 @@ function parseEnv(raw: string): Record<string, string> {
 async function deterministicPlannerResult(error: unknown): Promise<PatchModelResult> {
   const message = error instanceof Error ? error.message : String(error);
   return { summary: message, files: [], unableReason: message };
-}
-
-function buildStrategyDocument({ projectName, prompt, context, validation, codeMode, reason, answers = [] }: { projectName: string; prompt: string; context: ContextSearchResult; validation: Awaited<ReturnType<typeof detectValidationCommands>>; codeMode: boolean; reason?: string; answers?: PlanClarificationAnswer[] }): string {
-  const inspectedFiles = context.files.length
-    ? context.files.map((file) => `- ${file.path} — ${file.reasons.join(', ') || 'selected'}; ${file.lineCount} lines${file.truncated ? '; truncated' : ''}`)
-    : ['- No readable files were discovered.'];
-  const todoTasks = buildImplementationTodos(prompt, context);
-  return [
-    `# Code Space Plan — ${projectName}`,
-    '',
-    '## Request',
-    prompt,
-    '',
-    reason ? `## Note\n${reason}\n` : '',
-    answers.length ? '## Clarified decisions' : '',
-    ...answers.map((answer) => `- ${answer.question}: ${answer.answer}`),
-    answers.length ? '' : '',
-    '## Evidence inspected',
-    ...inspectedFiles,
-    '',
-    '## Recommended implementation strategy',
-    'Build this as an incremental, verifiable change: inspect the exact files above, modify only the required implementation surfaces, keep user-facing chat concise, and move diagnostics/tool details into structured panels rather than assistant prose.',
-    '',
-    '## TODO tasks',
-    ...todoTasks.map((task, index) => `${index + 1}. ${task}`),
-    '',
-    '## Testing and validation strategy',
-    ...(validation.commands.length ? validation.commands.map((command) => `- ${command.command} — ${command.reason}`) : ['- manual review']),
-    '- Re-run the most specific checks after each failed correction loop before marking the session complete.',
-    '- Confirm Plan mode produces either critical MCQs or a final plan document, never a premature placeholder answer.',
-    '- Confirm Ask mode returns a direct answer and does not surface internal audit/tool chatter.',
-    '',
-    '## Definition of done',
-    '- Ask mode answers the user directly from gathered evidence without dummy review/validation copy.',
-    '- Plan mode gathers context before producing a plan, asks only critical MCQ clarifications when necessary, and creates this markdown artifact only after clarification is satisfied or not needed.',
-    '- The plan contains implementation TODOs, validation commands, and end-to-end acceptance criteria.',
-    '- The sidebar shows a View plan action and a purple Build action so the user can review or proceed.',
-    '- Validation passes or remaining risks are surfaced clearly before completion.',
-    '',
-    codeMode ? '## Code behavior\nChanges should be applied through checkpointed Code mode.\n' : '## Plan behavior\nThis file is an editable planning artifact. Review or edit it before choosing Build.\n',
-  ].filter((line) => line !== '').join('\n');
-}
-
-function buildImplementationTodos(prompt: string, context: ContextSearchResult): string[] {
-  const files = context.files.slice(0, 8).map((file) => file.path);
-  const tasks = [
-    `Re-read the request and inspect the highest-signal files: ${files.join(', ') || 'project files discovered during context search'}.`,
-    'Trace existing patterns, imports, state flow, and tests before writing code.',
-    'Implement the smallest end-to-end change that satisfies the request and preserves existing style.',
-    'Add or update tests/fixtures/docs where the inspected evidence shows an existing project pattern.',
-    'Run validation, repair failures, and summarize only user-relevant outcomes.',
-  ];
-  if (/ui|panel|button|mode|chat|sidebar|ux/i.test(prompt)) tasks.splice(3, 0, 'Verify the UI copy stays concise and tool/audit details remain in structured panels, not assistant chat.');
-  if (/refactor|rename|move|import|export/i.test(prompt)) tasks.splice(2, 0, 'Use filesystem-native moves and update every import/export/reference discovered by search.');
-  return tasks;
 }
 
 async function applyGeneratedPatch({ root, projectId, runId, files }: { root: string; projectId: string; runId: string; files: ProposedPatchFile[] }): Promise<{ checkpoint: Awaited<ReturnType<typeof createFileCheckpoint>> | null; files: AppliedFileResult[] }> {
