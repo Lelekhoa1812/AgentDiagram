@@ -62,6 +62,17 @@ async function readCurrentFiles(root: string, filePaths: string[]): Promise<Reco
   return files;
 }
 
+function firstDifference(a: string, b: string): { index: number; line: number; column: number } | null {
+  const max = Math.max(a.length, b.length);
+  for (let index = 0; index < max; index += 1) {
+    if (a[index] === b[index]) continue;
+    const prefix = a.slice(0, index);
+    const lines = prefix.split('\n');
+    return { index, line: lines.length, column: lines[lines.length - 1].length + 1 };
+  }
+  return null;
+}
+
 export async function POST(req: Request) {
   const json = await req.json().catch(() => ({}));
   const parsed = Body.safeParse(json);
@@ -97,15 +108,8 @@ export async function POST(req: Request) {
       });
     }
 
-    // Motivation vs Logic: patch acceptance is intentionally server-side so every write is
-    // preceded by an auditable checkpoint and conflict check instead of trusting client state.
-    const checkpoint = await createFileCheckpoint({
-      projectId: parsed.data.projectId,
-      projectRoot: guarded.resolved,
-      runId: parsed.data.runId,
-      reason: `before applying ${parsed.data.patchId}`,
-      files: parsed.data.files.map((file) => file.path),
-    });
+    const alreadyApplied: string[] = [];
+    const conflicts: Array<{ path: string; line: number; column: number; currentPreview: string; expectedPreview: string }> = [];
 
     for (const file of parsed.data.files) {
       const target = resolveInside(guarded.resolved, file.path);
@@ -115,23 +119,63 @@ export async function POST(req: Request) {
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       }
-      if (current !== file.beforeContent) {
-        return NextResponse.json(
-          {
-            error: `Patch conflict in ${file.path}. The file changed since the proposal was created.`,
-            code: 'PATCH_CONFLICT',
-            checkpoint,
-          },
-          { status: 409 },
-        );
+
+      if (current === file.afterContent) {
+        alreadyApplied.push(file.path);
+        continue;
       }
+
+      if (current !== file.beforeContent) {
+        const diff = firstDifference(current, file.beforeContent) ?? { index: 0, line: 1, column: 1 };
+        conflicts.push({
+          path: file.path,
+          line: diff.line,
+          column: diff.column,
+          currentPreview: current.slice(Math.max(0, diff.index - 160), diff.index + 160),
+          expectedPreview: file.beforeContent.slice(Math.max(0, diff.index - 160), diff.index + 160),
+        });
+      }
+    }
+
+    if (conflicts.length) {
+      return NextResponse.json(
+        {
+          error: 'Patch conflict. The file changed since the proposal was created. Refresh the diff or regenerate the patch from the latest file content.',
+          code: 'PATCH_CONFLICT',
+          conflicts,
+          alreadyApplied,
+        },
+        { status: 409 },
+      );
+    }
+
+    if (alreadyApplied.length === parsed.data.files.length) {
+      return NextResponse.json({
+        patchId: parsed.data.patchId,
+        status: 'already_applied',
+        filesChanged: [],
+        alreadyApplied,
+        appliedAt: Date.now(),
+      });
+    }
+
+    const filesToWrite = parsed.data.files.filter((file) => !alreadyApplied.includes(file.path));
+    const checkpoint = await createFileCheckpoint({
+      projectId: parsed.data.projectId,
+      projectRoot: guarded.resolved,
+      runId: parsed.data.runId,
+      reason: `before applying ${parsed.data.patchId}`,
+      files: filesToWrite.map((file) => file.path),
+    });
+
+    for (const file of filesToWrite) {
       const diagnostics = validateSyntaxLightweight(file.path, file.afterContent);
       if (diagnostics.length) {
         return NextResponse.json({ error: `Patch failed syntax pre-validation in ${file.path}.`, code: 'AST_PREVALIDATION_FAILED', diagnostics, checkpoint }, { status: 422 });
       }
     }
 
-    for (const file of parsed.data.files) {
+    for (const file of filesToWrite) {
       const target = resolveInside(guarded.resolved, file.path);
       await fs.mkdir(path.dirname(target), { recursive: true });
       await fs.writeFile(target, file.afterContent, 'utf8');
@@ -140,8 +184,9 @@ export async function POST(req: Request) {
     return NextResponse.json({
       patchId: parsed.data.patchId,
       status: 'applied',
-      filesChanged: parsed.data.files.map((file) => file.path),
-      unifiedDiff: parsed.data.files.map((file) => createUnifiedDiff(file.path, file.beforeContent, file.afterContent)).join('\n'),
+      filesChanged: filesToWrite.map((file) => file.path),
+      alreadyApplied,
+      unifiedDiff: filesToWrite.map((file) => createUnifiedDiff(file.path, file.beforeContent, file.afterContent)).join('\n'),
       checkpoint,
       appliedAt: Date.now(),
     });
