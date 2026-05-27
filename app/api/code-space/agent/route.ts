@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import fg from 'fast-glob';
-import { classifyCodeSpaceIntent } from '@/lib/code-space/core';
+import { classifyCodeSpaceIntent, type CodeSpaceClarifyingQuestion } from '@/lib/code-space/core';
 import type { AgentSSEEvent } from '@/lib/code-space/agent/types';
 import { normalizeCodeSpaceAgentMode, type CodeSpaceAgentMode } from '@/lib/code-space/agentModes';
 import { createAgentEvent, createDefaultToolRegistry, encodeSseEvent, getEventStore } from '@/lib/code-space/runtime';
@@ -13,6 +13,12 @@ import { guardPath } from '@/lib/security/pathGuard';
 const MessageSchema = z.object({
   role: z.enum(['user', 'assistant', 'system', 'tool']),
   content: z.string(),
+});
+
+const AttachmentSchema = z.object({
+  kind: z.enum(['file', 'folder']),
+  relativePath: z.string().min(1),
+  displayName: z.string().min(1),
 });
 
 const BodySchema = z.object({
@@ -30,13 +36,17 @@ const BodySchema = z.object({
   mode: z.enum(['ask', 'plan', 'code']).optional().default('code'),
   toolBudget: z.number().default(50),
   enableThinking: z.boolean().default(true),
+  // Motivation vs Logic: The composer surfaces structured @ mention attachments. They flow as a
+  // first-class field so the context resolver can prioritise these files/folders ahead of its
+  // generic keyword search. The field is optional + defaulted so older clients still validate.
+  attachments: z.array(AttachmentSchema).optional().default([]),
 });
 
 export async function POST(req: NextRequest) {
   const body = BodySchema.safeParse(await req.json());
   if (!body.success) return Response.json({ error: body.error.message }, { status: 400 });
 
-  const { messages, projectName, projectRoot, sessionId, toolBudget, openTabs } = body.data;
+  const { messages, projectName, projectRoot, sessionId, toolBudget, openTabs, attachments } = body.data;
   const mode = normalizeCodeSpaceAgentMode(body.data.mode);
   const latestUserMessage = [...messages].reverse().find((message) => message.role === 'user');
   if (!latestUserMessage) {
@@ -92,9 +102,14 @@ export async function POST(req: NextRequest) {
 
         const contextToolId = `tool:${Date.now()}:context`;
         const contextStart = Date.now();
-        emit({ type: 'tool_start', toolCallId: contextToolId, tool: 'context_search', input: { openTabs, tools: registry.list().map((tool) => tool.name) } });
-        await emitRuntime('context.search.started', { openTabs });
-        const context = await collectProjectContext(guarded.resolved, latestUserMessage.content, openTabs);
+        emit({
+          type: 'tool_start',
+          toolCallId: contextToolId,
+          tool: 'context_search',
+          input: { openTabs, attachments, tools: registry.list().map((tool) => tool.name) },
+        });
+        await emitRuntime('context.search.started', { openTabs, attachments });
+        const context = await collectProjectContext(guarded.resolved, latestUserMessage.content, openTabs, attachments);
         emit({
           type: 'tool_result',
           toolCallId: contextToolId,
@@ -197,9 +212,9 @@ export function buildPlan(mode: CodeSpaceAgentMode, _intents: string[], _prompt:
 
   if (mode === 'plan') {
     return [
-      'Classify the request and identify ambiguity before implementation.',
-      'Search and read the most relevant project files.',
-      'Write an editable markdown plan with assumptions, strategy, TODOs, and validation steps.',
+      'Scan the project structure, prompt, open tabs, and likely implementation surfaces before asking anything.',
+      'Search and read the most relevant project files, docs, and existing patterns.',
+      'Ask only task-solving clarifications in the sidebar, then write the final planning doc with assumptions, strategy, TODOs, and validation steps.',
     ];
   }
 
@@ -210,7 +225,7 @@ export function buildPlan(mode: CodeSpaceAgentMode, _intents: string[], _prompt:
   ];
 }
 
-export function buildClarifyingQuestions(mode: CodeSpaceAgentMode, prompt: string, intents: string[]) {
+export function buildClarifyingQuestions(mode: CodeSpaceAgentMode, prompt: string, intents: string[]): CodeSpaceClarifyingQuestion[] {
   if (mode !== 'plan') return [];
   const ambiguous =
     prompt.trim().length < 120 ||
@@ -242,7 +257,18 @@ function promptTerms(prompt: string): string[] {
   );
 }
 
-async function collectProjectContext(root: string, prompt: string, openTabs: string[]) {
+interface AgentAttachment {
+  kind: 'file' | 'folder';
+  relativePath: string;
+  displayName: string;
+}
+
+async function collectProjectContext(
+  root: string,
+  prompt: string,
+  openTabs: string[],
+  attachments: AgentAttachment[] = [],
+) {
   const candidates = await fg(['**/*.{ts,tsx,js,jsx,json,md,css,scss,py,go,rs}', '!node_modules/**', '!.git/**', '!dist/**', '!build/**', '!.next/**'], {
     cwd: root,
     onlyFiles: true,
@@ -251,9 +277,26 @@ async function collectProjectContext(root: string, prompt: string, openTabs: str
     unique: true,
   });
   const terms = promptTerms(prompt);
+
+  // Motivation vs Logic: User-attached mentions are an explicit, structured signal that this file
+  // (or folder) matters. Bias the scorer heavily for files attached directly, and tag folder
+  // attachments so any candidate inside them inherits a non-trivial boost.
+  const attachedFiles = new Set(
+    attachments.filter((item) => item.kind === 'file').map((item) => item.relativePath),
+  );
+  const attachedFolders = attachments
+    .filter((item) => item.kind === 'folder')
+    .map((item) => item.relativePath.replace(/\/+$/, ''));
+
   const scored = candidates.map((file) => {
     const lower = file.toLowerCase();
+    const attachedFile = attachedFiles.has(file);
+    const inAttachedFolder = attachedFolders.some(
+      (folder) => folder && file.startsWith(`${folder}/`),
+    );
     const score =
+      (attachedFile ? 40 : 0) +
+      (inAttachedFolder ? 16 : 0) +
       (openTabs.includes(file) ? 8 : 0) +
       terms.reduce((sum, term) => sum + (lower.includes(term) ? 3 : 0), 0) +
       (/readme|package\.json|architecture|agent|code-space/i.test(file) ? 2 : 0);
@@ -354,7 +397,7 @@ export async function writePlanMarkdown({
   return { filePath, content };
 }
 
-function buildGroundedResponse({
+export function buildGroundedResponse({
   mode,
   projectName,
   prompt,
@@ -384,11 +427,29 @@ function buildGroundedResponse({
     ? `I inspected these files:\n${citations}`
     : 'I did not find readable source files that matched the prompt.';
   const clarifyingSummary = clarifyingQuestions.length
-    ? `Clarifying questions were added to ${planMarkdownPath ?? 'the visible plan'} with an Other option for custom answers.`
+    ? 'Answer the sidebar clarifying questions to refine the next implementation pass.'
     : 'No blocking clarification questions were needed for this pass.';
   const planFileSummary = planMarkdownPath
-    ? `Editable plan file: ${planMarkdownPath} (${planMarkdownContent.length} characters).`
+    ? mode === 'plan'
+      ? `Full planning doc is ready at ${planMarkdownPath} (${planMarkdownContent.length} characters).`
+      : `Editable plan file: ${planMarkdownPath} (${planMarkdownContent.length} characters).`
     : '';
+  if (mode === 'plan') {
+    return [
+      `Mode: ${primaryMode}`,
+      '',
+      `For ${projectName}, I classified the request as: ${intents.join(', ')}.`,
+      '',
+      contextSummary,
+      '',
+      clarifyingSummary,
+      planFileSummary,
+      'The chat stays concise in Plan mode; the complete markdown plan is surfaced only at wrap-up.',
+      'Next step: answer the sidebar MCQs or open the final plan artifact when you want to review the full document.',
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
 
   return [
     `Mode: ${primaryMode}`,

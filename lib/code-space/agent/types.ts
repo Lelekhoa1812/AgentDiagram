@@ -1,9 +1,11 @@
+import type { CodeSpaceClarifyingQuestion } from '@/lib/code-space/core';
+
 export type AgentSSEEvent =
   | { type: 'text_delta'; delta: string }
   | { type: 'structured_event'; event: import('@/lib/code-space/runtime').AgentEvent }
   | { type: 'plan_created'; items: string[] }
   | { type: 'plan_markdown_created'; filePath: string; content: string }
-  | { type: 'clarifying_questions_created'; questions: Array<{ id: string; question: string; choices: string[] }> }
+  | { type: 'clarifying_questions_created'; questions: CodeSpaceClarifyingQuestion[] }
   | { type: 'todo_created'; todo: { id: string; text: string; done: boolean } }
   | { type: 'todo_updated'; todoId: string; done: boolean }
   | { type: 'tool_start'; toolCallId: string; tool: string; input: unknown }

@@ -1,306 +1,462 @@
 'use client';
 
-import React, { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
+// Motivation vs Logic: This component is the agent composer. The legacy implementation was a
+// `<textarea>` that stored mentions as `[basename](path)` markdown text inside the value; the
+// mirror highlighted the entire `[...](...)` substring, which is why the visible "chip" still
+// showed the full project path. The rewrite uses a contenteditable div with atomic
+// `contenteditable=false` mention chips. Visible chip text is basename-only; the relative path
+// lives on `data-mention-path` and `title` for tooltip + a11y. The DOM is the source of truth
+// during user interaction; React only mounts the initial empty state and listens for external
+// resets (e.g. clearing the input after submit). On every input/selection change we recompute
+// the active `@token`, run it through `queryMentionSuggestions`, and reposition the suggestor.
 
-// ---------------------------------------------------------------------------
-// Fuzzy filter: rank filePaths by how well they match the query.
-// Priority: filename starts with query > filename contains query > path contains query.
-// ---------------------------------------------------------------------------
-function fuzzyFilter(paths: string[], query: string): string[] {
-  if (!query) return paths.slice(0, 8);
-  const q = query.toLowerCase();
-  return paths
-    .filter((p) => {
-      const name = (p.split('/').pop() ?? '').toLowerCase();
-      return name.includes(q) || p.toLowerCase().includes(q);
-    })
-    .sort((a, b) => {
-      const nameA = (a.split('/').pop() ?? '').toLowerCase();
-      const nameB = (b.split('/').pop() ?? '').toLowerCase();
-      const scoreA = nameA.startsWith(q) ? 0 : nameA.includes(q) ? 1 : 2;
-      const scoreB = nameB.startsWith(q) ? 0 : nameB.includes(q) ? 1 : 2;
-      return scoreA - scoreB;
-    })
-    .slice(0, 8);
-}
+import React, {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
+import type { FileMentionIndex } from '@/lib/code-space/mentions/index';
+import { queryMentionSuggestions } from '@/lib/code-space/mentions/query';
+import type { MentionSuggestion, SelectedMention } from '@/lib/code-space/mentions/types';
+import type { MentionIndexStatus } from '@/lib/code-space/mentions/useMentionIndex';
+import { MentionSuggestor } from './mentions/MentionSuggestor';
+import { createMentionChipNode, MENTION_CHIP_CLASS } from './mentions/MentionChip';
 
-// ---------------------------------------------------------------------------
-// Split text into plain/mention segments for the mirror div.
-// Matches [filename](path) markdown links inserted by the mention handler.
-// ---------------------------------------------------------------------------
-function splitSegments(text: string): Array<{ kind: 'plain' | 'mention'; value: string }> {
-  const pattern = /(\[[^\]]+\]\([^)]+\))/g;
-  const segments: Array<{ kind: 'plain' | 'mention'; value: string }> = [];
-  let last = 0;
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(text)) !== null) {
-    if (match.index > last) {
-      segments.push({ kind: 'plain', value: text.slice(last, match.index) });
-    }
-    segments.push({ kind: 'mention', value: match[0] });
-    last = match.index + match[0].length;
-  }
-  if (last < text.length) segments.push({ kind: 'plain', value: text.slice(last) });
-  return segments;
-}
+const MAX_SUGGESTIONS = 10;
+const TOKEN_CHAR_RE = /[A-Za-z0-9_./\-]/;
+// Hard delimiters per spec: space/newline/tab/comma/semicolon/closing brackets/quotes/backtick.
+const BOUNDARY_BEFORE_RE = /[\s,;()[\]{}'"`]/;
 
-// ---------------------------------------------------------------------------
-// Props
-// ---------------------------------------------------------------------------
 export interface FileMentionInputProps {
+  /** Plain-text view of the composer. Reset to '' to clear externally (e.g. after submit). */
   value: string;
-  onChange: (value: string) => void;
-  onSubmit: () => void;
-  filePaths: string[];
+  /** Structured mentions parallel to `value`. */
+  mentions?: SelectedMention[];
+  onChange: (value: string, mentions: SelectedMention[]) => void;
+  onSubmit: (value: string, mentions: SelectedMention[]) => void;
+  mentionIndex: FileMentionIndex;
+  indexStatus?: MentionIndexStatus;
+  indexError?: string;
+  openFiles?: ReadonlyArray<string>;
+  recentFiles?: ReadonlyArray<string>;
+  currentEditorFilePath?: string;
   disabled?: boolean;
   placeholder?: string;
 }
 
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
+interface ActiveToken {
+  rawToken: string;
+  range: Range;
+}
+
+// Serialize the editor's DOM tree into (text, mentions). Mentions are recognised by their
+// `data-mention-chip="true"` flag; everything else contributes plain text. `&nbsp;` (U+00A0) is
+// converted back to a regular space so the submitted text is human-readable.
+function serializeEditor(root: HTMLElement): { text: string; mentions: SelectedMention[] } {
+  let text = '';
+  const mentions: SelectedMention[] = [];
+
+  const walk = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      text += (node.textContent ?? '').replace(/\u00A0/g, ' ');
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    const el = node as HTMLElement;
+    if (el.getAttribute && el.getAttribute('data-mention-chip') === 'true') {
+      const type = (el.getAttribute('data-mention-type') as 'file' | 'folder') ?? 'file';
+      const relativePath = el.getAttribute('data-mention-path') ?? '';
+      const basename = el.getAttribute('data-mention-name') ?? el.textContent ?? '';
+      const displayName = type === 'folder' ? `${basename}/` : basename;
+      text += `@${basename}`;
+      mentions.push({
+        id: `mention:${mentions.length}:${relativePath}`,
+        type,
+        basename,
+        displayName,
+        relativePath,
+      });
+      return;
+    }
+    if (el.tagName === 'BR') {
+      text += '\n';
+      return;
+    }
+    el.childNodes.forEach(walk);
+  };
+  root.childNodes.forEach(walk);
+  return { text, mentions };
+}
+
+// Walk back from the caret (within a single text node) to detect an active `@token`. Returns the
+// range covering `@`..caret and the raw token text (everything after `@`), or null when there is
+// no active token. The boundary char before `@` must be a hard delimiter (or start-of-input) so
+// emails like `test@example.com` do not trigger.
+function detectActiveToken(root: HTMLElement): ActiveToken | null {
+  const selection = root.ownerDocument?.getSelection?.();
+  if (!selection || selection.rangeCount === 0) return null;
+  const range = selection.getRangeAt(0);
+  if (!range.collapsed) return null;
+  if (!root.contains(range.startContainer)) return null;
+  const node = range.startContainer;
+  if (node.nodeType !== Node.TEXT_NODE) return null;
+  const textNode = node as Text;
+  const offset = range.startOffset;
+  const text = textNode.data ?? '';
+  // Find the last '@' before the caret.
+  let atIdx = -1;
+  for (let i = offset - 1; i >= 0; i--) {
+    const ch = text[i]!;
+    if (ch === '@') {
+      atIdx = i;
+      break;
+    }
+    if (!TOKEN_CHAR_RE.test(ch)) {
+      // Hit a delimiter before finding '@' — not in an active token.
+      return null;
+    }
+  }
+  if (atIdx === -1) return null;
+  const before = atIdx === 0 ? null : text[atIdx - 1];
+  // Boundary must be: start of node, or a hard delimiter char, or the start of the parent block.
+  if (before !== null && before !== undefined && !BOUNDARY_BEFORE_RE.test(before)) {
+    // If the '@' sits at the very start of a text node whose previous sibling is a chip span, we
+    // still treat it as the start of a token.
+    if (atIdx !== 0) return null;
+    const prev = textNode.previousSibling;
+    const prevIsChip =
+      prev && prev.nodeType === Node.ELEMENT_NODE &&
+      (prev as HTMLElement).getAttribute &&
+      (prev as HTMLElement).getAttribute('data-mention-chip') === 'true';
+    if (!prevIsChip && prev !== null) return null;
+  }
+
+  const rawToken = text.slice(atIdx + 1, offset);
+  const tokenRange = root.ownerDocument!.createRange();
+  tokenRange.setStart(textNode, atIdx);
+  tokenRange.setEnd(textNode, offset);
+  return { rawToken, range: tokenRange };
+}
+
+// Set the caret immediately after `node` inside `root`. Creates a fresh selection.
+function placeCaretAfter(root: HTMLElement, node: Node): void {
+  const sel = root.ownerDocument?.getSelection?.();
+  if (!sel) return;
+  const range = root.ownerDocument!.createRange();
+  range.setStartAfter(node);
+  range.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
 export function FileMentionInput({
   value,
+  mentions: _externalMentions,
   onChange,
   onSubmit,
-  filePaths,
+  mentionIndex,
+  indexStatus = 'ready',
+  indexError,
+  openFiles,
+  recentFiles,
+  currentEditorFilePath,
   disabled = false,
   placeholder = 'Describe a task...',
 }: FileMentionInputProps) {
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const mirrorRef = useRef<HTMLDivElement>(null);
-  const dropdownRef = useRef<HTMLUListElement>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const listboxId = useId();
 
-  // mentionQuery: the text after @ up to cursor; null means dropdown is closed
-  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
-  const [matchedFiles, setMatchedFiles] = useState<string[]>([]);
+  const [activeToken, setActiveToken] = useState<ActiveToken | null>(null);
+  const [suggestions, setSuggestions] = useState<MentionSuggestion[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
+  const [containerRect, setContainerRect] = useState<DOMRect | null>(null);
+  const lastSerialized = useRef<{ text: string; mentions: SelectedMention[] }>({
+    text: '',
+    mentions: [],
+  });
 
-  // -------------------------------------------------------------------------
-  // Auto-grow: max 5 rows (5 × 20px line-height + 12px padding = 112px)
-  // -------------------------------------------------------------------------
-  const MAX_HEIGHT = 112;
+  const openFilesKey = (openFiles ?? []).join('\u0001');
+  const recentFilesKey = (recentFiles ?? []).join('\u0001');
+  const openFilesMemo = useMemo(() => openFiles ?? [], [openFilesKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const recentFilesMemo = useMemo(() => recentFiles ?? [], [recentFilesKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const adjustHeight = useCallback(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT)}px`;
-  }, []);
+  const emitChange = useCallback(() => {
+    const root = editorRef.current;
+    if (!root) return;
+    const { text, mentions } = serializeEditor(root);
+    lastSerialized.current = { text, mentions };
+    onChange(text, mentions);
+  }, [onChange]);
 
-  // -------------------------------------------------------------------------
-  // Handle text change — detect @ trigger
-  // -------------------------------------------------------------------------
-  const handleChange = useCallback(
-    (event: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const newValue = event.target.value;
-      onChange(newValue);
-      adjustHeight();
-
-      const cursor = event.target.selectionStart ?? newValue.length;
-      const before = newValue.slice(0, cursor);
-      // Match @ followed by non-whitespace chars (the in-progress mention)
-      const match = before.match(/@(\S*)$/);
-      if (match) {
-        const query = match[1] ?? '';
-        const filtered = fuzzyFilter(filePaths, query);
-        setMentionQuery(query);
-        setMatchedFiles(filtered);
-        setActiveIndex(0);
-      } else {
-        setMentionQuery(null);
-        setMatchedFiles([]);
-      }
-    },
-    [onChange, adjustHeight, filePaths]
-  );
-
-  // -------------------------------------------------------------------------
-  // Insert a file mention into the textarea value
-  // -------------------------------------------------------------------------
-  const insertMention = useCallback(
-    (filePath: string) => {
-      const textarea = textareaRef.current;
-      if (!textarea) return;
-      const cursor = textarea.selectionStart ?? value.length;
-      const before = value.slice(0, cursor);
-      const match = before.match(/@(\S*)$/);
-      if (!match) return;
-
-      const fileName = filePath.split('/').pop() ?? filePath;
-      const start = cursor - match[0].length;
-      const mention = `[${fileName}](${filePath})`;
-      const newValue = value.slice(0, start) + mention + value.slice(cursor);
-      onChange(newValue);
-      setMentionQuery(null);
-      setMatchedFiles([]);
-
-      // Restore focus + move cursor after the inserted mention
-      requestAnimationFrame(() => {
-        textarea.focus();
-        const newCursor = start + mention.length;
-        textarea.setSelectionRange(newCursor, newCursor);
-        adjustHeight();
-      });
-    },
-    [value, onChange, adjustHeight]
-  );
-
-  // -------------------------------------------------------------------------
-  // Mirror scroll sync
-  // -------------------------------------------------------------------------
-  const handleScroll = useCallback(() => {
-    if (mirrorRef.current && textareaRef.current) {
-      mirrorRef.current.scrollTop = textareaRef.current.scrollTop;
+  // Recompute the suggestor for the current caret + active token.
+  const refreshSuggestions = useCallback(() => {
+    const root = editorRef.current;
+    if (!root) return;
+    const detected = detectActiveToken(root);
+    if (!detected) {
+      setActiveToken(null);
+      setSuggestions([]);
+      return;
     }
-  }, []);
+    setActiveToken(detected);
+    const next = queryMentionSuggestions(mentionIndex, {
+      rawToken: detected.rawToken,
+      openFiles: openFilesMemo,
+      recentFiles: recentFilesMemo,
+      currentEditorFilePath,
+      maxResults: MAX_SUGGESTIONS,
+    });
+    setSuggestions(next);
+    setActiveIndex(0);
+    // Caret position for the popover anchor.
+    try {
+      const rect = detected.range.getBoundingClientRect();
+      setAnchorRect(rect);
+    } catch {
+      setAnchorRect(null);
+    }
+    if (containerRef.current) setContainerRect(containerRef.current.getBoundingClientRect());
+  }, [mentionIndex, openFilesMemo, recentFilesMemo, currentEditorFilePath]);
 
-  // -------------------------------------------------------------------------
-  // Keyboard navigation inside textarea
-  // -------------------------------------------------------------------------
+  // External resets: clear the DOM only when the parent transitions `value` from non-empty back
+  // to '' (the post-submit clear pattern). A render where `value` stays '' should NOT clear
+  // mid-keystroke edits where the controlled parent hasn't caught up yet — that would race
+  // typing flows and break test fixtures that pass a no-op `onChange`.
+  const prevValueRef = useRef(value);
+  useLayoutEffect(() => {
+    const prev = prevValueRef.current;
+    prevValueRef.current = value;
+    const root = editorRef.current;
+    if (!root) return;
+    if (prev !== '' && value === '' && root.childNodes.length > 0) {
+      root.innerHTML = '';
+      lastSerialized.current = { text: '', mentions: [] };
+      setActiveToken(null);
+      setSuggestions([]);
+    }
+  });
+
+  // Insert a chip at the active token's range and emit onChange.
+  const insertMention = useCallback(
+    (suggestion: MentionSuggestion) => {
+      const root = editorRef.current;
+      if (!root || !activeToken) return;
+      const doc = root.ownerDocument!;
+      const selected: SelectedMention = {
+        id: `mention:${Date.now()}:${suggestion.relativePath}`,
+        type: suggestion.type,
+        basename: suggestion.basename,
+        displayName: suggestion.displayName,
+        relativePath: suggestion.relativePath,
+      };
+      const chip = createMentionChipNode(doc, selected);
+      const spacer = doc.createTextNode('\u00A0');
+
+      try {
+        activeToken.range.deleteContents();
+        activeToken.range.insertNode(spacer);
+        activeToken.range.insertNode(chip);
+      } catch {
+        // If the range became invalid (DOM mutated externally), append at the end.
+        root.appendChild(chip);
+        root.appendChild(spacer);
+      }
+      placeCaretAfter(root, spacer);
+
+      setActiveToken(null);
+      setSuggestions([]);
+      emitChange();
+    },
+    [activeToken, emitChange],
+  );
+
+  // ---- Event handlers ----
+
+  const handleInput = useCallback(() => {
+    refreshSuggestions();
+    emitChange();
+  }, [refreshSuggestions, emitChange]);
+
+  const handleSelectionChange = useCallback(() => {
+    const root = editorRef.current;
+    if (!root) return;
+    const doc = root.ownerDocument;
+    if (!doc) return;
+    const selection = doc.getSelection?.();
+    if (!selection || selection.rangeCount === 0) return;
+    if (!root.contains(selection.anchorNode)) return;
+    refreshSuggestions();
+  }, [refreshSuggestions]);
+
+  useEffect(() => {
+    const doc = editorRef.current?.ownerDocument;
+    if (!doc) return;
+    const listener = () => handleSelectionChange();
+    doc.addEventListener('selectionchange', listener);
+    return () => doc.removeEventListener('selectionchange', listener);
+  }, [handleSelectionChange]);
+
   const handleKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLTextAreaElement>) => {
-      if (disabled) return;
-      const dropdownOpen = mentionQuery !== null && matchedFiles.length > 0;
-
+    (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      if (disabled) {
+        event.preventDefault();
+        return;
+      }
+      const dropdownOpen = activeToken !== null && suggestions.length > 0;
       if (dropdownOpen) {
         if (event.key === 'ArrowDown') {
           event.preventDefault();
-          setActiveIndex((i) => (i + 1) % matchedFiles.length);
+          setActiveIndex((i) => (i + 1) % suggestions.length);
           return;
         }
         if (event.key === 'ArrowUp') {
           event.preventDefault();
-          setActiveIndex((i) => (i - 1 + matchedFiles.length) % matchedFiles.length);
+          setActiveIndex((i) => (i - 1 + suggestions.length) % suggestions.length);
           return;
         }
         if (event.key === 'Enter' || event.key === 'Tab') {
           event.preventDefault();
-          const selected = matchedFiles[activeIndex];
-          if (selected) insertMention(selected);
+          const choice = suggestions[activeIndex];
+          if (choice) insertMention(choice);
           return;
         }
         if (event.key === 'Escape') {
           event.preventDefault();
-          setMentionQuery(null);
-          setMatchedFiles([]);
+          setActiveToken(null);
+          setSuggestions([]);
           return;
         }
       }
-
-      // Enter without Shift → submit; Shift+Enter → newline (default)
       if (event.key === 'Enter' && !event.shiftKey && !dropdownOpen) {
         event.preventDefault();
-        if (value.trim()) onSubmit();
+        const root = editorRef.current;
+        if (!root) return;
+        const { text, mentions } = serializeEditor(root);
+        if (text.trim()) onSubmit(text, mentions);
       }
     },
-    [disabled, mentionQuery, matchedFiles, activeIndex, insertMention, value, onSubmit]
+    [activeIndex, activeToken, disabled, insertMention, onSubmit, suggestions],
   );
 
-  // -------------------------------------------------------------------------
-  // Close dropdown on outside click
-  // -------------------------------------------------------------------------
-  useEffect(() => {
-    if (mentionQuery === null) return;
-    const handler = (event: MouseEvent) => {
-      if (
-        !textareaRef.current?.contains(event.target as Node) &&
-        !dropdownRef.current?.contains(event.target as Node)
-      ) {
-        setMentionQuery(null);
-        setMatchedFiles([]);
+  const handlePaste = useCallback(
+    (event: ClipboardEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      const text = event.clipboardData.getData('text/plain');
+      if (!text) return;
+      const doc = editorRef.current?.ownerDocument;
+      if (!doc) return;
+      const selection = doc.getSelection?.();
+      if (!selection || selection.rangeCount === 0) return;
+      const range = selection.getRangeAt(0);
+      range.deleteContents();
+      const node = doc.createTextNode(text);
+      range.insertNode(node);
+      placeCaretAfter(editorRef.current!, node);
+      handleInput();
+    },
+    [handleInput],
+  );
+
+  const handleBeforeInput = useCallback(
+    (event: Event) => {
+      const inputEvent = event as InputEvent;
+      if (inputEvent.inputType !== 'deleteContentBackward') return;
+      const root = editorRef.current;
+      if (!root) return;
+      const doc = root.ownerDocument;
+      if (!doc) return;
+      const selection = doc.getSelection?.();
+      if (!selection || selection.rangeCount === 0) return;
+      const range = selection.getRangeAt(0);
+      if (!range.collapsed) return;
+      const node = range.startContainer;
+      const offset = range.startOffset;
+      // If the caret sits immediately after a chip span, remove the chip whole.
+      let target: ChildNode | null = null;
+      if (node.nodeType === Node.TEXT_NODE && offset === 0) {
+        target = (node as Text).previousSibling;
+      } else if (node === root && offset > 0) {
+        target = root.childNodes.item(offset - 1) ?? null;
       }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [mentionQuery]);
+      if (
+        target &&
+        target.nodeType === Node.ELEMENT_NODE &&
+        (target as HTMLElement).getAttribute('data-mention-chip') === 'true'
+      ) {
+        event.preventDefault();
+        target.parentNode?.removeChild(target);
+        handleInput();
+      }
+    },
+    [handleInput],
+  );
 
-  const dropdownOpen = mentionQuery !== null && matchedFiles.length > 0;
+  useLayoutEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.addEventListener('beforeinput', handleBeforeInput as EventListener);
+    return () => editor.removeEventListener('beforeinput', handleBeforeInput as EventListener);
+  }, [handleBeforeInput]);
 
-  // -------------------------------------------------------------------------
-  // Render
-  // -------------------------------------------------------------------------
+  const handleFocus = useCallback(() => {
+    refreshSuggestions();
+  }, [refreshSuggestions]);
+
+  const handleBlur = useCallback((event: React.FocusEvent<HTMLDivElement>) => {
+    // Only collapse when focus leaves the composer's container entirely.
+    const next = event.relatedTarget as Node | null;
+    if (next && containerRef.current?.contains(next)) return;
+    setActiveToken(null);
+    setSuggestions([]);
+  }, []);
+
+  // Track suggestor open state for ARIA semantics.
+  const expanded = activeToken !== null && suggestions.length > 0;
+
   return (
-    <div className="relative flex-1">
-      {/* Mention dropdown — floats above the input */}
-      {dropdownOpen && (
-        <ul
-          ref={dropdownRef}
-          data-testid="mention-dropdown"
-          className="absolute bottom-full left-0 z-50 mb-1 w-full overflow-hidden rounded border border-[#30363d] bg-[#161b22] shadow-lg"
-          role="listbox"
-        >
-          {matchedFiles.map((filePath, index) => {
-            const fileName = filePath.split('/').pop() ?? filePath;
-            const dir = filePath.slice(0, filePath.lastIndexOf('/') + 1);
-            return (
-              <li
-                key={filePath}
-                role="option"
-                aria-selected={index === activeIndex}
-                onMouseDown={(e) => {
-                  e.preventDefault(); // prevent textarea blur
-                  insertMention(filePath);
-                }}
-                className={`flex cursor-pointer items-center gap-2 px-2 py-1 text-[10px] ${
-                  index === activeIndex ? 'bg-[#1f6feb33] text-[#e6edf3]' : 'text-[#8b949e] hover:bg-[#1f1f1f]'
-                }`}
-              >
-                <span className="font-semibold text-[#58a6ff]">{fileName}</span>
-                <span className="truncate text-[#6e7681]">{dir}</span>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-
-      {/* Ghost overlay stack */}
-      <div className="relative overflow-hidden rounded border border-[#30363d] bg-[#161b22] focus-within:border-[#58a6ff]">
-        {/* Mirror div — shows ALL text; plain text in normal color, mentions highlighted */}
-        <div
-          ref={mirrorRef}
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 overflow-hidden px-2 py-1.5 font-mono text-[11px] leading-5"
-          style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
-        >
-          {splitSegments(value).map((seg, i) =>
-            seg.kind === 'mention' ? (
-              <mark
-                key={i}
-                className="rounded px-0.5 not-italic"
-                style={{ background: 'rgba(31,111,235,0.2)', color: '#79b8ff' }}
-              >
-                {seg.value}
-              </mark>
-            ) : (
-              <span key={i} style={{ color: '#e6edf3' }}>
-                {seg.value}
-              </span>
-            )
-          )}
-          {/* trailing newline keeps mirror height in sync with textarea */}
-          {'\n'}
-        </div>
-
-        {/* Textarea on top — TRANSPARENT text so mirror shows through; caret visible */}
-        <textarea
-          ref={textareaRef}
-          value={value}
-          onChange={handleChange}
-          onKeyDown={handleKeyDown}
-          onScroll={handleScroll}
-          placeholder={placeholder}
-          disabled={disabled}
-          rows={1}
-          className="relative w-full resize-none bg-transparent px-2 py-1.5 font-mono text-[11px] leading-5 outline-none placeholder:text-[#6e7681] overflow-y-auto"
-          style={{
-            minHeight: '28px',
-            maxHeight: `${MAX_HEIGHT}px`,
-            color: 'transparent',   // hide textarea text — mirror renders it
-            caretColor: '#e6edf3',  // caret stays visible
-          }}
+    <div ref={containerRef} className="relative flex-1">
+      {expanded && (
+        <MentionSuggestor
+          suggestions={suggestions}
+          activeIndex={activeIndex}
+          status={indexStatus}
+          error={indexError}
+          anchorRect={anchorRect}
+          containerRect={containerRect}
+          onSelect={insertMention}
+          onHighlight={setActiveIndex}
+          listboxId={listboxId}
         />
-      </div>
+      )}
+      <div
+        ref={editorRef}
+        role="textbox"
+        aria-multiline="true"
+        aria-disabled={disabled || undefined}
+        aria-controls={expanded ? listboxId : undefined}
+        aria-expanded={expanded}
+        aria-haspopup="listbox"
+        aria-label={placeholder}
+        data-placeholder={placeholder}
+        data-testid="mention-editor"
+        contentEditable={!disabled}
+        suppressContentEditableWarning
+        onInput={handleInput}
+        onKeyDown={handleKeyDown}
+        onPaste={handlePaste}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
+        className="mention-editor max-h-28 min-h-[28px] w-full overflow-y-auto rounded border border-[#30363d] bg-[#161b22] px-2 py-1.5 font-mono text-[11px] leading-5 text-[#e6edf3] outline-none focus-within:border-[#58a6ff]"
+        style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+      />
     </div>
   );
 }

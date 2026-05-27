@@ -8,6 +8,11 @@ import { AgentModeSelector } from './AgentModeSelector';
 import { CollapsibleSection } from './CollapsibleSection';
 import { SessionListSection } from './SessionListSection';
 import { FileMentionInput } from './FileMentionInput';
+import { PlanClarificationPanel } from './PlanClarificationPanel';
+import type { FileMentionIndex } from '@/lib/code-space/mentions/index';
+import { buildMentionIndex } from '@/lib/code-space/mentions/index';
+import type { MentionIndexStatus } from '@/lib/code-space/mentions/useMentionIndex';
+import type { SelectedMention } from '@/lib/code-space/mentions/types';
 
 interface AgentPanelProps {
   session: CodeSpaceAgentSession | null;
@@ -32,10 +37,18 @@ interface AgentPanelProps {
   onSelectSession: (sessionId: string | null) => void;
   onRenameSession: (session: CodeSpaceAgentSession) => void;
   onDeleteSession: (session: CodeSpaceAgentSession) => void;
-  onSubmitPrompt: (prompt: string) => void;
+  onSubmitPrompt: (prompt: string, attachments?: SelectedMention[]) => void;
   onCancelRun: () => void;
   onAcceptDiff: (diffId: string) => void;
   onRejectDiff: (diffId: string) => void;
+  /** Project-wide mention index. Falls back to an index built from filePaths if absent. */
+  mentionIndex?: FileMentionIndex;
+  indexStatus?: MentionIndexStatus;
+  indexError?: string;
+  openFiles?: ReadonlyArray<string>;
+  recentFiles?: ReadonlyArray<string>;
+  currentEditorFilePath?: string;
+  /** Legacy seed list of file paths used when mentionIndex is not supplied. */
   filePaths?: string[];
 }
 
@@ -72,11 +85,23 @@ export function AgentPanel({
   onCancelRun,
   onAcceptDiff,
   onRejectDiff,
+  mentionIndex,
+  indexStatus = 'ready',
+  indexError,
+  openFiles,
+  recentFiles,
+  currentEditorFilePath,
   filePaths = [],
 }: AgentPanelProps) {
   const [prompt, setPrompt] = useState('');
+  const [promptMentions, setPromptMentions] = useState<SelectedMention[]>([]);
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  const effectiveIndex = useMemo<FileMentionIndex>(() => {
+    if (mentionIndex) return mentionIndex;
+    return buildMentionIndex(filePaths);
+  }, [mentionIndex, filePaths]);
 
   const toolCalls = session?.toolCalls ?? [];
   const toolCallCount = session?.toolCallCount ?? 0;
@@ -102,8 +127,9 @@ export function AgentPanel({
     event.preventDefault();
     const value = prompt.trim();
     if (!value || isRunning) return;
-    onSubmitPrompt(value);
+    onSubmitPrompt(value, promptMentions);
     setPrompt('');
+    setPromptMentions([]);
   };
 
   return (
@@ -128,6 +154,12 @@ export function AgentPanel({
           onSelectSession={onSelectSession}
           onRenameSession={onRenameSession}
           onDeleteSession={onDeleteSession}
+        />
+
+        <PlanClarificationPanel
+          questions={session?.clarifyingQuestions ?? []}
+          disabled={isRunning}
+          onSubmitAnswers={onSubmitPrompt}
         />
 
         <div className="min-h-0 flex-1 overflow-y-auto rounded border border-[#2a2a2a] bg-[#111111] p-2">
@@ -347,14 +379,24 @@ export function AgentPanel({
         <div className="flex items-end gap-2">
           <FileMentionInput
             value={prompt}
-            onChange={setPrompt}
-            onSubmit={() => {
-              const value = prompt.trim();
-              if (!value || isRunning) return;
-              onSubmitPrompt(value);
-              setPrompt('');
+            mentions={promptMentions}
+            onChange={(nextValue, nextMentions) => {
+              setPrompt(nextValue);
+              setPromptMentions(nextMentions);
             }}
-            filePaths={filePaths}
+            onSubmit={(nextValue, nextMentions) => {
+              const trimmed = nextValue.trim();
+              if (!trimmed || isRunning) return;
+              onSubmitPrompt(trimmed, nextMentions);
+              setPrompt('');
+              setPromptMentions([]);
+            }}
+            mentionIndex={effectiveIndex}
+            indexStatus={indexStatus}
+            indexError={indexError}
+            openFiles={openFiles}
+            recentFiles={recentFiles}
+            currentEditorFilePath={currentEditorFilePath}
             disabled={isRunning}
             placeholder="Describe a task..."
           />

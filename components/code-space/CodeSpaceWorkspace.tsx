@@ -54,8 +54,9 @@ import {
 } from '@/lib/code-space/agentModes';
 import { BottomPanel } from '@/components/code-space/BottomPanel';
 import {
-  deleteCodeSpaceProject,
-  deleteCodeSpaceSession,
+    deleteCodeSpaceProject,
+    deleteCodeSpaceSession,
+    deleteCodeSpaceTab,
   readCodeSpacePreferences,
   readCodeSpaceProjects,
   readCodeSpaceSessions,
@@ -70,6 +71,8 @@ import { ProviderConfig } from '@/components/agent/ProviderConfig';
 import { AgentPanel } from '@/components/code-space/AgentPanel';
 import type { AgentSSEEvent } from '@/lib/code-space/agent/types';
 import { nameSessionAsync } from '@/lib/code-space/sessionNaming';
+import { useMentionIndex } from '@/lib/code-space/mentions/useMentionIndex';
+import type { SelectedMention } from '@/lib/code-space/mentions/types';
 
 interface FilePayload {
   path: string;
@@ -187,6 +190,7 @@ function createSession(projectId: string | null, title = 'New coding session', m
     messages: [],
     toolCalls: [],
     plan: [],
+    clarifyingQuestions: [],
     todos: [],
     changesets: [],
     verificationResults: [],
@@ -224,9 +228,11 @@ export function CodeSpaceWorkspace() {
   const [fileContents, setFileContents] = useState<Record<string, FilePayload>>({});
   const [treeChildren, setTreeChildren] = useState<Record<string, CodeSpaceTreeNode[]>>({});
 
-  // Derive a flat list of all known file paths for the @ mention feature.
-  // Note: only directories the user has expanded are loaded into treeChildren,
-  // so files inside collapsed directories will not appear in mention suggestions.
+  // Motivation vs Logic: The @ mention picker needs every project file/folder available, not
+  // just the ones the user has expanded in the explorer. We keep flatFilePaths as a seed (so the
+  // picker has *something* before the server scan returns) and let useMentionIndex hydrate the
+  // full project listing from /api/code-space/mention-index. The hook caches per-rootPath and
+  // debounces refreshes.
   const flatFilePaths = useMemo(() => {
     const paths: string[] = [];
     function collect(nodes: CodeSpaceTreeNode[]) {
@@ -240,6 +246,19 @@ export function CodeSpaceWorkspace() {
     }
     return paths;
   }, [treeChildren]);
+
+  const activeProjectRootPath =
+    projects.find((project) => project.id === activeProjectId)?.rootPath ?? null;
+  const mentionSeedPaths = useMemo(() => flatFilePaths, [flatFilePaths]);
+  const mentionIndexHook = useMentionIndex(activeProjectRootPath, {
+    seedPaths: mentionSeedPaths,
+  });
+  // Debounced refresh when the explorer tree grows so newly-loaded files appear in suggestions.
+  useEffect(() => {
+    if (!activeProjectRootPath) return;
+    mentionIndexHook.refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProjectRootPath, flatFilePaths.length]);
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [loadingTree, setLoadingTree] = useState<Record<string, boolean>>({});
@@ -656,8 +675,16 @@ export function CodeSpaceWorkspace() {
       });
       return next;
     });
+    const removedTabIds: string[] = [];
+    // Root Cause vs Logic: dropping a project left its tabs in IndexedDB, so they reappeared after reload; delete the persisted rows when the project is gone.
     setTabs((current) => {
-      const next = current.filter((tab) => tab.projectId !== projectId);
+      const next = current.filter((tab) => {
+        if (tab.projectId === projectId) {
+          removedTabIds.push(tab.id);
+          return false;
+        }
+        return true;
+      });
       setActiveTabId((activeId) => {
         if (activeId && !next.some((tab) => tab.id === activeId)) {
           return null;
@@ -666,6 +693,9 @@ export function CodeSpaceWorkspace() {
       });
       return next;
     });
+    for (const tabId of removedTabIds) {
+      void deleteCodeSpaceTab(tabId);
+    }
     setActiveProjectId((activeId) => {
       if (activeId !== projectId) return activeId;
       setLocalPath('');
@@ -1148,12 +1178,15 @@ export function CodeSpaceWorkspace() {
 
   const deleteActiveFile = useCallback(() => {
     if (!activeTab || !window.confirm(`Delete ${activeTab.path}? This cannot be undone here.`)) return;
+    const tabIdToRemove = activeTab.id;
     void runFileAction({ action: 'delete', path: activeTab.path });
-    setTabs((current) => current.filter((tab) => tab.id !== activeTab.id));
+    setTabs((current) => current.filter((tab) => tab.id !== tabIdToRemove));
     setActiveTabId(null);
+    // Root Cause vs Logic: file deletions previously kept their tab rows in IndexedDB, so they popped back after refresh; delete the persisted entry too.
+    void deleteCodeSpaceTab(tabIdToRemove);
   }, [activeTab, runFileAction]);
 
-  const handleRunAgent = useCallback(async (userPrompt: string) => {
+  const handleRunAgent = useCallback(async (userPrompt: string, attachments: SelectedMention[] = []) => {
     const project = projects.find((item) => item.id === activeProjectId);
     if (!project || !project.rootPath) return;
 
@@ -1172,6 +1205,7 @@ export function CodeSpaceWorkspace() {
       mode: agentMode,
       messages: [...session.messages, userMessage],
       toolCallCount: 0,
+      clarifyingQuestions: [],
       updatedAt: now,
     };
 
@@ -1253,6 +1287,11 @@ export function CodeSpaceWorkspace() {
           mode: agentMode,
           toolBudget: sessionWithPrompt.toolBudget,
           enableThinking,
+          attachments: attachments.map((mention) => ({
+            kind: mention.type,
+            relativePath: mention.relativePath,
+            displayName: mention.displayName,
+          })),
         }),
         signal: abortCtrl.signal,
       });
@@ -1286,29 +1325,21 @@ export function CodeSpaceWorkspace() {
                 unifiedDiff: event.unifiedDiff,
               }]);
             } else if (event.type === 'plan_markdown_created') {
-              appendSessionMessage(sessionWithPrompt.id, {
-                id: nowId('msg'),
-                role: 'assistant',
-                content: `Plan markdown created: ${event.filePath}\n\nOpen it in the editor to revise the strategy before coding.`,
-                createdAt: Date.now(),
-              });
-              void openFile(project, event.filePath);
+              patchSession(sessionWithPrompt.id, (current) => ({
+                ...current,
+                planMarkdown: {
+                  filePath: event.filePath,
+                  content: event.content,
+                  createdAt: Date.now(),
+                },
+                updatedAt: Date.now(),
+              }));
             } else if (event.type === 'clarifying_questions_created') {
-              const content = [
-                'Clarifying questions:',
-                '',
-                ...event.questions.map((question, index) => [
-                  `${index + 1}. ${question.question}`,
-                  ...question.choices.map((choice, choiceIndex) => `   ${String.fromCharCode(65 + choiceIndex)}. ${choice}`),
-                  '   Other. Type a custom answer in the prompt box.',
-                ].join('\n')),
-              ].join('\n');
-              appendSessionMessage(sessionWithPrompt.id, {
-                id: nowId('msg'),
-                role: 'assistant',
-                content,
-                createdAt: Date.now(),
-              });
+              patchSession(sessionWithPrompt.id, (current) => ({
+                ...current,
+                clarifyingQuestions: event.questions,
+                updatedAt: Date.now(),
+              }));
             } else if (event.type === 'terminal_chunk') {
               setTerminalStream((prev) => prev + event.chunk);
             } else if (event.type === 'plan_created') {
@@ -1875,7 +1906,15 @@ export function CodeSpaceWorkspace() {
                 {fileIcon(tab.path)}
                 <span className="truncate">{basename(tab.path)}</span>
                 {tab.dirty && <span className="h-2 w-2 rounded-full bg-accent" />}
-                <span onClick={(event) => { event.stopPropagation(); setTabs((current) => current.filter((item) => item.id !== tab.id)); if (activeTabId === tab.id) setActiveTabId(null); }} className="rounded p-0.5 opacity-0 hover:bg-[#37373d] group-hover:opacity-100">
+                <span
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setTabs((current) => current.filter((item) => item.id !== tab.id));
+                    if (activeTabId === tab.id) setActiveTabId(null);
+                    void deleteCodeSpaceTab(tab.id);
+                  }}
+                  className="rounded p-0.5 opacity-0 hover:bg-[#37373d] group-hover:opacity-100"
+                >
                   <X size={12} />
                 </span>
               </button>
@@ -2050,6 +2089,11 @@ export function CodeSpaceWorkspace() {
             onCancelRun={handleCancelRun}
             onAcceptDiff={(diffId) => void acceptPendingDiff(diffId)}
             onRejectDiff={rejectPendingDiff}
+            mentionIndex={mentionIndexHook.index}
+            indexStatus={mentionIndexHook.status}
+            indexError={mentionIndexHook.error}
+            openFiles={tabs.map((tab) => tab.path).filter(Boolean)}
+            currentEditorFilePath={activeTab?.path}
             filePaths={flatFilePaths}
           />
           </aside>

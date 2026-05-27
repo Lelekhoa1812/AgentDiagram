@@ -103,6 +103,13 @@ export interface CodeSpaceMessage {
   createdAt: number;
 }
 
+export interface CodeSpaceClarifyingQuestion {
+  id: string;
+  question: string;
+  choices: string[];
+  allowMultiple?: boolean;
+}
+
 export interface CodeSpaceChangesetFile {
   path: string;
   status: 'added' | 'modified' | 'deleted' | 'renamed';
@@ -132,6 +139,12 @@ export interface CodeSpaceAgentSession {
   messages: CodeSpaceMessage[];
   toolCalls: CodeSpaceToolCall[];
   plan: string[];
+  clarifyingQuestions: CodeSpaceClarifyingQuestion[];
+  planMarkdown?: {
+    filePath: string;
+    content: string;
+    createdAt: number;
+  };
   todos: Array<{ id: string; text: string; done: boolean }>;
   changesets: CodeSpaceChangeset[];
   verificationResults: Array<{ id: string; command: string; status: 'passed' | 'failed' | 'skipped'; output: string }>;

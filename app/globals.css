@@ -203,3 +203,48 @@ textarea {
     box-shadow 220ms ease,
     transform 180ms ease;
 }
+
+/* Motivation vs Logic: the mention chip needs to look like a single inline token regardless of
+   whether it lives inside the contenteditable composer or a static React component. Visible text
+   is basename-only; the full project path lives on the `title` attribute (native tooltip) and
+   `aria-label` for screen readers. */
+.mention-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  margin: 0 1px;
+  border-radius: 4px;
+  background: rgba(31, 111, 235, 0.18);
+  color: #79b8ff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: nowrap;
+  user-select: none;
+  border: 1px solid rgba(31, 111, 235, 0.4);
+  cursor: default;
+}
+
+.mention-chip--folder {
+  background: rgba(163, 113, 247, 0.18);
+  color: #d2a8ff;
+  border-color: rgba(163, 113, 247, 0.4);
+}
+
+.mention-chip__remove {
+  font-size: 10px;
+  line-height: 1;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0 1px;
+  cursor: pointer;
+}
+
+.mention-editor:empty:before {
+  content: attr(data-placeholder);
+  color: #6e7681;
+  pointer-events: none;
+}
+
