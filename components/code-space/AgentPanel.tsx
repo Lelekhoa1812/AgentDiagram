@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Bot, Loader2, Zap } from 'lucide-react';
 import type { CodeSpaceAgentSession, CodeSpaceMessage } from '@/lib/code-space/core';
 import type { CodeSpaceAgentMode } from '@/lib/code-space/agentModes';
-import type { CodeSpaceExecutionPolicy } from '@/lib/code-space/executionPolicy';
+import { getCodeSpaceExecutionPolicyMeta, type CodeSpaceExecutionPolicy } from '@/lib/code-space/executionPolicy';
 import { AgentModeSelector } from './AgentModeSelector';
 import { ExecutionPolicySelector } from './ExecutionPolicySelector';
 import { CollapsibleSection } from './CollapsibleSection';
@@ -128,6 +128,7 @@ export function AgentPanel({
     if (mentionIndex) return mentionIndex;
     return buildMentionIndex(filePaths);
   }, [mentionIndex, filePaths]);
+  const executionPolicyMeta = getCodeSpaceExecutionPolicyMeta(executionPolicy);
 
   const chatEntries = useMemo(() => {
     return (session?.messages ?? [])
@@ -232,7 +233,7 @@ export function AgentPanel({
                 <div key={diff.diffId} className="rounded border border-[#30363d] bg-[#0f1114]">
                   <div className="flex items-center gap-2 border-b border-[#1f1f1f] px-2 py-1">
                     <span className="truncate text-[10px] text-[#e6edf3]">{diff.filePath}</span>
-                    <span className="ml-auto text-[9px] uppercase tracking-wider text-[#facc15]">
+                    <span className={`ml-auto text-[9px] uppercase tracking-wider ${executionPolicyMeta.accentClassName}`}>
                       {executionPolicy === 'auto' ? 'auto mode enabled' : 'confirm mode required'}
                     </span>
                   </div>
@@ -242,7 +243,9 @@ export function AgentPanel({
                   </div>
                   <div className="flex justify-end gap-2 border-t border-[#1f1f1f] px-2 py-1.5">
                     {executionPolicy === 'auto' ? (
-                      <span className="text-[9px] uppercase tracking-wider text-[#3fb950]">Applied automatically</span>
+                      <span className={`text-[9px] uppercase tracking-wider ${executionPolicyMeta.accentClassName}`}>
+                        Applied automatically
+                      </span>
                     ) : (
                       <>
                         <button type="button" onClick={() => onRejectDiff(diff.diffId)} className="rounded border border-[#30363d] px-2 py-1 text-[10px] text-[#f85149] hover:bg-[#2d1517]">

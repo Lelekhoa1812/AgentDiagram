@@ -14,21 +14,23 @@ export interface CodeSpaceExecutionPolicyMeta {
 export const DEFAULT_CODE_SPACE_EXECUTION_POLICY: CodeSpaceExecutionPolicy = 'manual';
 
 export const CODE_SPACE_EXECUTION_POLICY_META: Record<CodeSpaceExecutionPolicy, CodeSpaceExecutionPolicyMeta> = {
+  // Motivation vs Logic: the selector should signal risk in the same visual language as the review flow, so the
+  // automatically applied path reads as cautionary red while the user-confirmed path reads as the safe green default.
   auto: {
     policy: 'auto',
     label: 'Auto',
     description: 'Apply agent changes automatically without asking.',
-    accentClassName: 'text-[#3fb950]',
-    buttonClassName: 'border-[#23863666] bg-[#0f2a1a] text-[#7ee787] hover:bg-[#12331f]',
-    menuItemClassName: 'text-[#7ee787] hover:bg-[#12331f]',
+    accentClassName: 'text-[#f85149]',
+    buttonClassName: 'border-[#be123c66] bg-[#2d1217] text-[#fb7185] hover:bg-[#3b151f]',
+    menuItemClassName: 'text-[#fb7185] hover:bg-[#3b151f]',
   },
   manual: {
     policy: 'manual',
     label: 'Confirm',
     description: 'Require manual confirmation before applying code changes.',
-    accentClassName: 'text-[#f85149]',
-    buttonClassName: 'border-[#be123c66] bg-[#2d1217] text-[#fb7185] hover:bg-[#3b151f]',
-    menuItemClassName: 'text-[#fb7185] hover:bg-[#3b151f]',
+    accentClassName: 'text-[#3fb950]',
+    buttonClassName: 'border-[#23863666] bg-[#0f2a1a] text-[#7ee787] hover:bg-[#12331f]',
+    menuItemClassName: 'text-[#7ee787] hover:bg-[#12331f]',
   },
 };
 
