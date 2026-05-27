@@ -11,6 +11,7 @@ import { CustomPromptPanel } from '@/components/agent/CustomPromptPanel';
 import { MultiLayerPanel } from '@/components/multilayer/MultiLayerPanel';
 import { LayerNavigator } from '@/components/multilayer/LayerNavigator';
 import { CodeSpaceWorkspace } from '@/components/code-space/CodeSpaceWorkspace';
+import { CodeSpaceWorkspaceEnhancements } from '@/components/code-space/CodeSpaceWorkspaceEnhancements';
 import { flushDraftSave, useDiagramStore } from '@/lib/state/store';
 import { readUiPreferences, writeUiPreference } from '@/lib/state/uiPreferences';
 import { downloadPng } from '@/lib/export/png';
@@ -286,7 +287,10 @@ export default function Page() {
         </main>
       ) : mode === 'code-space' ? (
         // Motivation vs Logic: Code Space is a unifying IDE surface that reuses repo, editor, custom-app, and multilayer services, so it lives as a first-class shell mode without changing the existing page contracts.
-        <CodeSpaceWorkspace />
+        <>
+          <CodeSpaceWorkspace />
+          <CodeSpaceWorkspaceEnhancements />
+        </>
       ) : mode === 'custom-prompt' ? (
         <main className="flex-1 min-h-0 overflow-hidden bg-ink-950">
           <CustomPromptPanel />
