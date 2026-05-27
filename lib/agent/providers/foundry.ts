@@ -1,5 +1,5 @@
 /**
- * Azure AI Foundry provider — uses OpenAI-compatible REST API.
+ * Azure AI Foundry provider — uses Azure OpenAI deployment chat completions.
  * User supplies endpoint and custom model deployment name.
  */
 import type { Provider, ChatParams, ValidationResult, ProviderConfig } from './types';
@@ -12,7 +12,7 @@ export class FoundryProvider implements Provider {
 
   constructor(cfg: ProviderConfig) {
     this.apiKey = cfg.apiKey;
-    this.endpoint = (cfg.endpoint ?? '').replace(/\/$/, '');
+    this.endpoint = (cfg.endpoint ?? '').replace(/\/+$/, '');
     if (!this.endpoint) {
       throw new Error('FoundryProvider requires endpoint URL');
     }
@@ -20,10 +20,7 @@ export class FoundryProvider implements Provider {
 
   async validate(model: string): Promise<ValidationResult> {
     try {
-      await this.callChat({
-        messages: [{ role: 'user', content: 'ping' }],
-        model,
-      });
+      await this.callChat({ messages: [{ role: 'user', content: 'ping' }], model });
       return { ok: true };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -32,15 +29,13 @@ export class FoundryProvider implements Provider {
   }
 
   async chat(params: ChatParams): Promise<string> {
-    const res = await this.callChat(params);
-    return res;
+    return this.callChat(params);
   }
 
   private async callChat(params: ChatParams): Promise<string> {
-    const url = `${this.endpoint}/openai/deployments/${encodeURIComponent(params.model)}/chat/completions?api-version=2024-08-01-preview`;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const body: any = {
-      // Root Cause vs Logic: Avoid unsupported sampling knobs so Foundry/OpenAI deployments accept the request.
+    const url = buildFoundryChatUrl(this.endpoint, params.model);
+    const body: Record<string, unknown> = {
+      // Coding-agent provider payloads stay minimal: no temperature and no max_tokens.
       messages: params.messages,
     };
     if (params.jsonSchema) {
@@ -64,4 +59,17 @@ export class FoundryProvider implements Provider {
     const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
     return json.choices?.[0]?.message?.content ?? '';
   }
+}
+
+function buildFoundryChatUrl(endpoint: string, deployment: string): string {
+  const version = process.env.FOUNDRY_API_VERSION ?? process.env.AZURE_OPENAI_API_VERSION ?? '2024-08-01-preview';
+  const clean = endpoint.replace(/\/+$/, '');
+  if (clean.includes('/chat/completions')) return appendApiVersion(clean, version);
+  if (clean.includes('/openai/deployments/')) return appendApiVersion(`${clean}/chat/completions`, version);
+  return appendApiVersion(`${clean}/openai/deployments/${encodeURIComponent(deployment)}/chat/completions`, version);
+}
+
+function appendApiVersion(url: string, version: string): string {
+  if (/[?&]api-version=/.test(url)) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}api-version=${encodeURIComponent(version)}`;
 }
