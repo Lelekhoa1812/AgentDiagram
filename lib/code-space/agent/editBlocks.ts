@@ -1,0 +1,242 @@
+import { createHash } from 'node:crypto';
+
+export interface EditBlock {
+  path: string;
+  search: string;
+  replace: string;
+  reason: string;
+}
+
+export interface EditBlockPreview {
+  path: string;
+  beforeContent: string;
+  afterContent: string;
+  explanation: string;
+  unifiedDiff: string;
+  beforeHash: string;
+  afterHash: string;
+}
+
+export interface EditBlockDiagnostic {
+  path: string;
+  code:
+    | 'EMPTY_SEARCH'
+    | 'SEARCH_NOT_FOUND'
+    | 'SEARCH_NOT_UNIQUE'
+    | 'INVALID_PATH'
+    | 'SYNTAX_ERROR';
+  message: string;
+  line?: number;
+  column?: number;
+}
+
+export type EditBlockResult =
+  | { ok: true; previews: EditBlockPreview[] }
+  | { ok: false; diagnostics: EditBlockDiagnostic[] };
+
+function hashContent(content: string): string {
+  return createHash('sha256').update(content).digest('hex');
+}
+
+function countOccurrences(haystack: string, needle: string): number {
+  if (!needle) return 0;
+  let count = 0;
+  let index = 0;
+  while (true) {
+    const next = haystack.indexOf(needle, index);
+    if (next < 0) break;
+    count += 1;
+    index = next + needle.length;
+  }
+  return count;
+}
+
+function lineForIndex(content: string, index: number): number {
+  return content.slice(0, Math.max(0, index)).split('\n').length;
+}
+
+export function normalizeAgentPath(path: string): string {
+  return path.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+/g, '/');
+}
+
+export function applyEditBlocksToContent(path: string, beforeContent: string, edits: EditBlock[]): EditBlockResult {
+  const normalizedPath = normalizeAgentPath(path);
+  if (!normalizedPath || normalizedPath.startsWith('../') || normalizedPath.includes('/../')) {
+    return { ok: false, diagnostics: [{ path, code: 'INVALID_PATH', message: `Invalid edit path: ${path}` }] };
+  }
+
+  let nextContent = beforeContent;
+  const diagnostics: EditBlockDiagnostic[] = [];
+
+  for (const edit of edits) {
+    if (!edit.search) {
+      diagnostics.push({ path: normalizedPath, code: 'EMPTY_SEARCH', message: 'SEARCH block cannot be empty.' });
+      continue;
+    }
+
+    const occurrences = countOccurrences(nextContent, edit.search);
+    if (occurrences === 0) {
+      diagnostics.push({
+        path: normalizedPath,
+        code: 'SEARCH_NOT_FOUND',
+        message: 'SEARCH block did not exactly match the current file. Re-read the target range and regenerate the edit.',
+      });
+      continue;
+    }
+    if (occurrences > 1) {
+      diagnostics.push({
+        path: normalizedPath,
+        code: 'SEARCH_NOT_UNIQUE',
+        message: 'SEARCH block matched more than once. Add surrounding context until it is unique.',
+      });
+      continue;
+    }
+
+    nextContent = nextContent.replace(edit.search, edit.replace);
+  }
+
+  if (diagnostics.length) return { ok: false, diagnostics };
+
+  return {
+    ok: true,
+    previews: [
+      {
+        path: normalizedPath,
+        beforeContent,
+        afterContent: nextContent,
+        explanation: edits.map((edit) => edit.reason).filter(Boolean).join('\n') || 'Surgical edit block proposal',
+        unifiedDiff: createUnifiedDiff(normalizedPath, beforeContent, nextContent),
+        beforeHash: hashContent(beforeContent),
+        afterHash: hashContent(nextContent),
+      },
+    ],
+  };
+}
+
+export function applyGroupedEditBlocks(files: Record<string, string>, edits: EditBlock[]): EditBlockResult {
+  const grouped = new Map<string, EditBlock[]>();
+  for (const edit of edits) {
+    const normalized = normalizeAgentPath(edit.path);
+    grouped.set(normalized, [...(grouped.get(normalized) ?? []), { ...edit, path: normalized }]);
+  }
+
+  const previews: EditBlockPreview[] = [];
+  const diagnostics: EditBlockDiagnostic[] = [];
+  for (const [filePath, fileEdits] of grouped) {
+    const before = files[filePath] ?? '';
+    const result = applyEditBlocksToContent(filePath, before, fileEdits);
+    if (!result.ok) diagnostics.push(...result.diagnostics);
+    else previews.push(...result.previews);
+  }
+
+  return diagnostics.length ? { ok: false, diagnostics } : { ok: true, previews };
+}
+
+export function createUnifiedDiff(filePath: string, beforeContent: string, afterContent: string): string {
+  if (beforeContent === afterContent) return '';
+
+  const before = beforeContent.split('\n');
+  const after = afterContent.split('\n');
+  const out = [`--- a/${filePath}`, `+++ b/${filePath}`];
+  let i = 0;
+  let j = 0;
+  let oldLine = 1;
+  let newLine = 1;
+  const hunk: string[] = [];
+
+  while (i < before.length || j < after.length) {
+    if (before[i] === after[j]) {
+      if (hunk.length) hunk.push(` ${before[i] ?? ''}`);
+      i += 1;
+      j += 1;
+      oldLine += 1;
+      newLine += 1;
+      continue;
+    }
+
+    const startOld = oldLine;
+    const startNew = newLine;
+    hunk.length = 0;
+    let oldCount = 0;
+    let newCount = 0;
+
+    while ((i < before.length || j < after.length) && before[i] !== after[j]) {
+      const nextBeforeEqualsAfterNext = before[i] !== undefined && before[i] === after[j + 1];
+      const nextAfterEqualsBeforeNext = after[j] !== undefined && after[j] === before[i + 1];
+
+      if (nextBeforeEqualsAfterNext && after[j] !== undefined) {
+        hunk.push(`+${after[j]}`);
+        j += 1;
+        newLine += 1;
+        newCount += 1;
+      } else if (nextAfterEqualsBeforeNext && before[i] !== undefined) {
+        hunk.push(`-${before[i]}`);
+        i += 1;
+        oldLine += 1;
+        oldCount += 1;
+      } else {
+        if (before[i] !== undefined) {
+          hunk.push(`-${before[i]}`);
+          i += 1;
+          oldLine += 1;
+          oldCount += 1;
+        }
+        if (after[j] !== undefined) {
+          hunk.push(`+${after[j]}`);
+          j += 1;
+          newLine += 1;
+          newCount += 1;
+        }
+      }
+
+      if (hunk.length > 400) break;
+    }
+
+    out.push(`@@ -${startOld},${Math.max(oldCount, 1)} +${startNew},${Math.max(newCount, 1)} @@`);
+    out.push(...hunk);
+  }
+
+  return `${out.join('\n')}\n`;
+}
+
+export function parseSearchReplaceBlocks(raw: string): EditBlock[] {
+  const edits: EditBlock[] = [];
+  const pattern = /<<<<<<< SEARCH(?:\s+path="([^"]+)")?[^\n]*\n([\s\S]*?)\n=======\n([\s\S]*?)\n>>>>>>> REPLACE/g;
+  for (const match of raw.matchAll(pattern)) {
+    const path = match[1]?.trim();
+    if (!path) continue;
+    edits.push({ path, search: match[2], replace: match[3], reason: 'Model-generated SEARCH/REPLACE block' });
+  }
+  return edits;
+}
+
+export function validateSyntaxLightweight(path: string, content: string): EditBlockDiagnostic[] {
+  const diagnostics: EditBlockDiagnostic[] = [];
+  const ext = path.split('.').pop()?.toLowerCase();
+  if (ext === 'json') {
+    try {
+      JSON.parse(content);
+    } catch (error) {
+      diagnostics.push({ path, code: 'SYNTAX_ERROR', message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  if (['ts', 'tsx', 'js', 'jsx'].includes(ext ?? '')) {
+    const pairs: Array<[string, string]> = [['(', ')'], ['[', ']'], ['{', '}']];
+    for (const [open, close] of pairs) {
+      const openCount = (content.match(new RegExp(`\\${open}`, 'g')) ?? []).length;
+      const closeCount = (content.match(new RegExp(`\\${close}`, 'g')) ?? []).length;
+      if (Math.abs(openCount - closeCount) > 2) {
+        const index = content.lastIndexOf(openCount > closeCount ? open : close);
+        diagnostics.push({
+          path,
+          code: 'SYNTAX_ERROR',
+          line: lineForIndex(content, index),
+          message: `Large delimiter imbalance for ${open}${close}. Run typecheck after applying or regenerate a smaller edit.`,
+        });
+      }
+    }
+  }
+
+  return diagnostics;
+}

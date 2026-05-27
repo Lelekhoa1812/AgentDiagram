@@ -8,6 +8,7 @@ import type { AgentSSEEvent } from '@/lib/code-space/agent/types';
 import { normalizeCodeSpaceAgentMode, type CodeSpaceAgentMode } from '@/lib/code-space/agentModes';
 import { createAgentEvent, createDefaultToolRegistry, encodeSseEvent, getEventStore } from '@/lib/code-space/runtime';
 import type { AgentEventType } from '@/lib/code-space/runtime';
+import { createUnifiedDiff, validateSyntaxLightweight } from '@/lib/code-space/agent/editBlocks';
 import { guardPath } from '@/lib/security/pathGuard';
 
 const MessageSchema = z.object({
@@ -54,24 +55,6 @@ interface ContextFile {
   reasons: string[];
 }
 
-interface RepoMap {
-  filesConsidered: number;
-  directories: Array<{ path: string; fileCount: number }>;
-  keyFiles: string[];
-  extensionCounts: Array<{ extension: string; count: number }>;
-  stack: ProjectStack;
-}
-
-interface ProjectStack {
-  packageManager: string | null;
-  languages: string[];
-  frameworks: string[];
-  scripts: Record<string, string>;
-  testRunners: string[];
-  lintTools: string[];
-  buildTools: string[];
-}
-
 interface ContextSearchResult {
   filesConsidered: number;
   terms: string[];
@@ -79,22 +62,12 @@ interface ContextSearchResult {
   omittedRelevantFiles: string[];
 }
 
-interface DependencyTrace {
-  imports: Array<{ from: string; imports: string[] }>;
-  relatedFiles: string[];
-  unresolvedImports: string[];
-}
-
-interface ValidationStrategy {
-  packageManager: string | null;
-  commands: Array<{ kind: 'typecheck' | 'lint' | 'test' | 'build' | 'format' | 'preview'; command: string; reason: string }>;
-  missing: string[];
-}
-
-interface RiskAssessment {
-  level: 'low' | 'medium' | 'high';
-  reasons: string[];
-  approvalGates: string[];
+interface ProposedPatchFile {
+  path: string;
+  beforeContent: string;
+  afterContent: string;
+  explanation: string;
+  unifiedDiff: string;
 }
 
 export async function POST(req: NextRequest) {
@@ -136,6 +109,23 @@ export async function POST(req: NextRequest) {
         );
         emit({ type: 'structured_event', event });
       };
+      const emitTool = async <T>(tool: string, input: unknown, run: () => Promise<T>): Promise<T> => {
+        const toolCallId = `tool:${Date.now()}:${tool}:${Math.random().toString(36).slice(2, 6)}`;
+        const startedAt = Date.now();
+        emit({ type: 'tool_start', toolCallId, tool, input });
+        await emitRuntime('tool.started', { tool, input });
+        try {
+          const output = await run();
+          emit({ type: 'tool_result', toolCallId, tool, output, durationMs: Date.now() - startedAt });
+          await emitRuntime('tool.completed', { tool, output });
+          return output;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          emit({ type: 'tool_result', toolCallId, tool, output: null, durationMs: Date.now() - startedAt, error: message });
+          await emitRuntime('tool.failed', { tool, message });
+          throw error;
+        }
+      };
 
       try {
         await emitRuntime('run.created', { mode, toolBudget });
@@ -146,49 +136,51 @@ export async function POST(req: NextRequest) {
         await emitRuntime('plan.created', { items: plan });
         plan.forEach((text, index) => emit({ type: 'todo_created', todo: { id: `todo:${runId}:${index}`, text, done: false } }));
 
-        const classifyToolId = `tool:${Date.now()}:classify`;
-        emit({ type: 'tool_start', toolCallId: classifyToolId, tool: 'classify_task', input: { prompt: latestUserMessage.content, intents } });
-        await emitRuntime('tool.started', { tool: 'classify_task', riskLevel: 'safe' });
-        emit({ type: 'tool_result', toolCallId: classifyToolId, tool: 'classify_task', output: { intents, mode }, durationMs: 1 });
-        await emitRuntime('tool.completed', { tool: 'classify_task', intents, mode });
+        await emitTool('classify_task', { prompt: latestUserMessage.content, intents, mode }, async () => ({ intents, mode, modeContract: describeModeContract(mode) }));
         emit({ type: 'todo_updated', todoId: `todo:${runId}:0`, done: true });
 
-        const contextToolId = `tool:${Date.now()}:context`;
-        const contextStart = Date.now();
-        emit({
-          type: 'tool_start',
-          toolCallId: contextToolId,
-          tool: 'context_search',
-          input: { openTabs, attachments, tools: registry.list().map((tool) => tool.name) },
-        });
-        await emitRuntime('context.search.started', { openTabs, attachments });
-        const context = await collectProjectContext(guarded.resolved, latestUserMessage.content, openTabs, attachments);
-        emit({
-          type: 'tool_result',
-          toolCallId: contextToolId,
-          tool: 'context_search',
-          output: {
-            filesConsidered: context.filesConsidered,
-            selectedFiles: context.files.map((file) => ({ path: file.path, score: file.score, reasons: file.reasons })),
-          },
-          durationMs: Date.now() - contextStart,
-        });
+        const context = await emitTool('context_search', { openTabs, attachments, tools: registry.list().map((tool) => tool.name) }, async () =>
+          collectProjectContext(guarded.resolved, latestUserMessage.content, openTabs, attachments),
+        );
         await emitRuntime('context.search.completed', { selectedFiles: context.files.map((file) => file.path), terms: context.terms });
         emit({ type: 'todo_updated', todoId: `todo:${runId}:1`, done: true });
 
-        const validationCommands: string[] = [];
-        const answer = [
-          `Mode: ${mode === 'ask' ? 'Ask' : mode === 'plan' ? 'Plan' : 'Code'}`,
-          '',
-          `For ${projectName}, I reviewed the selected project context.`,
-          '',
-          'Evidence reviewed:',
-          ...(context.files.length ? context.files.slice(0, 8).map((file) => `- ${file.path}`) : ['- No readable source files were found.']),
-          '',
-          mode === 'code'
-            ? 'Code mode requires the patch generation/apply loop before it can safely mutate source files. No source changes were applied by this run.'
-            : 'No source changes were made by this run.',
-        ].join('\n');
+        const validation = await emitTool('validation_strategy', { mode, changedPaths: context.files.map((file) => file.path) }, async () => detectValidationCommands(guarded.resolved));
+        emit({ type: 'todo_updated', todoId: `todo:${runId}:2`, done: true });
+
+        let filesChanged: string[] = [];
+        let answer = '';
+
+        if (mode === 'ask') {
+          answer = buildAskResponse(projectName, latestUserMessage.content, context, validation);
+        } else if (mode === 'plan') {
+          const planArtifact = await emitTool('write_plan_artifact', { projectName, prompt: latestUserMessage.content }, async () => writePlanArtifact(guarded.resolved, sessionId, projectName, latestUserMessage.content, context, validation));
+          filesChanged = [planArtifact.filePath];
+          emit({ type: 'plan_markdown_created', filePath: planArtifact.filePath, content: planArtifact.content });
+          answer = buildPlanResponse(projectName, planArtifact.filePath, context, validation);
+        } else {
+          const proposal = await emitTool('propose_patch', { prompt: latestUserMessage.content, contextFiles: context.files.map((file) => file.path) }, async () =>
+            proposeConservativePatch(guarded.resolved, latestUserMessage.content, context),
+          );
+          if (proposal.files.length) {
+            for (const file of proposal.files) {
+              emit({
+                type: 'diff_proposed',
+                diffId: `patch:${runId}:${file.path}`,
+                filePath: file.path,
+                oldContent: file.beforeContent,
+                newContent: file.afterContent,
+                explanation: file.explanation,
+                unifiedDiff: file.unifiedDiff,
+              });
+              await emitRuntime('patch.proposed', { path: file.path, explanation: file.explanation });
+            }
+            filesChanged = proposal.files.map((file) => file.path);
+            answer = buildCodeResponse(projectName, proposal.files, validation);
+          } else {
+            answer = buildNoPatchResponse(projectName, latestUserMessage.content, context, validation);
+          }
+        }
 
         for (const chunk of chunkText(answer)) {
           emit({ type: 'text_delta', delta: chunk });
@@ -196,15 +188,20 @@ export async function POST(req: NextRequest) {
         }
         await emitRuntime('message.assistant.completed', { content: answer });
 
+        const validationStatus = mode === 'code' && filesChanged.length ? 'skipped' : 'passed';
         emit({
           type: 'validation_result',
-          id: `validation:${runId}:static`,
-          command: validationCommands.length ? validationCommands.join(', ') : 'context review',
-          status: 'skipped',
-          output: 'No file mutation validation was run because no source files were changed.',
+          id: `validation:${runId}:strategy`,
+          command: validation.commands.map((command) => command.command).join(', ') || 'validation strategy discovery',
+          status: validationStatus,
+          output:
+            mode === 'code' && filesChanged.length
+              ? 'Patch proposed for review. Run validation after accepting the diff so checks execute against the updated workspace.'
+              : `Detected ${validation.commands.length} validation command(s).`,
         });
-        await emitRuntime('run.completed', { status: 'completed', filesChanged: [] });
-        emit({ type: 'agent_done', summary: answer, filesChanged: [] });
+        await emitRuntime('validation.completed', { status: validationStatus, validation });
+        await emitRuntime('run.completed', { status: 'completed', filesChanged });
+        emit({ type: 'agent_done', summary: answer, filesChanged });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         await emitRuntime('run.failed', { message });
@@ -224,26 +221,39 @@ export async function POST(req: NextRequest) {
   });
 }
 
-export function buildPlan(mode: CodeSpaceAgentMode, _intents: string[], _prompt: string): string[] {
+export function buildPlan(mode: CodeSpaceAgentMode, intents: string[], prompt: string): string[] {
   if (mode === 'ask') {
-    return ['Classify request', 'Search relevant project context', 'Answer without changing files'];
+    return ['Classify read-only request', 'Discover relevant context dynamically', 'Answer with evidence and no file mutation'];
   }
 
   if (mode === 'plan') {
-    return ['Classify request', 'Search relevant project context', 'Prepare implementation plan'];
+    return ['Classify implementation intent', 'Discover relevant context and validation surfaces', 'Write a reusable planning artifact'];
   }
 
-  return ['Classify request', 'Search relevant project context', 'Prepare source changes'];
+  const complex = shouldUseMultiAgent(prompt, intents);
+  return [
+    'Classify implementation request and blast radius',
+    complex ? 'Run multi-agent style exploration checklist' : 'Discover relevant source and validation context',
+    'Prepare the smallest reviewable code patch',
+    'Defer disk mutation until the user accepts the diff',
+  ];
 }
 
 export function buildClarifyingQuestions(): CodeSpaceClarifyingQuestion[] {
   return [];
 }
 
-function promptTerms(prompt: string): string[] {
-  return Array.from(new Set(prompt.toLowerCase().split(/[^a-z0-9_/-]+/).filter((term) => term.length > 2))).slice(0, 32);
+function describeModeContract(mode: CodeSpaceAgentMode): string {
+  if (mode === 'ask') return 'Ask mode is read-only: inspect, explain, and cite evidence without creating patches.';
+  if (mode === 'plan') return 'Plan mode creates a markdown implementation plan artifact and does not edit product source files.';
+  return 'Code mode proposes reviewable diffs and relies on checkpointed apply for mutation.';
 }
 
+function promptTerms(prompt: string): string[] {
+  return Array.from(new Set(prompt.toLowerCase().split(/[^a-z0-9_/-]+/).filter((term) => term.length > 2 && !STOP_WORDS.has(term)))).slice(0, 32);
+}
+
+const STOP_WORDS = new Set(['the', 'and', 'for', 'with', 'this', 'that', 'you', 'your', 'are', 'can', 'into', 'from', 'mode', 'code']);
 const CONTEXT_GLOBS = ['**/*.{ts,tsx,js,jsx,json,md,css,scss,py,go,rs,yml,yaml,toml}', '!node_modules/**', '!.git/**', '!dist/**', '!build/**', '!.next/**'];
 
 async function collectProjectContext(root: string, prompt: string, openTabs: string[], attachments: AgentAttachment[] = []): Promise<ContextSearchResult> {
@@ -261,14 +271,15 @@ async function collectProjectContext(root: string, prompt: string, openTabs: str
         score += amount;
         reasons.push(reason);
       };
-      add(attachedFiles.has(file) ? 60 : 0, '@ mentioned file');
-      add(attachedFolders.some((folder) => folder && file.startsWith(`${folder}/`)) ? 30 : 0, '@ mentioned folder');
-      add(openTabs.includes(file) ? 20 : 0, 'open tab');
-      add(terms.reduce((sum, term) => sum + (lower.includes(term) ? 4 : 0), 0), 'prompt/path overlap');
+      add(attachedFiles.has(file) ? 80 : 0, '@ mentioned file');
+      add(attachedFolders.some((folder) => folder && file.startsWith(`${folder}/`)) ? 40 : 0, '@ mentioned folder');
+      add(openTabs.includes(file) ? 28 : 0, 'open tab');
+      add(/package\.json|tsconfig|next\.config|readme|agent|code-space|runtime|route|test/i.test(file) ? 8 : 0, 'high-signal project file');
+      add(terms.reduce((sum, term) => sum + (lower.includes(term) ? 5 : 0), 0), 'prompt/path overlap');
       return { file, score, reasons };
     })
     .sort((a, b) => b.score - a.score || a.file.localeCompare(b.file))
-    .slice(0, 12);
+    .slice(0, 16);
 
   const files: ContextFile[] = [];
   for (const item of selected) {
@@ -276,11 +287,227 @@ async function collectProjectContext(root: string, prompt: string, openTabs: str
     if (absolute !== root && !absolute.startsWith(`${root}${path.sep}`)) continue;
     try {
       const content = await fs.readFile(absolute, 'utf8');
-      files.push({ path: item.file, content: content.slice(0, 8_000), truncated: content.length > 8_000, lineCount: content.split('\n').length, score: item.score, reasons: item.reasons });
+      files.push({ path: item.file, content: content.slice(0, 12_000), truncated: content.length > 12_000, lineCount: content.split('\n').length, score: item.score, reasons: item.reasons });
     } catch {}
   }
 
   return { filesConsidered: candidates.length, files, terms, omittedRelevantFiles: [] };
+}
+
+async function detectValidationCommands(root: string): Promise<{ commands: Array<{ kind: 'typecheck' | 'lint' | 'test' | 'build'; command: string; reason: string }>; packageManager: string | null }> {
+  try {
+    const pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8')) as { scripts?: Record<string, string>; packageManager?: string };
+    const packageManager = await detectPackageManager(root, pkg.packageManager);
+    const scripts = pkg.scripts ?? {};
+    const commands: Array<{ kind: 'typecheck' | 'lint' | 'test' | 'build'; command: string; reason: string }> = [];
+    if (scripts.typecheck) commands.push({ kind: 'typecheck', command: `${packageManager} run typecheck`, reason: 'TypeScript/no-emit validation is available.' });
+    if (scripts.lint) commands.push({ kind: 'lint', command: `${packageManager} run lint`, reason: 'Lint validation is available.' });
+    if (scripts.test) commands.push({ kind: 'test', command: `${packageManager} run test`, reason: 'Automated tests are available.' });
+    if (scripts.build) commands.push({ kind: 'build', command: `${packageManager} run build`, reason: 'Production build validation is available.' });
+    return { commands, packageManager };
+  } catch {
+    return { commands: [], packageManager: null };
+  }
+}
+
+async function detectPackageManager(root: string, packageManager?: string): Promise<string> {
+  if (packageManager?.startsWith('pnpm')) return 'pnpm';
+  if (packageManager?.startsWith('yarn')) return 'yarn';
+  if (packageManager?.startsWith('bun')) return 'bun';
+  if (await exists(path.join(root, 'pnpm-lock.yaml'))) return 'pnpm';
+  if (await exists(path.join(root, 'yarn.lock'))) return 'yarn';
+  if (await exists(path.join(root, 'bun.lockb'))) return 'bun';
+  return 'npm';
+}
+
+async function exists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function writePlanArtifact(
+  root: string,
+  sessionId: string,
+  projectName: string,
+  prompt: string,
+  context: ContextSearchResult,
+  validation: Awaited<ReturnType<typeof detectValidationCommands>>,
+): Promise<{ filePath: string; content: string }> {
+  const filePath = `.agent/plans/${sessionId.replace(/[^a-zA-Z0-9_.-]+/g, '-')}.md`;
+  const absolute = path.join(root, filePath);
+  const content = [
+    `# Code Space Plan — ${projectName}`,
+    '',
+    `## User request`,
+    prompt,
+    '',
+    '## Definition of Done',
+    '- The implementation is represented as the smallest reviewable patch set.',
+    '- Every edited file is read before patch proposal.',
+    '- Syntax pre-validation passes before disk write.',
+    '- Checkpoint is created before apply, with restore available.',
+    '- Typecheck, lint, tests, and build are run when available after acceptance.',
+    '',
+    '## Evidence reviewed',
+    ...(context.files.length ? context.files.map((file) => `- ${file.path} (${file.lineCount} lines${file.truncated ? ', truncated' : ''})`) : ['- No source files selected.']),
+    '',
+    '## Implementation sequence',
+    '1. Confirm exact files to mutate via @Files/@Folder/open tabs or semantic search.',
+    '2. Read target files and related tests/usages.',
+    '3. Generate exact SEARCH/REPLACE edit blocks.',
+    '4. Preview patch and run syntax pre-validation.',
+    '5. Request user diff approval.',
+    '6. Apply with checkpoint and run validation commands.',
+    '7. Self-heal failures with additional surgical patches.',
+    '',
+    '## Validation commands',
+    ...(validation.commands.length ? validation.commands.map((command) => `- ${command.command} — ${command.reason}`) : ['- No package validation commands detected.']),
+    '',
+    '## Rollback',
+    '- Use the checkpoint restore endpoint for any accepted patch that corrupts the workspace.',
+    '',
+  ].join('\n');
+  await fs.mkdir(path.dirname(absolute), { recursive: true });
+  await fs.writeFile(absolute, content, 'utf8');
+  return { filePath, content };
+}
+
+function buildAskResponse(projectName: string, prompt: string, context: ContextSearchResult, validation: Awaited<ReturnType<typeof detectValidationCommands>>): string {
+  return [
+    'Mode: Ask',
+    '',
+    `For ${projectName}, I inspected relevant project context without mutating files.`,
+    '',
+    'Evidence reviewed:',
+    ...(context.files.length ? context.files.slice(0, 10).map((file) => `- ${file.path}`) : ['- No readable source files were selected.']),
+    '',
+    `Request interpreted as: ${prompt}`,
+    '',
+    `Available validation: ${validation.commands.map((command) => command.command).join(', ') || 'none detected'}.`,
+    '',
+    'Ask mode is read-only. Switch to Plan for an implementation plan or Code for a reviewable patch.',
+  ].join('\n');
+}
+
+function buildPlanResponse(projectName: string, planPath: string, context: ContextSearchResult, validation: Awaited<ReturnType<typeof detectValidationCommands>>): string {
+  return [
+    'Mode: Plan',
+    '',
+    `Created an implementation plan for ${projectName}:`,
+    `- ${planPath}`,
+    '',
+    'The plan includes DoDs, implementation sequence, validation gates, and rollback expectations.',
+    '',
+    `Context files considered: ${context.files.length}. Validation commands: ${validation.commands.length}.`,
+  ].join('\n');
+}
+
+function buildCodeResponse(projectName: string, files: ProposedPatchFile[], validation: Awaited<ReturnType<typeof detectValidationCommands>>): string {
+  return [
+    'Mode: Code',
+    '',
+    `Prepared ${files.length} reviewable patch proposal(s) for ${projectName}.`,
+    '',
+    'Proposed files:',
+    ...files.map((file) => `- ${file.path}: ${file.explanation}`),
+    '',
+    'No disk mutation has occurred yet. Accept the diff to apply through the checkpointed patch API.',
+    '',
+    `After acceptance, run: ${validation.commands.map((command) => command.command).join(', ') || 'manual validation'}.`,
+  ].join('\n');
+}
+
+function buildNoPatchResponse(projectName: string, prompt: string, context: ContextSearchResult, validation: Awaited<ReturnType<typeof detectValidationCommands>>): string {
+  return [
+    'Mode: Code',
+    '',
+    `For ${projectName}, I could not safely infer a concrete source edit from the available context.`,
+    '',
+    'Evidence reviewed:',
+    ...(context.files.length ? context.files.slice(0, 8).map((file) => `- ${file.path}`) : ['- No readable source files were selected.']),
+    '',
+    `Request: ${prompt}`,
+    '',
+    'Provide an exact @File or a more specific change request to generate a surgical patch.',
+    `Available validation: ${validation.commands.map((command) => command.command).join(', ') || 'none detected'}.`,
+  ].join('\n');
+}
+
+async function proposeConservativePatch(root: string, prompt: string, context: ContextSearchResult): Promise<{ files: ProposedPatchFile[] }> {
+  const lowerPrompt = prompt.toLowerCase();
+  const planCandidate = /definition of done|dod|agentic|coding agent|code space|cursor|claude code|workflow|blueprint/.test(lowerPrompt);
+  if (!planCandidate) return { files: [] };
+
+  const filePath = 'docs/superpowers/specs/code-space-agentic-runtime-dods.md';
+  const target = path.join(root, filePath);
+  let beforeContent = '';
+  try {
+    beforeContent = await fs.readFile(target, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+
+  const afterContent = buildRuntimeDodDocument(prompt, context);
+  const diagnostics = validateSyntaxLightweight(filePath, afterContent);
+  if (diagnostics.length) throw new Error(`Generated DoD document failed validation: ${diagnostics[0].message}`);
+
+  return {
+    files: [
+      {
+        path: filePath,
+        beforeContent,
+        afterContent,
+        explanation: 'Add high-definition DoDs and execution blueprint for the fully agentic Code Space runtime.',
+        unifiedDiff: createUnifiedDiff(filePath, beforeContent, afterContent),
+      },
+    ],
+  };
+}
+
+function buildRuntimeDodDocument(prompt: string, context: ContextSearchResult): string {
+  return [
+    '# Code Space Agentic Runtime — Definitions of Done',
+    '',
+    '## Source request',
+    prompt,
+    '',
+    '## DoD 1 — Ask / Plan / Code mode parity',
+    '- Ask mode is strictly read-only and never proposes disk mutation.',
+    '- Plan mode writes a planning artifact with assumptions, scope, risks, validation gates, and rollback plan.',
+    '- Code mode proposes checkpointed, reviewable patches and does not apply them without user approval.',
+    '',
+    '## DoD 2 — Dynamic context discovery',
+    '- Context selection starts with @Files/@Folder/open tabs and expands through search, dependency tracing, and validation surfaces.',
+    '- Large outputs are persisted as artifacts and inspected through bounded read/grep tools.',
+    '- Agents must read target files before editing and must not edit from snippets alone.',
+    '',
+    '## DoD 3 — Surgical editing',
+    '- All model-facing edits use exact SEARCH/REPLACE blocks or server-generated before/after proposals.',
+    '- The server rejects missing or non-unique SEARCH blocks instead of fuzzy applying.',
+    '- Syntax pre-validation runs before patch application.',
+    '',
+    '## DoD 4 — Verification and self-healing',
+    '- After accepted patches, the runtime runs detected typecheck, lint, test, and build commands when available.',
+    '- Failing logs are stored as artifacts with read hints for repair turns.',
+    '- Repair turns stay scoped to failing files and stop after a bounded retry budget.',
+    '',
+    '## DoD 5 — Checkpoint and rollback',
+    '- Every accepted patch creates a file checkpoint before write.',
+    '- Checkpoints can be restored deterministically through the checkpoint restore API.',
+    '- UI refreshes editor state, tree, and git status after apply/rollback.',
+    '',
+    '## Current evidence reviewed',
+    ...(context.files.length ? context.files.map((file) => `- ${file.path}`) : ['- No context files selected.']),
+    '',
+  ].join('\n');
+}
+
+function shouldUseMultiAgent(prompt: string, intents: string[]): boolean {
+  return /architecture|multi[- ]?agent|agentic|migration|refactor|cursor|claude code|orchestration/i.test(prompt) || intents.includes('refactor') || intents.includes('feature_build');
 }
 
 function chunkText(text: string): string[] {

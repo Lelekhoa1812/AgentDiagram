@@ -153,6 +153,34 @@ export function createDefaultToolRegistry(): ToolRegistry {
   );
   registry.register(
     baseTool({
+      name: 'propose_edit_blocks',
+      description: 'Propose exact SEARCH/REPLACE edit blocks. The server exact-matches, rejects ambiguous blocks, syntax-validates, and returns a reviewable diff without writing to disk.',
+      inputSchema: objectSchema(
+        {
+          edits: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                path: { type: 'string' },
+                search: { type: 'string' },
+                replace: { type: 'string' },
+                reason: { type: 'string' },
+              },
+              required: ['path', 'search', 'replace', 'reason'],
+            },
+          },
+        },
+        ['edits'],
+      ),
+      riskLevel: 'medium',
+      permission: 'approval_required',
+      timeoutMs: 60_000,
+      observationCompression: 'summarize',
+    }),
+  );
+  registry.register(
+    baseTool({
       name: 'propose_patch',
       description: 'Create a reviewable patch proposal with file-level before/after content, unified diff, explanation, and validation intent. Does not write to disk.',
       inputSchema: objectSchema(
@@ -172,7 +200,7 @@ export function createDefaultToolRegistry(): ToolRegistry {
   registry.register(
     baseTool({
       name: 'apply_patch',
-      description: 'Apply an approved patch proposal to the active workspace after checkpoint creation.',
+      description: 'Apply an approved patch proposal to the active workspace after checkpoint creation and conflict checking.',
       inputSchema: objectSchema({ patchId: { type: 'string' } }, ['patchId']),
       riskLevel: 'medium',
       permission: 'approval_required',
@@ -181,13 +209,63 @@ export function createDefaultToolRegistry(): ToolRegistry {
   );
   registry.register(
     baseTool({
+      name: 'restore_checkpoint',
+      description: 'Restore a previously created checkpoint and rewind all files captured by that checkpoint.',
+      inputSchema: objectSchema({ checkpointRef: { type: 'string' }, reason: { type: 'string' } }, ['checkpointRef']),
+      riskLevel: 'medium',
+      permission: 'approval_required',
+      timeoutMs: 60_000,
+    }),
+  );
+  registry.register(
+    baseTool({
       name: 'run_command',
-      description: 'Run an approved terminal command in the workspace and stream output to the terminal panel.',
-      inputSchema: objectSchema({ command: { type: 'string' }, args: { type: 'array', items: { type: 'string' } }, reason: { type: 'string' } }, ['command']),
+      description: 'Run an approved terminal command in the workspace and stream output to the terminal panel. Full output should be stored as an artifact for bounded reads.',
+      inputSchema: objectSchema({ command: { type: 'string' }, args: { type: 'array', items: { type: 'string' } }, reason: { type: 'string' } }, ['command', 'reason']),
       riskLevel: 'high',
       permission: 'approval_required',
       timeoutMs: 120_000,
       logPolicy: 'redacted',
+    }),
+  );
+  registry.register(
+    baseTool({
+      name: 'read_artifact',
+      description: 'Read a bounded line range from a stored terminal, validation, grep, docs, or large-file artifact instead of injecting the full output into context.',
+      inputSchema: objectSchema({ artifactId: { type: 'string' }, path: { type: 'string' }, startLine: { type: 'number' }, endLine: { type: 'number' } }, ['path', 'startLine', 'endLine']),
+      riskLevel: 'safe',
+      permission: 'auto',
+      observationCompression: 'none',
+    }),
+  );
+  registry.register(
+    baseTool({
+      name: 'grep_artifact',
+      description: 'Search inside a stored artifact without loading the full artifact into the agent context.',
+      inputSchema: objectSchema({ artifactId: { type: 'string' }, path: { type: 'string' }, pattern: { type: 'string' }, contextLines: { type: 'number' } }, ['path', 'pattern']),
+      riskLevel: 'safe',
+      permission: 'auto',
+      observationCompression: 'summarize',
+    }),
+  );
+  registry.register(
+    baseTool({
+      name: 'spawn_subagent',
+      description: 'Spawn an isolated temporary subagent with a blank context window for explorer, critic, docs-reader, test-writer, or verifier roles.',
+      inputSchema: objectSchema(
+        {
+          role: { type: 'string' },
+          task: { type: 'string' },
+          allowedTools: { type: 'array', items: { type: 'string' } },
+          readOnly: { type: 'boolean' },
+          maxToolCalls: { type: 'number' },
+        },
+        ['role', 'task'],
+      ),
+      riskLevel: 'safe',
+      permission: 'auto',
+      timeoutMs: 180_000,
+      observationCompression: 'summarize',
     }),
   );
   registry.register(
