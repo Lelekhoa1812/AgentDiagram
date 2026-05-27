@@ -308,6 +308,8 @@ export function CustomPromptPanel() {
     const genMaxTokens =
       provider.provider === 'local' ? (provider.localContextLength ?? 4096) : undefined;
 
+    let projectName = extractFallbackName(prompt, 2);
+
     try {
       const res = await fetch(apiEndpoint, {
         method: 'POST',
@@ -383,7 +385,6 @@ export function CustomPromptPanel() {
       // After the stream ends, resolve the project name and call addGeneratedProject.
       const result = capturedResult;
       if (result !== null) {
-        let projectName = extractFallbackName(prompt, 2);
         try {
           const nameRes = await fetch('/api/code-space/name-session', {
             method: 'POST',
