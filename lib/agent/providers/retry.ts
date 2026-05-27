@@ -24,6 +24,10 @@ export interface RetryOptions {
   isRetryable?: (err: unknown) => boolean;
   baseDelayMs?: number;
   capDelayMs?: number;
+  /** Shared key used to cool down future calls after a provider rate-limit. */
+  cooldownKey?: string;
+  cooldownMinMs?: number;
+  cooldownMaxMs?: number;
 }
 
 const TRANSIENT_ERROR_CODES = new Set([
@@ -38,7 +42,9 @@ const TRANSIENT_ERROR_CODES = new Set([
 ]);
 
 const TRANSIENT_MESSAGE_RE =
-  /\b(?:5\d\d|server had an error|internal server error|bad gateway|service unavailable|gateway timeout|temporarily unavailable|overloaded|timeout|ETIMEDOUT|ECONNRESET|fetch failed|network|socket hang up|rate limit|too many requests)\b/i;
+  /\b(?:5\d\d|server had an error|internal server error|bad gateway|service unavailable|gateway timeout|temporarily unavailable|overloaded|timeout|ETIMEDOUT|ECONNRESET|fetch failed|network|socket hang up|rate limit|too many requests)/i;
+
+const cooldowns = ((globalThis as typeof globalThis & { __agentDiagramProviderCooldowns?: Map<string, number> }).__agentDiagramProviderCooldowns ??= new Map<string, number>());
 
 function statusFromMessage(message: string | undefined): number | undefined {
   if (!message) return undefined;
@@ -88,6 +94,16 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+function rateLimitCooldownDelay(err: RetryError, fallbackDelayMs: number, opts: RetryOptions): number | null {
+  const status = typeof err.status === 'number' ? err.status : statusFromMessage(err.message);
+  const message = err.message ?? '';
+  const isRateLimited = status === 429 || /\b(rate limit|too many requests|quota)\b/i.test(message);
+  if (!isRateLimited) return null;
+  const min = opts.cooldownMinMs ?? 15_000;
+  const max = opts.cooldownMaxMs ?? 10 * 60_000;
+  return Math.min(Math.max(fallbackDelayMs, min), max);
+}
+
 export async function withRetry<T>(fn: () => Promise<T>, opts: RetryOptions = {}): Promise<T> {
   const isRetryable = opts.isRetryable ?? defaultIsRetryable;
   const base = opts.baseDelayMs ?? 2000;
@@ -95,6 +111,14 @@ export async function withRetry<T>(fn: () => Promise<T>, opts: RetryOptions = {}
   let attempt = 0;
   for (;;) {
     if (opts.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    if (opts.cooldownKey) {
+      const until = cooldowns.get(opts.cooldownKey) ?? 0;
+      const remaining = until - Date.now();
+      if (remaining > 0) {
+        opts.onRetry?.({ attempt, delayMs: remaining, reason: 'provider cooldown' });
+        await delay(remaining, opts.signal);
+      }
+    }
     try {
       return await fn();
     } catch (err) {
@@ -106,13 +130,15 @@ export async function withRetry<T>(fn: () => Promise<T>, opts: RetryOptions = {}
       const fromHeader = retryError.retryAfterMs ?? retryAfterFromHeaders(retryError.headers);
       const exponential = Math.min(cap, base * 2 ** (attempt - 1));
       const jittered = fromHeader ?? Math.round(exponential * (0.5 + Math.random() * 0.5));
+      const cooldownDelay = rateLimitCooldownDelay(retryError, jittered, opts);
+      if (opts.cooldownKey && cooldownDelay !== null) cooldowns.set(opts.cooldownKey, Date.now() + cooldownDelay);
       const reason = status
         ? `HTTP ${status}`
         : retryError.code
         ? retryError.code
         : retryError.message?.slice(0, 80) ?? 'transient error';
-      opts.onRetry?.({ attempt, delayMs: jittered, reason });
-      await delay(jittered, opts.signal);
+      opts.onRetry?.({ attempt, delayMs: cooldownDelay ?? jittered, reason });
+      await delay(cooldownDelay ?? jittered, opts.signal);
     }
   }
 }
@@ -121,6 +147,7 @@ export async function withRetry<T>(fn: () => Promise<T>, opts: RetryOptions = {}
 export async function makeRetryError(res: Response): Promise<RetryError> {
   const err: RetryError = new Error(`${res.status} ${res.statusText}`);
   err.status = res.status;
+  err.headers = res.headers;
   const retryAfter = res.headers.get('retry-after');
   if (retryAfter) {
     const secs = Number(retryAfter);
