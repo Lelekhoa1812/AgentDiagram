@@ -9,8 +9,6 @@ import type { Provider, ChatParams, ValidationResult, ProviderConfig } from './t
 export class LocalModelProvider implements Provider {
   id = 'local' as const;
   private client: OpenAI;
-  private temperature: number;
-  private maxTokens: number;
 
   constructor(cfg: ProviderConfig) {
     const baseURL = (cfg.endpoint ?? 'http://localhost:11434/v1').replace(/\/$/, '');
@@ -18,8 +16,6 @@ export class LocalModelProvider implements Provider {
       baseURL,
       apiKey: cfg.apiKey || 'local',
     });
-    this.temperature = cfg.temperature ?? 0.7;
-    this.maxTokens = cfg.maxTokens ?? 4096;
   }
 
   async validate(_model: string): Promise<ValidationResult> {
@@ -39,10 +35,9 @@ export class LocalModelProvider implements Provider {
     }));
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const body: any = {
+      // Keep local/OpenAI-compatible payloads minimal: no temperature and no max_tokens.
       model: params.model,
       messages,
-      temperature: this.temperature,
-      max_tokens: this.maxTokens,
     };
     if (params.jsonSchema) {
       body.response_format = {
