@@ -17,6 +17,7 @@ const PROVIDERS: Array<{ id: ProviderId; label: string; envVar: string; note: st
   { id: 'gemini', label: 'Gemini', envVar: 'GEMINI_API_KEY', note: 'Models degrade in capability from top to bottom.' },
   { id: 'grok', label: 'xAI Grok', envVar: 'GROK_API_KEY', note: 'Fast multi-modal chat with Grok-family defaults.' },
   { id: 'foundry', label: 'Azure Foundry', envVar: 'FOUNDRY_API_KEY', note: 'Provide the deployment name for your custom model.' },
+  { id: 'local', label: 'Local Model', envVar: '', note: 'OpenAI-compatible API — works with Ollama, LM Studio, llama.cpp, Jan.' },
 ];
 
 const MODELS_BY_PROVIDER: Record<string, readonly string[]> = {
@@ -26,6 +27,60 @@ const MODELS_BY_PROVIDER: Record<string, readonly string[]> = {
   foundry: [],
   grok: GROK_MODELS,
 };
+
+function LocalModelTestButton({ baseUrl, apiKey }: { baseUrl: string; apiKey: string }) {
+  const [status, setStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
+  const [error, setError] = useState('');
+  const [models, setModels] = useState<string[]>([]);
+
+  async function handleTest() {
+    if (!baseUrl) return;
+    setStatus('testing');
+    setError('');
+    setModels([]);
+    try {
+      const res = await fetch('/api/local-model/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ baseUrl, apiKey }),
+      });
+      const data = (await res.json()) as { ok: boolean; models?: string[]; error?: string };
+      if (data.ok) {
+        setStatus('ok');
+        setModels(data.models ?? []);
+      } else {
+        setStatus('fail');
+        setError(data.error ?? 'Connection failed');
+      }
+    } catch (err) {
+      setStatus('fail');
+      setError(err instanceof Error ? err.message : 'Network error');
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        onClick={handleTest}
+        disabled={!baseUrl || status === 'testing'}
+        className="rounded-md border border-ink-700 bg-ink-800 px-3 py-1.5 text-xs hover:bg-ink-700 disabled:opacity-50"
+      >
+        {status === 'testing' ? 'Testing…' : 'Test Connection'}
+      </button>
+      {status === 'ok' && (
+        <span className="text-[11px] text-green-400">
+          ✓ Connected{models.length > 0 ? ` · ${models.length} model(s)` : ''}
+        </span>
+      )}
+      {status === 'fail' && (
+        <span className="truncate text-[11px] text-red-400" title={error}>
+          ✕ {error}
+        </span>
+      )}
+    </div>
+  );
+}
 
 export function ProviderConfig() {
   const provider = useDiagramStore((s) => s.provider);
@@ -90,7 +145,7 @@ export function ProviderConfig() {
         ))}
       </div>
 
-      {provider.provider !== 'foundry' && (
+      {provider.provider !== 'foundry' && provider.provider !== 'local' && (
         <div>
           <div className="mb-1 text-[10px] uppercase tracking-widest text-ink-400">Model</div>
           <select
@@ -131,6 +186,86 @@ export function ProviderConfig() {
             />
           </div>
         </>
+      )}
+
+      {provider.provider === 'local' && (
+        <div className="space-y-3">
+          <div className="rounded-md border border-green-900/50 bg-green-950/30 px-3 py-2 text-[11px] text-green-400">
+            🟢 OpenAI-compatible API · Works with Ollama, LM Studio, llama.cpp, Jan
+          </div>
+
+          <div>
+            <div className="mb-1 text-[10px] uppercase tracking-widest text-ink-400">Base URL</div>
+            <input
+              type="text"
+              value={provider.localBaseUrl ?? 'http://localhost:11434/v1'}
+              onChange={(e) => setProvider({ localBaseUrl: e.target.value })}
+              placeholder="http://localhost:11434/v1"
+              className="w-full rounded-md border border-ink-700 bg-ink-900 px-2 py-1.5 text-[13px]"
+              autoComplete="off"
+            />
+          </div>
+
+          <div>
+            <div className="mb-1 text-[10px] uppercase tracking-widest text-ink-400">Model Name</div>
+            <input
+              type="text"
+              value={provider.localModelName ?? ''}
+              onChange={(e) => setProvider({ localModelName: e.target.value })}
+              placeholder="llama3.2"
+              className="w-full rounded-md border border-ink-700 bg-ink-900 px-2 py-1.5 text-[13px]"
+              autoComplete="off"
+            />
+            <div className="mt-1 text-[10px] text-ink-400">e.g. llama3.2, mistral, codestral, phi3</div>
+          </div>
+
+          <div>
+            <div className="mb-1 text-[10px] uppercase tracking-widest text-ink-400">
+              API Key <span className="normal-case text-ink-500">(optional)</span>
+            </div>
+            <input
+              type="password"
+              value={provider.localApiKey ?? ''}
+              onChange={(e) => setProvider({ localApiKey: e.target.value })}
+              placeholder="Leave blank if not required"
+              className="w-full rounded-md border border-ink-700 bg-ink-900 px-2 py-1.5 text-[13px]"
+              autoComplete="off"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <div className="mb-1 text-[10px] uppercase tracking-widest text-ink-400">Context Length</div>
+              <input
+                type="number"
+                value={provider.localContextLength ?? 4096}
+                onChange={(e) => setProvider({ localContextLength: Number(e.target.value) })}
+                min={256}
+                step={256}
+                className="w-full rounded-md border border-ink-700 bg-ink-900 px-2 py-1.5 text-[13px]"
+              />
+            </div>
+            <div>
+              <div className="mb-1 text-[10px] uppercase tracking-widest text-ink-400">Temperature</div>
+              <input
+                type="number"
+                value={provider.localTemperature ?? 0.7}
+                onChange={(e) => setProvider({ localTemperature: Number(e.target.value) })}
+                min={0}
+                max={2}
+                step={0.1}
+                className="w-full rounded-md border border-ink-700 bg-ink-900 px-2 py-1.5 text-[13px]"
+              />
+            </div>
+          </div>
+
+          <LocalModelTestButton
+            baseUrl={provider.localBaseUrl ?? ''}
+            apiKey={provider.localApiKey ?? ''}
+          />
+
+          <div className="text-[10px] text-ink-500">✓ Config auto-saved to browser storage</div>
+        </div>
       )}
 
       <div>
