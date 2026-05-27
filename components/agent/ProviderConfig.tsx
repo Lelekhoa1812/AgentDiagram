@@ -203,6 +203,7 @@ export function ProviderConfig() {
               placeholder="http://localhost:11434/v1"
               className="w-full rounded-md border border-ink-700 bg-ink-900 px-2 py-1.5 text-[13px]"
               autoComplete="off"
+              aria-label="Local model base URL"
             />
           </div>
 
@@ -215,6 +216,7 @@ export function ProviderConfig() {
               placeholder="llama3.2"
               className="w-full rounded-md border border-ink-700 bg-ink-900 px-2 py-1.5 text-[13px]"
               autoComplete="off"
+              aria-label="Local model name"
             />
             <div className="mt-1 text-[10px] text-ink-400">e.g. llama3.2, mistral, codestral, phi3</div>
           </div>
@@ -230,6 +232,7 @@ export function ProviderConfig() {
               placeholder="Leave blank if not required"
               className="w-full rounded-md border border-ink-700 bg-ink-900 px-2 py-1.5 text-[13px]"
               autoComplete="off"
+              aria-label="Local model API key"
             />
           </div>
 
@@ -243,6 +246,7 @@ export function ProviderConfig() {
                 min={256}
                 step={256}
                 className="w-full rounded-md border border-ink-700 bg-ink-900 px-2 py-1.5 text-[13px]"
+                aria-label="Context length in tokens"
               />
             </div>
             <div>
@@ -255,6 +259,7 @@ export function ProviderConfig() {
                 max={2}
                 step={0.1}
                 className="w-full rounded-md border border-ink-700 bg-ink-900 px-2 py-1.5 text-[13px]"
+                aria-label="Temperature"
               />
             </div>
           </div>
