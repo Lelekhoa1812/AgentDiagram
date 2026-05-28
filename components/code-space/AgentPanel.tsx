@@ -274,7 +274,7 @@ export function AgentPanel({
         <PlanClarificationPanel questions={session?.clarifyingQuestions ?? []} disabled={isRunning} onSubmitAnswers={onSubmitPrompt} />
         <div className="rounded border border-[#30363d] bg-[#11182766] px-2 py-1.5 text-[10px] text-[#8b949e]">
           <div className="flex items-center justify-between gap-2">
-            <span className="uppercase tracking-wider text-[#6e7681]">Mode contract</span>
+            <span className="uppercase tracking-wider text-[#6e7681]">State</span>
             <span className="text-[#c9d1d9]">{modeContract(agentMode)}</span>
           </div>
           <div className="mt-1 flex items-center justify-between gap-2">
