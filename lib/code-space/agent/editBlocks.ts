@@ -223,6 +223,10 @@ export function validateSyntaxLightweight(path: string, content: string): EditBl
     }
   }
 
+  if (ext === 'py') {
+    diagnostics.push(...validatePythonIndentation(path, content));
+  }
+
   if (['ts', 'tsx', 'js', 'jsx'].includes(ext ?? '')) {
     const pairs: Array<[string, string]> = [['(', ')'], ['[', ']'], ['{', '}']];
     for (const [open, close] of pairs) {
@@ -241,4 +245,93 @@ export function validateSyntaxLightweight(path: string, content: string): EditBl
   }
 
   return diagnostics;
+}
+
+function validatePythonIndentation(path: string, content: string): EditBlockDiagnostic[] {
+  const diagnostics: EditBlockDiagnostic[] = [];
+  const indentStack = [0];
+  let previousRequiresIndent = false;
+  let bracketDepth = 0;
+  const lines = content.split(/\r?\n/);
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const rawLine = lines[index] ?? '';
+    const trimmed = rawLine.trim();
+    const lineNumber = index + 1;
+    if (!trimmed || trimmed.startsWith('#')) continue;
+
+    const leading = rawLine.match(/^[\t ]*/)?.[0] ?? '';
+    if (/\t/.test(leading) && / /.test(leading)) {
+      diagnostics.push({ path, code: 'SYNTAX_ERROR', line: lineNumber, column: 1, message: 'Python indentation mixes tabs and spaces on the same line.' });
+      break;
+    }
+
+    const indent = indentationWidth(leading);
+    const currentIndent = indentStack[indentStack.length - 1] ?? 0;
+    const inContinuation = bracketDepth > 0;
+
+    if (!inContinuation && indent > currentIndent) {
+      if (!previousRequiresIndent) {
+        diagnostics.push({
+          path,
+          code: 'SYNTAX_ERROR',
+          line: lineNumber,
+          column: leading.length + 1,
+          message: 'Unexpected Python indentation: this line is indented without a preceding block header.',
+        });
+        break;
+      }
+      indentStack.push(indent);
+    } else if (!inContinuation && indent < currentIndent) {
+      while (indentStack.length > 1 && indent < (indentStack[indentStack.length - 1] ?? 0)) indentStack.pop();
+      if (indent !== (indentStack[indentStack.length - 1] ?? 0)) {
+        diagnostics.push({ path, code: 'SYNTAX_ERROR', line: lineNumber, column: leading.length + 1, message: 'Python indentation does not match any outer indentation level.' });
+        break;
+      }
+    } else if (!inContinuation && previousRequiresIndent && indent === currentIndent) {
+      diagnostics.push({ path, code: 'SYNTAX_ERROR', line: lineNumber, column: leading.length + 1, message: 'Expected an indented Python block after a block header.' });
+      break;
+    }
+
+    previousRequiresIndent = !inContinuation && pythonLineRequiresIndent(trimmed);
+    bracketDepth = Math.max(0, bracketDepth + bracketDelta(stripPythonComment(trimmed)));
+  }
+
+  return diagnostics;
+}
+
+function indentationWidth(value: string): number {
+  let width = 0;
+  for (const char of value) width += char === '\t' ? 4 : 1;
+  return width;
+}
+
+function pythonLineRequiresIndent(trimmedLine: string): boolean {
+  return stripPythonComment(trimmedLine).trimEnd().endsWith(':');
+}
+
+function stripPythonComment(line: string): string {
+  let quote: 'single' | 'double' | null = null;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const previous = line[index - 1];
+    if (char === "'" && previous !== '\\' && quote !== 'double') quote = quote === 'single' ? null : 'single';
+    if (char === '"' && previous !== '\\' && quote !== 'single') quote = quote === 'double' ? null : 'double';
+    if (char === '#' && quote == null) return line.slice(0, index);
+  }
+  return line;
+}
+
+function bracketDelta(line: string): number {
+  let delta = 0;
+  let quote: 'single' | 'double' | null = null;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const previous = line[index - 1];
+    if (char === "'" && previous !== '\\' && quote !== 'double') quote = quote === 'single' ? null : 'single';
+    else if (char === '"' && previous !== '\\' && quote !== 'single') quote = quote === 'double' ? null : 'double';
+    else if (quote == null && ['(', '[', '{'].includes(char ?? '')) delta += 1;
+    else if (quote == null && [')', ']', '}'].includes(char ?? '')) delta -= 1;
+  }
+  return delta;
 }
