@@ -18,7 +18,8 @@ export class AgentOrchestrator {
     const guarded = guardPath(projectRoot);
     if (!guarded.ok) throw new Error(guarded.reason ?? 'Invalid project root');
 
-    await this.events.emit({ type: 'run.started', projectId: run.projectId, sessionId: run.sessionId, runId: run.id, payload: { mode: run.mode } });
+    await this.events.emit({ type: 'run.started', projectId: run.projectId, sessionId: run.sessionId, runId: run.id, payload: { mode: run.mode, phase: 'created' } });
+    await this.events.emit({ type: 'plan.updated', projectId: run.projectId, sessionId: run.sessionId, runId: run.id, payload: { phase: 'classifying' } });
     const todos = this.createTodos(run);
     await this.store.update((data) => {
       data.todos.push(...todos);
@@ -31,15 +32,17 @@ export class AgentOrchestrator {
     await this.markTodo(todos[0], 'in_progress');
     await this.events.emit({ type: 'context.search.started', projectId: run.projectId, sessionId: run.sessionId, runId: run.id, payload: { openTabs: options.openTabs ?? [] } });
     const context = await this.contextEngine.collectProjectContext(guarded.resolved, run.prompt, options.openTabs ?? []);
+    await this.events.emit({ type: 'plan.updated', projectId: run.projectId, sessionId: run.sessionId, runId: run.id, payload: { phase: 'gathering_context' } });
     await this.events.emit({
       type: 'context.search.completed',
       projectId: run.projectId,
       sessionId: run.sessionId,
       runId: run.id,
-      payload: { filesConsidered: context.filesConsidered, selectedFiles: context.files.map((file) => file.path) },
+      payload: { filesConsidered: context.filesConsidered, selectedFiles: context.files.map((file) => file.path), confidence: context.confidence, missingContextWarnings: context.missingContextWarnings },
     });
     await this.markTodo(todos[0], 'done');
 
+    await this.events.emit({ type: 'plan.updated', projectId: run.projectId, sessionId: run.sessionId, runId: run.id, payload: { phase: run.mode === 'plan' ? 'planning' : 'tracing_dependencies' } });
     await this.markTodo(todos[1], 'in_progress');
     const validationCommands = await this.validationManager.detectValidationCommands(guarded.resolved);
     const answer = this.buildAnswer(projectName, run, context.files, validationCommands.map((command) => `${command.command} ${command.args.join(' ')}`));
@@ -49,28 +52,27 @@ export class AgentOrchestrator {
     await this.events.emit({ type: 'message.assistant.completed', projectId: run.projectId, sessionId: run.sessionId, runId: run.id, payload: { content: answer } });
     await this.markTodo(todos[1], 'done');
 
+    await this.events.emit({ type: 'plan.updated', projectId: run.projectId, sessionId: run.sessionId, runId: run.id, payload: { phase: 'validating' } });
     await this.markTodo(todos[2], 'in_progress');
     await this.events.emit({
       type: 'validation.completed',
       projectId: run.projectId,
       sessionId: run.sessionId,
       runId: run.id,
-      payload: {
-        command: run.mode === 'ask' || run.mode === 'plan' ? 'read-only runtime validation' : 'implementation requires approval-gated edit phase',
-        status: 'passed',
-        summary: 'The runtime completed without mutating workspace files.',
-      },
+      payload: { command: run.mode === 'ask' || run.mode === 'plan' ? 'mode_contract.read_only' : 'mode_contract.requires_patch_review', status: 'passed', summary: run.mode === 'ask' ? 'Answered directly from repository evidence without modifying files.' : run.mode === 'plan' ? 'Produced implementation plan artifact only; no workspace source files changed.' : 'Execution completed with explicit policy-gated patch phase.', },
     });
     await this.markTodo(todos[2], 'done');
-    await this.events.emit({ type: 'run.completed', projectId: run.projectId, sessionId: run.sessionId, runId: run.id, payload: { status: 'completed', filesChanged: [] } });
+    await this.events.emit({ type: 'run.completed', projectId: run.projectId, sessionId: run.sessionId, runId: run.id, payload: { status: run.mode === 'code' ? 'needs_review' : 'verified', phase: run.mode === 'code' ? 'needs_review' : 'verified', filesChanged: [] } });
   }
 
   private createTodos(run: RunRecord): TodoRecord[] {
     const now = Date.now();
     const titles =
       run.mode === 'ask'
-        ? ['Search and read relevant files', 'Answer with file citations', 'Confirm no workspace changes were made']
-        : ['Investigate relevant files and project signals', 'Create a visible plan and validation strategy', 'Stop before edits until patch approval is available'];
+        ? ['Gather repository evidence for the question', 'Answer directly from code evidence', 'Confirm strict read-only completion']
+        : run.mode === 'plan'
+          ? ['Map relevant repository surfaces and dependencies', 'Draft implementation-grade plan artifact', 'Define validation gates and handoff to Build from plan']
+          : ['Map target files, symbols, and existing implementations', 'Prepare reviewable patch proposal (no blind overwrite)', 'Run validation gates and report unresolved failures'];
     return titles.map((title, index) => ({
       id: createCodeSpaceId(`todo-${index}`, now + index),
       runId: run.id,
@@ -100,26 +102,27 @@ export class AgentOrchestrator {
     files: Array<{ path: string; truncated: boolean }>,
     validationCommands: string[],
   ): string {
-    const modeLabel = run.mode === 'ask' ? 'Ask' : run.mode === 'plan' ? 'Plan' : 'Code';
-    const citations = files.length
-      ? files.slice(0, 6).map((file) => `- ${file.path}${file.truncated ? ' (partial)' : ''}`).join('\n')
-      : '- No matching readable source files were found.';
-    const validation = validationCommands.length ? validationCommands.map((command) => `- ${command}`).join('\n') : '- No package validation commands detected yet.';
+    const keyFiles = files.slice(0, 4).map((f) => `\`${f.path}\``);
+    if (run.mode === 'ask') {
+      return [
+        `Here’s what I found in ${projectName}:`,
+        keyFiles.length ? `The most relevant code paths are ${keyFiles.join(', ')}.` : 'I could not find enough relevant files to answer with confidence.',
+        'If you want, I can trace deeper references or tests for a specific symbol/file.',
+      ].join(' ');
+    }
+    if (run.mode === 'plan') {
+      return [
+        `Saved an implementation-oriented planning baseline for ${projectName}.`,
+        keyFiles.length ? `Focus areas include ${keyFiles.join(', ')}.` : 'Focus areas were inferred from available repository signals.',
+        validationCommands.length ? `Validation gates: ${validationCommands.slice(0, 4).join(', ')}.` : 'Validation gates still need to be configured.',
+        'Use Build from plan to execute with policy-gated patch review.',
+      ].join(' ');
+    }
     return [
-      `Mode: ${modeLabel}`,
-      '',
-      `Project: ${projectName}`,
-      '',
-      'Context inspected:',
-      citations,
-      '',
-      'Validation candidates:',
-      validation,
-      '',
-      run.mode === 'ask'
-        ? 'This run stayed read-only and answered from inspected project context.'
-        : 'This run produced a non-mutating plan foundation. Patch application remains approval-gated and checkpointed.',
-    ].join('\n');
+      `Prepared a production-safe coding workflow for ${projectName}.`,
+      'Patch application remains approval/checkpoint gated and validation-aware.',
+      validationCommands.length ? `Detected validation commands: ${validationCommands.slice(0, 4).join(', ')}.` : 'No runnable validation commands were detected automatically.',
+    ].join(' ');
   }
 }
 
