@@ -62,7 +62,12 @@ export function buildCodeCompletionResponse(input: CodeResponseInput): string {
       `Proposed ${input.files.length} reviewable patch${input.files.length === 1 ? '' : 'es'} for ${input.projectName}: ${formatList(fileList)}${suffix}. No project file is written until the patch is visible in Code changes and accepted or auto-apply succeeds.`,
     );
   } else {
-    lines.push(`No reviewable code patch was produced for ${input.projectName}.`);
+    // Root Cause vs Logic: an empty patch result is a blocked run, not a useful completion. Surface
+    // the recovery path so users can inspect context/patch-planner tool output instead of seeing a
+    // canned success-looking sentence that hides why the workspace stayed unchanged.
+    lines.push(
+      `Needs review for ${input.projectName}: Code mode could not produce a reviewable file patch from the gathered context. No workspace files were changed; inspect the context_graph and patch_planner tool output, then rerun with the missing target files attached or after fixing the model/provider response.`,
+    );
   }
 
   const failed = input.validationRuns.filter((run) => run.status === 'failed');
