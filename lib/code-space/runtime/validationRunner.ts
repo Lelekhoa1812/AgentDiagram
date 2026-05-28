@@ -32,10 +32,8 @@ export class ValidationRunner {
     const pythonConfig = await findFirst(rootPath, ['pyproject.toml', 'requirements.txt', 'backend/requirements.txt', 'api/requirements.txt', 'pytest.ini', 'setup.py']);
     if (pythonConfig) {
       const cwd = path.join(rootPath, path.dirname(pythonConfig));
-      commands.push({ kind: 'typecheck', command: 'python3', args: ['-m', 'compileall', '.'], cwd, reason: 'Python syntax compilation is available.', timeoutMs: 120_000 });
-      if (await hasAny(rootPath, ['tests', 'test', `${path.dirname(pythonConfig)}/tests`, `${path.dirname(pythonConfig)}/test`, 'pytest.ini'])) {
-        commands.push({ kind: 'test', command: 'python3', args: ['-m', 'pytest'], cwd, reason: 'Python pytest validation appears available.', timeoutMs: 180_000 });
-      }
+      commands.push({ kind: 'syntax', command: 'python3', args: ['-m', 'compileall', '.'], cwd, reason: 'Python syntax and indentation compilation is required.', timeoutMs: 120_000 });
+      commands.push({ kind: 'test', command: 'python3', args: ['-m', 'pytest'], cwd, reason: 'Pytest must run for Python work; missing pytest is reported as validation output.', timeoutMs: 180_000 });
     }
 
     if (!commands.length && (await pathExists(rootPath, 'go.mod'))) {
@@ -55,7 +53,7 @@ export class ValidationRunner {
           kind: 'typecheck',
           command: 'manual review',
           status: 'skipped',
-          output: 'No project-specific validation command was detected.',
+          output: 'No project-specific validation command was detected. Treat the patch as unverified until an appropriate compile/test command is run manually.',
           durationMs: 0,
         },
       ];
