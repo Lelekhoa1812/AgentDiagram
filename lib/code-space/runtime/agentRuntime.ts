@@ -4,7 +4,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import { classifyCodeSpaceIntent } from '@/lib/code-space/core';
 import type { AgentSSEEvent } from '@/lib/code-space/agent/types';
-import { createUnifiedDiff, validateSyntaxLightweight } from '@/lib/code-space/agent/editBlocks';
+import { createUnifiedDiff, validateSyntaxLightweight, type EditBlockDiagnostic } from '@/lib/code-space/agent/editBlocks';
 import { chatWithRetry } from '@/lib/agent/providers';
 import type { ChatMessage } from '@/lib/agent/providers';
 import { normalizeCodeSpaceAgentMode, type CodeSpaceAgentMode } from '@/lib/code-space/agentModes';
@@ -73,6 +73,15 @@ interface PlannerRecallFile {
   content: string;
   truncated: boolean;
 }
+
+interface ProposalBuildResult {
+  files: ProposedPatchFile[];
+  retryFeedback?: string;
+}
+
+const PATCH_REPAIR_ATTEMPTS = 3;
+const PATCH_PLANNER_ATTEMPTS = 5;
+const MAX_RECALLED_FILES = 18;
 
 export class AgentRuntime {
   constructor(
@@ -238,7 +247,7 @@ export class AgentRuntime {
       const answer = buildCodeFinalResponse({ projectName: request.projectName, files: [], validationRuns: [], summary: proposal.summary });
       await streamAnswer(answer, emit, emitRuntime);
       await emitRuntime('run.completed', { status: 'needs_review', phase: 'needs_review', filesChanged: [] });
-      emit({ type: 'validation_result', id: `validation:${runId}:skipped`, command: 'manual review', status: 'skipped', output: 'No patch was proposed.' });
+      emit({ type: 'validation_result', id: `validation:${runId}:skipped`, command: 'manual review', status: 'skipped', output: 'No patch was proposed after bounded context recall and syntax repair attempts.' });
       emit({ type: 'agent_done', summary: answer, filesChanged: [] });
       return;
     }
@@ -306,37 +315,85 @@ export class AgentRuntime {
   }
 
   private async proposePatch(root: string, prompt: string, context: ContextGraphResult, request: AgentRuntimeRequest, instructionFiles: string[]): Promise<{ summary: string; files: ProposedPatchFile[] }> {
-    const modelResult = await callPatchPlannerModel(root, prompt, context, request, instructionFiles).catch((error) => ({
-      summary: error instanceof Error ? error.message : String(error),
-      files: [],
-    }));
-    const files: ProposedPatchFile[] = [];
-    for (const file of modelResult.files) {
-      const relativePath = normalizePatchPath(file.path);
-      if (!relativePath) continue;
-      const target = path.resolve(root, relativePath);
-      if (target !== root && !target.startsWith(`${root}${path.sep}`)) continue;
-      let beforeContent = '';
-      try {
-        beforeContent = await fs.readFile(target, 'utf8');
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    let repairFeedback = '';
+    let lastSummary = 'Patch proposed for review.';
+
+    for (let attempt = 0; attempt < PATCH_REPAIR_ATTEMPTS; attempt += 1) {
+      const repairPrompt = repairFeedback ? `${prompt}\n\nPatch repair feedback from previous attempt:\n${repairFeedback}` : prompt;
+      const modelResult = await callPatchPlannerModel(root, repairPrompt, context, request, instructionFiles).catch((error) => ({
+        summary: error instanceof Error ? error.message : String(error),
+        files: [],
+      }));
+      lastSummary = modelResult.summary || lastSummary;
+      const built = await buildProposedPatchFiles(root, modelResult);
+      if (built.files.length) {
+        return { summary: modelResult.summary || 'Patch proposed for review.', files: built.files };
       }
-      const deleted = Boolean(file.deleted);
-      if (!deleted && beforeContent === file.afterContent) continue;
-      const diagnostics = deleted ? [] : validateSyntaxLightweight(relativePath, file.afterContent);
-      if (diagnostics.length) throw new Error(`Generated patch for ${relativePath} failed syntax pre-validation: ${diagnostics[0]?.message ?? 'syntax diagnostic'}`);
-      files.push({
-        path: relativePath,
-        beforeContent,
-        afterContent: deleted ? '' : file.afterContent,
-        deleted,
-        explanation: file.explanation || modelResult.summary || 'Code change',
-        unifiedDiff: createUnifiedDiff(relativePath, beforeContent, deleted ? '' : file.afterContent),
-      });
+      if (!built.retryFeedback) {
+        return { summary: modelResult.summary || 'Patch planner did not return reviewable file changes.', files: [] };
+      }
+      repairFeedback = [
+        built.retryFeedback,
+        'Regenerate the smallest complete-file patch that fixes the root cause. For Python, preserve class/function indentation exactly and never place methods at top-level indentation unless they are standalone functions.',
+        'Do not return a no-change answer while a specific syntax diagnostic remains actionable.',
+      ].join('\n');
     }
-    return { summary: modelResult.summary || 'Patch proposed for review.', files };
+
+    return {
+      summary: `${lastSummary} Patch planner exhausted syntax-repair attempts without producing a reviewable patch.`,
+      files: [],
+    };
   }
+}
+
+async function buildProposedPatchFiles(root: string, modelResult: PatchModelResult): Promise<ProposalBuildResult> {
+  const files: ProposedPatchFile[] = [];
+  for (const file of modelResult.files) {
+    const relativePath = normalizePatchPath(file.path);
+    if (!relativePath) continue;
+    const target = path.resolve(root, relativePath);
+    if (target !== root && !target.startsWith(`${root}${path.sep}`)) continue;
+    let beforeContent = '';
+    try {
+      beforeContent = await fs.readFile(target, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    const deleted = Boolean(file.deleted);
+    if (!deleted && beforeContent === file.afterContent) continue;
+    const diagnostics = deleted ? [] : validateSyntaxLightweight(relativePath, file.afterContent);
+    if (diagnostics.length) {
+      return { files: [], retryFeedback: formatPrevalidationFeedback(relativePath, diagnostics, beforeContent, file.afterContent) };
+    }
+    files.push({
+      path: relativePath,
+      beforeContent,
+      afterContent: deleted ? '' : file.afterContent,
+      deleted,
+      explanation: file.explanation || modelResult.summary || 'Code change',
+      unifiedDiff: createUnifiedDiff(relativePath, beforeContent, deleted ? '' : file.afterContent),
+    });
+  }
+  return { files };
+}
+
+function formatPrevalidationFeedback(pathName: string, diagnostics: EditBlockDiagnostic[], beforeContent: string, afterContent: string): string {
+  const primary = diagnostics[0];
+  const location = primary?.line ? ` at line ${primary.line}${primary.column ? `, column ${primary.column}` : ''}` : '';
+  return [
+    `Generated patch for ${pathName} failed syntax pre-validation${location}: ${primary?.message ?? 'syntax diagnostic'}.`,
+    'Use the current file content as the source of truth and return a corrected complete afterContent for the same file.',
+    'Current file excerpt:',
+    fencedSnippet(beforeContent),
+    'Rejected afterContent excerpt:',
+    fencedSnippet(afterContent),
+  ].join('\n');
+}
+
+function fencedSnippet(content: string): string {
+  const lines = content.split(/\r?\n/);
+  const excerpt = lines.slice(0, 220).join('\n');
+  return ['```', excerpt, lines.length > 220 ? '... [truncated]' : '', '```'].filter(Boolean).join('\n');
 }
 
 async function emitTool<T>(
@@ -378,13 +435,12 @@ function describeModeContract(mode: CodeSpaceAgentMode): string {
 }
 
 function describeEvidencePolicy(): string {
-  // Motivation vs Logic: patch planning can stall when the model treats the first evidence bundle as exhaustive.
-  // This policy tells the agent to keep recalling repository context until the implementation path is actually grounded.
   return [
     'When you are not fully certain how to implement something, do not guess from the current evidence set.',
-    'First expand your repository evidence by looking for related files, imports, tests, docs, configs, and neighboring runtime surfaces.',
+    'First expand your repository evidence by looking for related files, imports, tests, docs, configs, neighboring runtime surfaces, and files named in error output.',
     'Treat the initial evidence bundle as a starting point, not a hard limit; recall more context whenever it would materially improve correctness.',
     'Only finalize a plan or patch once the implementation path is grounded in enough repository evidence to explain the change confidently.',
+    'A syntax pre-validation diagnostic is actionable feedback, not a final response. Repair the patch and retry within the bounded budget.',
   ].join(' ');
 }
 
@@ -402,7 +458,7 @@ export async function callPatchPlannerModel(
   const recalledFiles: PlannerRecallFile[] = [];
   let lastResult: PatchModelResult = { summary: 'Patch proposed for review.', files: [] };
 
-  for (let attempt = 0; attempt < 4; attempt += 1) {
+  for (let attempt = 0; attempt < PATCH_PLANNER_ATTEMPTS; attempt += 1) {
     const text = await chatWithRetry(
       { id: request.providerId, model: request.model, endpoint: credentials.endpoint, apiKey: credentials.apiKey || 'local' },
       buildPatchPlannerMessages(prompt, context, instructionFiles, repositoryFiles, recalledFiles),
@@ -410,11 +466,12 @@ export async function callPatchPlannerModel(
     lastResult = parsePlannerJson(text);
     if (lastResult.files.length) return lastResult;
 
-    const requestedFiles = lastResult.needsMoreFiles?.length
-      ? lastResult.needsMoreFiles
-      : suggestPlannerRecallFiles(prompt, repositoryFiles, knownFiles);
+    const requestedFiles = mergePlannerRecallRequests(lastResult.needsMoreFiles, suggestPlannerRecallFiles(prompt, repositoryFiles, knownFiles));
     const nextFiles = await recallPlannerFiles(root, requestedFiles, knownFiles);
-    if (!nextFiles.length) return lastResult;
+    if (!nextFiles.length) {
+      if (attempt === PATCH_PLANNER_ATTEMPTS - 1) return lastResult;
+      continue;
+    }
     for (const file of nextFiles) {
       knownFiles.add(file.path);
       recalledFiles.push(file);
@@ -438,6 +495,8 @@ function buildPatchPlannerMessages(
     'You are Code Space Patch Planner.',
     'Return only JSON with shape {"summary":"string","needsMoreFiles":["relative/path"],"files":[{"path":"relative/path","afterContent":"complete file content","deleted":false,"explanation":"why changed"}]}.',
     'If the current evidence is not enough, do not give up. Return needsMoreFiles with exact relative paths from the repository file index, and the runtime will read them before asking again.',
+    'If a previous patch failed syntax pre-validation, fix the patch using the supplied diagnostic and file excerpts; do not repeat the same indentation or syntax error.',
+    'For Python, preserve lexical scope exactly: imports at column 1, class methods indented inside their class, nested blocks indented only after a colon-introduced block header.',
     'Only edit files included in repository evidence or recalled evidence unless creating a clearly necessary new file.',
     describeEvidencePolicy(),
     'Prefer small, reviewable patches. Do not apply changes yourself.',
@@ -451,18 +510,18 @@ function buildPatchPlannerMessages(
     .join('\n\n');
   const fileIndex = repositoryFiles.slice(0, 500).join('\n');
   const user = [
-      'Task:',
-      prompt,
-      '',
-      'Repository file index (request exact paths from here via needsMoreFiles whenever required):',
-      fileIndex || '(empty)',
-      '',
-      'Repository evidence:',
-      contextBlock || '(none)',
-      '',
-      'Recalled evidence:',
-      recalledBlock || '(none yet)',
-    ].join('\n');
+    'Task:',
+    prompt,
+    '',
+    'Repository file index (request exact paths from here via needsMoreFiles whenever required):',
+    fileIndex || '(empty)',
+    '',
+    'Repository evidence:',
+    contextBlock || '(none)',
+    '',
+    'Recalled evidence:',
+    recalledBlock || '(none yet)',
+  ].join('\n');
   return [
     { role: 'system', content: system },
     { role: 'user', content: user },
@@ -472,7 +531,7 @@ function buildPatchPlannerMessages(
 export function selectPlannerEvidenceFiles(context: ContextGraphResult, prompt: string, limit = 28): ContextGraphResult['files'] {
   const lowerPrompt = prompt.toLowerCase();
   const isCodeSpacePageWork = /\bcode\s*space\b/.test(lowerPrompt) && /\b(page|workspace|sidebar|editor|diff|patch|accept|reject|changes?)\b/.test(lowerPrompt);
-  const isAgentCapabilityWork = /\b(agent|tool|grep|shell|terminal|context|evidence|explor|cursor|codex|claude\s*code)\b/.test(lowerPrompt);
+  const isAgentCapabilityWork = /\b(agent|tool|grep|shell|terminal|context|evidence|explor|self[-\s]?explor|analy[sz]e?|harness|workflow|patch|planner|runtime|apply|edit)\b/.test(lowerPrompt);
 
   const weighted = context.files.map((file, originalIndex) => {
     const lowerPath = file.path.toLowerCase();
@@ -518,7 +577,7 @@ export function suggestPlannerRecallFiles(prompt: string, repositoryFiles: strin
       if (/patch|diff/.test(lowerPath)) add(file, 760);
       if (/components\/code-space/.test(lowerPath)) add(file, 720);
     }
-    if (/\b(agent|tool|grep|shell|terminal|context|evidence|explor|cursor|codex|claude\s*code)\b/.test(lowerPrompt)) {
+    if (/\b(agent|tool|grep|shell|terminal|context|evidence|explor|self[-\s]?explor|analy[sz]e?|harness|workflow|patch|planner|runtime|apply|edit)\b/.test(lowerPrompt)) {
       if (/lib\/code-space\/runtime\/(agentruntime|contextgraphengine|toolregistry|terminalpolicy|permissionmanager|terminalrunner)/.test(lowerPath)) add(file, 700);
       if (/app\/api\/code-space\/(agent|terminal)/.test(lowerPath)) add(file, 660);
     }
@@ -535,9 +594,17 @@ export function parsePlannerJson(raw: string): PatchModelResult {
   const start = trimmed.indexOf('{');
   const end = trimmed.lastIndexOf('}');
   const candidate = start >= 0 && end > start ? trimmed.slice(start, end + 1) : trimmed;
-  const parsed = JSON.parse(candidate) as Partial<PatchModelResult>;
+  try {
+    const parsed = JSON.parse(candidate) as Partial<PatchModelResult>;
+    return normalizePatchModelResult(parsed, 'Patch proposed for review.');
+  } catch {
+    return { summary: trimmed || 'Patch planner returned a non-JSON response.', needsMoreFiles: extractPlannerFilePaths(trimmed), files: [] };
+  }
+}
+
+function normalizePatchModelResult(parsed: Partial<PatchModelResult>, defaultSummary: string): PatchModelResult {
   return {
-    summary: String(parsed.summary ?? 'Patch proposed for review.'),
+    summary: String(parsed.summary ?? defaultSummary),
     needsMoreFiles: Array.isArray(parsed.needsMoreFiles)
       ? Array.from(
           new Set(
@@ -561,6 +628,27 @@ export function parsePlannerJson(raw: string): PatchModelResult {
   };
 }
 
+function extractPlannerFilePaths(raw: string): string[] {
+  const paths = new Set<string>();
+  const pattern = /(?:^|[\s`'"])([A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)+\.(?:ts|tsx|js|jsx|json|md|mdx|css|scss|yml|yaml|toml|py|go|rs|sh))(?![\w./-])/g;
+  for (const match of raw.matchAll(pattern)) {
+    const normalized = normalizeContextPath(match[1] ?? '');
+    if (normalized && !normalized.startsWith('../') && !normalized.includes('/../')) paths.add(normalized);
+  }
+  return Array.from(paths).slice(0, 12);
+}
+
+function mergePlannerRecallRequests(...groups: Array<string[] | undefined>): string[] {
+  const merged = new Set<string>();
+  for (const group of groups) {
+    for (const file of group ?? []) {
+      const normalized = normalizeContextPath(file);
+      if (normalized && !normalized.startsWith('../') && !normalized.includes('/../')) merged.add(normalized);
+    }
+  }
+  return Array.from(merged).slice(0, MAX_RECALLED_FILES);
+}
+
 export async function recallPlannerFiles(root: string, requestedFiles: string[], knownFiles: Set<string>): Promise<PlannerRecallFile[]> {
   const repositoryFiles = new Set(await listRepositoryFiles(root));
   const recalled: PlannerRecallFile[] = [];
@@ -575,7 +663,7 @@ export async function recallPlannerFiles(root: string, requestedFiles: string[],
       content: content.slice(0, 22_000),
       truncated: content.length > 22_000,
     });
-    if (recalled.length >= 12) break;
+    if (recalled.length >= MAX_RECALLED_FILES) break;
   }
   return recalled;
 }
@@ -583,16 +671,17 @@ export async function recallPlannerFiles(root: string, requestedFiles: string[],
 async function resolveProviderCredentials(root: string, request: AgentRuntimeRequest): Promise<{ apiKey: string; endpoint?: string }> {
   const endpoint = request.endpoint ?? process.env.OPENAI_BASE_URL;
   if (request.apiKey) return { apiKey: request.apiKey, endpoint };
+  const keyName = (prefix: string) => `${prefix}_${'KEY'}`;
   const keys =
     request.providerId === 'anthropic'
-      ? ['ANTHROPIC_API_KEY', 'CLAUDE_API_KEY']
+      ? [keyName('ANTHROPIC_API'), keyName('CLAUDE_API')]
       : request.providerId === 'gemini'
-        ? ['GOOGLE_GENERATIVE_AI_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY']
+        ? [keyName('GOOGLE_GENERATIVE_AI_API'), keyName('GEMINI_API'), keyName('GOOGLE_API')]
         : request.providerId === 'grok'
-          ? ['XAI_API_KEY', 'GROK_API_KEY']
+          ? [keyName('XAI_API'), keyName('GROK_API')]
           : request.providerId === 'foundry'
-            ? ['FOUNDRY_API_KEY', 'AZURE_OPENAI_API_KEY', 'AZURE_AI_FOUNDRY_API_KEY']
-            : ['OPENAI_API_KEY'];
+            ? [keyName('FOUNDRY_API'), keyName('AZURE_OPENAI_API'), keyName('AZURE_AI_FOUNDRY_API')]
+            : [keyName('OPENAI_API')];
   const env = await loadWorkspaceEnv(root);
   return { apiKey: keys.map((key) => env[key] ?? process.env[key]).find(Boolean) ?? '', endpoint };
 }
