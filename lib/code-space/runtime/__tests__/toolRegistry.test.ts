@@ -11,6 +11,19 @@ describe('createDefaultToolRegistry', () => {
     expect(registry.get('run_command')?.permission).toBe('approval_required');
   });
 
+  it('describes comprehensive shell exploration through run_command', () => {
+    const runCommand = createDefaultToolRegistry().get('run_command');
+
+    expect(runCommand?.inputSchema.properties).toHaveProperty('cwd');
+    expect(runCommand?.inputSchema.properties).toHaveProperty('timeoutMs');
+    expect(runCommand?.description).toContain('grep');
+    expect(runCommand?.description).toContain('ls');
+    expect(runCommand?.description).toContain('npm');
+    expect(runCommand?.description).toContain('python3');
+    expect(runCommand?.description).toContain('mkdir');
+    expect(runCommand?.description).toContain('rm');
+  });
+
   it('exposes JSON schemas for model/tool callers', () => {
     const registry = createDefaultToolRegistry();
     const schemas = registry.list().map((tool) => tool.inputSchema);

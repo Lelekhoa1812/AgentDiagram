@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import Editor, { type OnMount } from '@monaco-editor/react';
+import Editor, { DiffEditor, type OnMount } from '@monaco-editor/react';
 import type * as Monaco from 'monaco-editor';
 import {
   Archive,
@@ -2035,6 +2035,10 @@ export function CodeSpaceWorkspace() {
   const activeTabProject = activeTab ? projects.find((project) => project.id === activeTab.projectId) ?? activeProject : null;
   const activeTabPayload = activeTab ? fileContents[activeTab.id] : null;
   const activeTabIsLoading = activeTab ? loadingFileIdsRef.current.has(activeTab.id) : false;
+  const activeTabDiff = activeTab
+    ? pendingDiffs.find((item) => item.filePath === activeTab.path) ??
+      agentChangesets.find((item) => item.filePath === activeTab.path)
+    : null;
   const breadcrumbs = activeProject && activeTab ? [activeProject.name, ...activeTab.path.split('/').filter(Boolean)] : [];
   // Motivation vs Logic: showing a quick snapshot of the root entries keeps the preview actionable before any file is opened.
   const activeProjectPreviewKey = activeProject ? `${activeProject.id}:` : '';
@@ -2220,7 +2224,35 @@ export function CodeSpaceWorkspace() {
         <div className="min-h-0 flex-1 bg-[#1e1e1e]">
           {activeTab ? (
             activeTabPayload ? (
-              activeTab.language === 'markdown' && activeTab.preview ? (
+              activeTabDiff ? (
+                <DiffEditor
+                  height="100%"
+                  theme={theme === 'light' ? 'agentdiagram-light' : 'agentdiagram-dark'}
+                  language={activeTab.language}
+                  original={'beforeContent' in activeTabDiff ? activeTabDiff.beforeContent : activeTabDiff.oldContent}
+                  modified={activeTabDiff.deleted ? '' : 'afterContent' in activeTabDiff ? activeTabDiff.afterContent : activeTabDiff.newContent}
+                  originalLanguage={activeTab.language}
+                  modifiedLanguage={activeTab.language}
+                  onMount={(_, monaco) => {
+                    // Motivation vs Logic: Reviewable patches should be inspectable in the main editor before
+                    // acceptance, not only as a cramped sidebar snippet. Monaco's diff editor gives users the
+                    // familiar red/green file-level review surface while preserving the existing accept/reject flow.
+                    monaco.editor.setTheme(theme === 'light' ? 'agentdiagram-light' : 'agentdiagram-dark');
+                    monacoRef.current = monaco;
+                  }}
+                  options={{
+                    readOnly: true,
+                    originalEditable: false,
+                    minimap: { enabled: minimapEnabled },
+                    wordWrap: wordWrap ? 'on' : 'off',
+                    fontSize: 13,
+                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                    renderSideBySide: true,
+                    scrollBeyondLastLine: false,
+                    automaticLayout: true,
+                  }}
+                />
+              ) : activeTab.language === 'markdown' && activeTab.preview ? (
                 activeTabProject ? (
                   <CodeSpaceMarkdownPreview
                     project={activeTabProject}

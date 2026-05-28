@@ -220,9 +220,18 @@ export function createDefaultToolRegistry(): ToolRegistry {
   registry.register(
     baseTool({
       name: 'run_command',
-      description: 'Run an approved terminal command in the workspace and stream output to the terminal panel. Prefer this for shell-native refactors and maintenance tasks such as mv, cp, rg, find, git status, and validation commands after a rename or move. Full output should be stored as an artifact for bounded reads.',
-      inputSchema: objectSchema({ command: { type: 'string' }, args: { type: 'array', items: { type: 'string' } }, reason: { type: 'string' } }, ['command', 'reason']),
-      riskLevel: 'high',
+      description: 'Run terminal commands in the workspace for comprehensive repository exploration, file operations, scripts, and validation. Agents may use grep/rg, find, ls, pwd, cd via cwd, mkdir, cp, mv, rm, touch, git status/diff, npm/pnpm/yarn/bun scripts, python/python3, shell script activation, and stack-specific test/build commands when needed; destructive or network-mutating commands are still detected by terminal policy and require explicit approval.',
+      inputSchema: objectSchema(
+        {
+          command: { type: 'string' },
+          args: { type: 'array', items: { type: 'string' } },
+          cwd: { type: 'string' },
+          reason: { type: 'string' },
+          timeoutMs: { type: 'number' },
+        },
+        ['command', 'reason'],
+      ),
+      riskLevel: 'medium',
       permission: 'approval_required',
       timeoutMs: 120_000,
       logPolicy: 'redacted',

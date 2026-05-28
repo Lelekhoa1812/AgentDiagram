@@ -26,5 +26,18 @@ describe('PermissionManager', () => {
       approvalRequired: false,
     });
   });
-});
 
+  it('lets sandbox autonomy run shell exploration while still gating risky commands', () => {
+    const permissions = new PermissionManager();
+    const registry = createDefaultToolRegistry();
+
+    expect(permissions.decide(registry.get('run_command')!, 'sandbox_autonomy')).toMatchObject({
+      permission: 'auto',
+      approvalRequired: false,
+    });
+    expect(permissions.decide(registry.get('apply_patch')!, 'sandbox_autonomy')).toMatchObject({
+      permission: 'auto',
+      approvalRequired: false,
+    });
+  });
+});

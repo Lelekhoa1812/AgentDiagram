@@ -6,6 +6,7 @@ import { classifyCodeSpaceIntent } from '@/lib/code-space/core';
 import type { AgentSSEEvent } from '@/lib/code-space/agent/types';
 import { createUnifiedDiff, validateSyntaxLightweight } from '@/lib/code-space/agent/editBlocks';
 import { chatWithRetry } from '@/lib/agent/providers';
+import type { ChatMessage } from '@/lib/agent/providers';
 import { normalizeCodeSpaceAgentMode, type CodeSpaceAgentMode } from '@/lib/code-space/agentModes';
 import { extractBuildPlanPath } from '@/lib/code-space/planBuild';
 import { guardPath } from '@/lib/security/pathGuard';
@@ -15,6 +16,7 @@ import { createAgentEvent, type AgentEventType } from './events';
 import { InstructionLoader } from './instructionLoader';
 import { PlanningEngine } from './planningEngine';
 import { PatchReview } from './patchReview';
+import { listRepositoryFiles, normalizeContextPath, safeReadTextFile } from './repoMap';
 import { createRunState, transitionRunState, type CodeSpaceRunPhase, type CodeSpaceRunState } from './runState';
 import { ValidationRunner } from './validationRunner';
 import type { TerminalCommand } from './terminalPolicy';
@@ -62,7 +64,14 @@ interface ProposedPatchFile {
 
 interface PatchModelResult {
   summary: string;
+  needsMoreFiles?: string[];
   files: Array<{ path: string; afterContent: string; deleted?: boolean; explanation: string }>;
+}
+
+interface PlannerRecallFile {
+  path: string;
+  content: string;
+  truncated: boolean;
 }
 
 export class AgentRuntime {
@@ -379,7 +388,7 @@ function describeEvidencePolicy(): string {
   ].join(' ');
 }
 
-async function callPatchPlannerModel(
+export async function callPatchPlannerModel(
   root: string,
   prompt: string,
   context: ContextGraphResult,
@@ -388,10 +397,45 @@ async function callPatchPlannerModel(
 ): Promise<PatchModelResult> {
   const credentials = await resolveProviderCredentials(root, request);
   if (!credentials.apiKey && request.providerId !== 'local') return { summary: 'The selected model provider is not configured yet.', files: [] };
+  const repositoryFiles = await listRepositoryFiles(root);
+  const knownFiles = new Set(context.files.map((file) => file.path));
+  const recalledFiles: PlannerRecallFile[] = [];
+  let lastResult: PatchModelResult = { summary: 'Patch proposed for review.', files: [] };
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const text = await chatWithRetry(
+      { id: request.providerId, model: request.model, endpoint: credentials.endpoint, apiKey: credentials.apiKey || 'local' },
+      buildPatchPlannerMessages(prompt, context, instructionFiles, repositoryFiles, recalledFiles),
+    );
+    lastResult = parsePlannerJson(text);
+    if (lastResult.files.length || !lastResult.needsMoreFiles?.length) return lastResult;
+
+    const nextFiles = await recallPlannerFiles(root, lastResult.needsMoreFiles, knownFiles);
+    if (!nextFiles.length) return lastResult;
+    for (const file of nextFiles) {
+      knownFiles.add(file.path);
+      recalledFiles.push(file);
+    }
+  }
+
+  return {
+    ...lastResult,
+    summary: `${lastResult.summary || 'Patch planner stopped before proposing changes.'} Recalled additional files but still did not produce a patch.`,
+  };
+}
+
+function buildPatchPlannerMessages(
+  prompt: string,
+  context: ContextGraphResult,
+  instructionFiles: string[],
+  repositoryFiles: string[],
+  recalledFiles: PlannerRecallFile[],
+): ChatMessage[] {
   const system = [
     'You are Code Space Patch Planner.',
-    'Return only JSON with shape {"summary":"string","files":[{"path":"relative/path","afterContent":"complete file content","deleted":false,"explanation":"why changed"}]}.',
-    'Only edit files included in repository evidence unless creating a clearly necessary new file.',
+    'Return only JSON with shape {"summary":"string","needsMoreFiles":["relative/path"],"files":[{"path":"relative/path","afterContent":"complete file content","deleted":false,"explanation":"why changed"}]}.',
+    'If the current evidence is not enough, do not give up. Return needsMoreFiles with exact relative paths from the repository file index, and the runtime will read them before asking again.',
+    'Only edit files included in repository evidence or recalled evidence unless creating a clearly necessary new file.',
     describeEvidencePolicy(),
     'Prefer small, reviewable patches. Do not apply changes yourself.',
     `Instruction files loaded: ${instructionFiles.join(', ') || '(none)'}`,
@@ -400,17 +444,30 @@ async function callPatchPlannerModel(
     .slice(0, 18)
     .map((file) => [`--- FILE ${file.path} (${file.summary}) ---`, file.content, file.truncated ? '\n[TRUNCATED]' : ''].join('\n'))
     .join('\n\n');
-  const text = await chatWithRetry(
-    { id: request.providerId, model: request.model, endpoint: credentials.endpoint, apiKey: credentials.apiKey || 'local' },
-    [
-      { role: 'system', content: system },
-      { role: 'user', content: [`Task: ${prompt}`, '', 'Repository evidence:', contextBlock].join('\n') },
-    ],
-  );
-  return parsePlannerJson(text);
+  const recalledBlock = recalledFiles
+    .map((file) => [`--- RECALLED FILE ${file.path} ---`, file.content, file.truncated ? '\n[TRUNCATED]' : ''].join('\n'))
+    .join('\n\n');
+  const fileIndex = repositoryFiles.slice(0, 500).join('\n');
+  const user = [
+      'Task:',
+      prompt,
+      '',
+      'Repository file index (request exact paths from here via needsMoreFiles whenever required):',
+      fileIndex || '(empty)',
+      '',
+      'Repository evidence:',
+      contextBlock || '(none)',
+      '',
+      'Recalled evidence:',
+      recalledBlock || '(none yet)',
+    ].join('\n');
+  return [
+    { role: 'system', content: system },
+    { role: 'user', content: user },
+  ];
 }
 
-function parsePlannerJson(raw: string): PatchModelResult {
+export function parsePlannerJson(raw: string): PatchModelResult {
   const trimmed = raw.trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
   const start = trimmed.indexOf('{');
   const end = trimmed.lastIndexOf('}');
@@ -418,6 +475,16 @@ function parsePlannerJson(raw: string): PatchModelResult {
   const parsed = JSON.parse(candidate) as Partial<PatchModelResult>;
   return {
     summary: String(parsed.summary ?? 'Patch proposed for review.'),
+    needsMoreFiles: Array.isArray(parsed.needsMoreFiles)
+      ? Array.from(
+          new Set(
+            parsed.needsMoreFiles
+              .filter((file): file is string => typeof file === 'string')
+              .map(normalizeContextPath)
+              .filter((file) => Boolean(file) && !file.startsWith('../') && !file.includes('/../')),
+          ),
+        ).slice(0, 12)
+      : [],
     files: Array.isArray(parsed.files)
       ? parsed.files
           .filter((file) => file && typeof file.path === 'string' && typeof file.afterContent === 'string')
@@ -429,6 +496,25 @@ function parsePlannerJson(raw: string): PatchModelResult {
           }))
       : [],
   };
+}
+
+export async function recallPlannerFiles(root: string, requestedFiles: string[], knownFiles: Set<string>): Promise<PlannerRecallFile[]> {
+  const repositoryFiles = new Set(await listRepositoryFiles(root));
+  const recalled: PlannerRecallFile[] = [];
+  for (const requested of requestedFiles) {
+    const normalized = normalizeContextPath(requested);
+    if (!normalized || normalized.startsWith('../') || normalized.includes('/../')) continue;
+    if (knownFiles.has(normalized) || !repositoryFiles.has(normalized)) continue;
+    const content = await safeReadTextFile(root, normalized);
+    if (content == null) continue;
+    recalled.push({
+      path: normalized,
+      content: content.slice(0, 22_000),
+      truncated: content.length > 22_000,
+    });
+    if (recalled.length >= 12) break;
+  }
+  return recalled;
 }
 
 async function resolveProviderCredentials(root: string, request: AgentRuntimeRequest): Promise<{ apiKey: string; endpoint?: string }> {

@@ -1,5 +1,15 @@
 export interface TerminalCommand {
-  kind: 'syntax' | 'format' | 'test' | 'typecheck' | 'lint' | 'build' | 'e2e';
+  kind:
+    | 'explore'
+    | 'shell'
+    | 'script'
+    | 'syntax'
+    | 'format'
+    | 'test'
+    | 'typecheck'
+    | 'lint'
+    | 'build'
+    | 'e2e';
   command: string;
   args: string[];
   cwd?: string;
