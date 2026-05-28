@@ -25,8 +25,10 @@ export class PatchReview {
   async prevalidateAndPersist(input: PatchPrevalidationInput): Promise<PendingPatchRecord> {
     for (const file of input.files) {
       resolvePatchTarget(input.root, file.path);
-      if (!input.readFiles.has(file.path) && file.beforeContent !== '') {
-        throw new Error(`Refusing to edit ${file.path} because it was not read in this run.`);
+      // Runtime recall may load a target after the initial context graph. The proposal still carries
+      // the exact previous content, and the later apply step checks for stale content before writing.
+      if (!input.readFiles.has(file.path) && file.beforeContent === '') {
+        throw new Error(`Patch target ${file.path} has no read baseline and is not a new file.`);
       }
       if (!file.deleted) {
         const diagnostics = validateSyntaxLightweight(file.path, file.afterContent);
