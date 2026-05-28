@@ -10,7 +10,7 @@ export function appendInstructionToPrompt(prompt: string, instruction?: string |
   if (!trimmedInstruction) return prompt;
 
   // Motivation vs Logic: Code Space should honor user-specific coding preferences without forcing every caller to duplicate prompt stitching, so we keep the merge rule in one reusable helper.
-  return [prompt, '', 'Additional instruction from Code Space preferences:', trimmedInstruction].join('\n');
+  return [prompt, '', 'Additional instruction for user customization:', trimmedInstruction].join('\n');
 }
 
 export function buildPlanImplementationPrompt(filePath: string): string {

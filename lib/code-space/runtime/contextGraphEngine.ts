@@ -117,6 +117,14 @@ function isPackageOrConfig(file: string): boolean {
   return /package\.json|tsconfig|next\.config|vitest|playwright|tailwind|postcss|eslint|\.cursorrules/i.test(file);
 }
 
+function promptNeedsCodeSpaceUi(prompt: string): boolean {
+  return /\bcode\s*space\b/i.test(prompt) && /\b(page|workspace|sidebar|editor|diff|patch|accept|reject|changes?)\b/i.test(prompt);
+}
+
+function promptNeedsAgentHarness(prompt: string): boolean {
+  return /\b(agent|tool|grep|shell|terminal|context|evidence|explor|cursor|codex|claude\s*code)\b/i.test(prompt);
+}
+
 function extractReferencedFiles(content: string, candidateSet: Set<string>): string[] {
   const references = new Set<string>();
   const seen = new Set<string>();
@@ -150,12 +158,25 @@ export class ContextGraphEngine {
     const terms = promptTerms(prompt);
     const scores = new Map<string, { score: number; reasons: Set<ContextReason>; details: Set<string> }>();
     const buildPlanPath = normalizeContextPath(options.buildPlanPath ?? extractBuildPlanPath(prompt) ?? '');
+    const needsCodeSpaceUi = promptNeedsCodeSpaceUi(prompt);
+    const needsAgentHarness = promptNeedsAgentHarness(prompt);
 
     for (const file of candidates) {
       const lower = file.toLowerCase();
       if (isPackageOrConfig(file)) addScore(scores, file, 18, 'package_config');
       if (/^app\/api\/code-space|lib\/code-space\/runtime|app\/api\/code-space\/agent/.test(file)) addScore(scores, file, 22, 'route_runtime_surface');
       if (/^components\/code-space/.test(file)) addScore(scores, file, 18, 'ui_surface');
+      // Motivation vs Logic: Cursor-like agents do not wait for users to paste every file; they
+      // use the request shape to route initial evidence. Code Space page/review prompts must bring
+      // the workspace/editor/sidebar files forward before runtime internals crowd them out.
+      if (needsCodeSpaceUi && /^components\/code-space\//.test(file)) addScore(scores, file, 80, 'ui_surface', 'Code Space UI prompt');
+      if (needsCodeSpaceUi && /components\/code-space\/(CodeSpaceWorkspace|AgentPanel)\.tsx$/.test(file)) addScore(scores, file, 120, 'ui_surface', 'primary Code Space page surface');
+      if (needsCodeSpaceUi && /^components\/code-space\/__tests__/.test(file)) addScore(scores, file, 55, 'test_surface', 'Code Space UI regression surface');
+      if (needsCodeSpaceUi && file === 'app/page.tsx') addScore(scores, file, 48, 'ui_surface', 'Code Space shell entrypoint');
+      if (needsAgentHarness && /lib\/code-space\/runtime\/(agentRuntime|contextGraphEngine|toolRegistry|terminalPolicy|permissionManager|terminalRunner)\.ts$/.test(file)) {
+        addScore(scores, file, 85, 'route_runtime_surface', 'agent harness capability prompt');
+      }
+      if (needsAgentHarness && /^app\/api\/code-space\/(agent|terminal)\//.test(file)) addScore(scores, file, 70, 'route_runtime_surface', 'agent API capability prompt');
       if (/(__tests__|\.test\.|\.spec\.|tests?\/)/i.test(file)) addScore(scores, file, 10, 'test_surface');
       if (/^(docs|README\.md)/i.test(file)) addScore(scores, file, 8, 'documentation_spec');
       if (/AGENTS\.md|CLAUDE\.md|\.cursorrules/i.test(file)) addScore(scores, file, 24, 'project_rule');

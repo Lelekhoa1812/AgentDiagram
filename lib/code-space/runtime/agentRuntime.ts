@@ -408,9 +408,12 @@ export async function callPatchPlannerModel(
       buildPatchPlannerMessages(prompt, context, instructionFiles, repositoryFiles, recalledFiles),
     );
     lastResult = parsePlannerJson(text);
-    if (lastResult.files.length || !lastResult.needsMoreFiles?.length) return lastResult;
+    if (lastResult.files.length) return lastResult;
 
-    const nextFiles = await recallPlannerFiles(root, lastResult.needsMoreFiles, knownFiles);
+    const requestedFiles = lastResult.needsMoreFiles?.length
+      ? lastResult.needsMoreFiles
+      : suggestPlannerRecallFiles(prompt, repositoryFiles, knownFiles);
+    const nextFiles = await recallPlannerFiles(root, requestedFiles, knownFiles);
     if (!nextFiles.length) return lastResult;
     for (const file of nextFiles) {
       knownFiles.add(file.path);
@@ -440,8 +443,7 @@ function buildPatchPlannerMessages(
     'Prefer small, reviewable patches. Do not apply changes yourself.',
     `Instruction files loaded: ${instructionFiles.join(', ') || '(none)'}`,
   ].join('\n');
-  const contextBlock = context.files
-    .slice(0, 18)
+  const contextBlock = selectPlannerEvidenceFiles(context, prompt)
     .map((file) => [`--- FILE ${file.path} (${file.summary}) ---`, file.content, file.truncated ? '\n[TRUNCATED]' : ''].join('\n'))
     .join('\n\n');
   const recalledBlock = recalledFiles
@@ -465,6 +467,67 @@ function buildPatchPlannerMessages(
     { role: 'system', content: system },
     { role: 'user', content: user },
   ];
+}
+
+export function selectPlannerEvidenceFiles(context: ContextGraphResult, prompt: string, limit = 28): ContextGraphResult['files'] {
+  const lowerPrompt = prompt.toLowerCase();
+  const isCodeSpacePageWork = /\bcode\s*space\b/.test(lowerPrompt) && /\b(page|workspace|sidebar|editor|diff|patch|accept|reject|changes?)\b/.test(lowerPrompt);
+  const isAgentCapabilityWork = /\b(agent|tool|grep|shell|terminal|context|evidence|explor|cursor|codex|claude\s*code)\b/.test(lowerPrompt);
+
+  const weighted = context.files.map((file, originalIndex) => {
+    const lowerPath = file.path.toLowerCase();
+    let weight = file.score;
+    if (file.reasons.some((reason) => reason === 'explicit_file' || reason === 'explicit_folder' || reason === 'open_tab' || reason === 'current_editor')) weight += 1000;
+    if (isCodeSpacePageWork && /^components\/code-space\//.test(lowerPath)) weight += 500;
+    if (isCodeSpacePageWork && /components\/code-space\/(codespaceworkspace|agentpanel)/i.test(file.path)) weight += 450;
+    if (isCodeSpacePageWork && /components\/code-space\/__tests__/.test(lowerPath)) weight += 260;
+    if (isCodeSpacePageWork && lowerPath === 'app/page.tsx') weight += 220;
+    if (isCodeSpacePageWork && /patch|diff|terminal|toolregistry|agentruntime|permissionmanager/.test(lowerPath)) weight += 120;
+    if (isAgentCapabilityWork && /lib\/code-space\/runtime\/(agentruntime|contextgraphengine|toolregistry|terminalpolicy|permissionmanager|terminalrunner)/.test(lowerPath)) weight += 360;
+    if (isAgentCapabilityWork && /app\/api\/code-space\/(agent|terminal)/.test(lowerPath)) weight += 300;
+    if (/(__tests__|\.test\.|\.spec\.)/.test(lowerPath)) weight += 80;
+    if (file.reasons.includes('project_rule')) weight += 180;
+    if (file.reasons.includes('package_config')) weight += 80;
+    return { file, weight, originalIndex };
+  });
+
+  return weighted
+    .sort((a, b) => b.weight - a.weight || a.originalIndex - b.originalIndex)
+    .slice(0, Math.max(1, limit))
+    .map((item) => item.file);
+}
+
+export function suggestPlannerRecallFiles(prompt: string, repositoryFiles: string[], knownFiles: Set<string>): string[] {
+  const lowerPrompt = prompt.toLowerCase();
+  const wanted = new Map<string, number>();
+  const add = (file: string, score: number) => {
+    const normalized = normalizeContextPath(file);
+    if (!normalized || knownFiles.has(normalized)) return;
+    wanted.set(normalized, Math.max(wanted.get(normalized) ?? 0, score));
+  };
+
+  for (const file of repositoryFiles) {
+    const lowerPath = file.toLowerCase();
+    if (/\bcode\s*space\b/.test(lowerPrompt)) {
+      if (/components\/code-space\/codespaceworkspace\.tsx$/.test(lowerPath)) add(file, 1000);
+      if (/components\/code-space\/agentpanel\.tsx$/.test(lowerPath)) add(file, 980);
+      if (/components\/code-space\/__tests__\/agentpanel\.test\.tsx$/.test(lowerPath)) add(file, 940);
+      if (lowerPath === 'app/page.tsx') add(file, 850);
+    }
+    if (/\b(diff|patch|accept|reject|changes?)\b/.test(lowerPrompt)) {
+      if (/patch|diff/.test(lowerPath)) add(file, 760);
+      if (/components\/code-space/.test(lowerPath)) add(file, 720);
+    }
+    if (/\b(agent|tool|grep|shell|terminal|context|evidence|explor|cursor|codex|claude\s*code)\b/.test(lowerPrompt)) {
+      if (/lib\/code-space\/runtime\/(agentruntime|contextgraphengine|toolregistry|terminalpolicy|permissionmanager|terminalrunner)/.test(lowerPath)) add(file, 700);
+      if (/app\/api\/code-space\/(agent|terminal)/.test(lowerPath)) add(file, 660);
+    }
+  }
+
+  return Array.from(wanted.entries())
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([file]) => file)
+    .slice(0, 12);
 }
 
 export function parsePlannerJson(raw: string): PatchModelResult {

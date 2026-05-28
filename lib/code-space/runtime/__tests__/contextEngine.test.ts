@@ -44,4 +44,33 @@ describe('ContextEngine', () => {
     expect(result.files.map((file) => file.path)).toContain('lib/code-space/runtime/agentRuntime.ts');
     expect(result.files.map((file) => file.path)).toContain('README.md');
   });
+
+  it('routes Code Space page review prompts toward workspace, sidebar, and editor tests', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ctx-engine-code-space-page-'));
+    await mkdir(path.join(root, 'components/code-space/__tests__'), { recursive: true });
+    await mkdir(path.join(root, 'lib/code-space/runtime'), { recursive: true });
+    await mkdir(path.join(root, 'app'), { recursive: true });
+    await writeFile(path.join(root, 'app/page.tsx'), 'import { CodeSpaceWorkspace } from "../components/code-space/CodeSpaceWorkspace";\n');
+    await writeFile(path.join(root, 'components/code-space/CodeSpaceWorkspace.tsx'), 'export function CodeSpaceWorkspace() { return "editor diff"; }\n');
+    await writeFile(path.join(root, 'components/code-space/AgentPanel.tsx'), 'export function AgentPanel() { return "Code changes sidebar"; }\n');
+    await writeFile(path.join(root, 'components/code-space/__tests__/AgentPanel.test.tsx'), 'describe("diff sidebar", () => {});\n');
+    await writeFile(path.join(root, 'lib/code-space/runtime/agentRuntime.ts'), 'export const runtime = true;\n');
+    await writeFile(path.join(root, 'lib/code-space/runtime/patchReview.ts'), 'export const patchReview = true;\n');
+
+    const engine = new ContextEngine();
+    const result = await engine.collectProjectContext(
+      root,
+      'Review the Code Space page so changed files open in the code editor with red and green patches before accept or reject.',
+      [],
+      8,
+    );
+    const selected = result.files.map((file) => file.path);
+
+    expect(selected).toContain('components/code-space/CodeSpaceWorkspace.tsx');
+    expect(selected).toContain('components/code-space/AgentPanel.tsx');
+    expect(selected).toContain('components/code-space/__tests__/AgentPanel.test.tsx');
+    expect(selected.indexOf('components/code-space/CodeSpaceWorkspace.tsx')).toBeLessThan(
+      selected.indexOf('lib/code-space/runtime/agentRuntime.ts'),
+    );
+  });
 });

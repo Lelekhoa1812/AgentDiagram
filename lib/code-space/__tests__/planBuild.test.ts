@@ -6,7 +6,7 @@ describe('plan build prompt helpers', () => {
     const result = appendInstructionToPrompt('Implement the requested feature.', 'Prefer small patches.');
 
     expect(result).toContain('Implement the requested feature.');
-    expect(result).toContain('Additional instruction from Code Space preferences:');
+    expect(result).toContain('Additional instruction for user customization:');
     expect(result).toContain('Prefer small patches.');
   });
 
