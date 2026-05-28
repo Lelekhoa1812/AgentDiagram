@@ -1,8 +1,16 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CodeSpaceProject } from '@/lib/code-space/core';
 import { readCodeSpacePreferences, readCodeSpaceProjects } from '@/lib/code-space/persistence';
+import {
+  acceptedHunkIdSet,
+  applyAcceptedDiffHunks,
+  everyHunkResolved,
+  splitUnifiedDiffIntoHunks,
+  type DiffHunk,
+  type DiffHunkStatus,
+} from '@/components/code-space/diffHunks';
 
 type ExplorerNodeType = 'file' | 'dir';
 
@@ -19,6 +27,48 @@ interface ExplorerMenuState {
   x: number;
   y: number;
   target: ExplorerTarget;
+}
+
+interface AgentDiffEvent {
+  type: 'diff_proposed';
+  diffId: string;
+  filePath: string;
+  oldContent: string;
+  newContent: string;
+  deleted?: boolean;
+  explanation?: string;
+  unifiedDiff?: string;
+}
+
+interface ReviewDiff {
+  diffId: string;
+  filePath: string;
+  oldContent: string;
+  newContent: string;
+  deleted?: boolean;
+  explanation?: string;
+  unifiedDiff?: string;
+  rootPath: string;
+  projectId: string;
+  runId?: string;
+  hunks: DiffHunk[];
+  hunkStatus: DiffHunkStatus;
+  applyingHunkId?: string;
+  error?: string;
+  createdAt: number;
+}
+
+interface AgentRequestContext {
+  rootPath: string;
+  runId?: string;
+  projectIdPromise: Promise<string>;
+}
+
+interface EditorRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
 }
 
 const NON_PATH_TITLES = new Set([
@@ -77,6 +127,10 @@ export function isClickInsideExplorerMenu(eventTarget: EventTarget | null): bool
   return eventTarget instanceof Element && Boolean(eventTarget.closest('[data-code-space-explorer-menu="true"]'));
 }
 
+function isClickInsideInlinePatchReview(eventTarget: EventTarget | null): boolean {
+  return eventTarget instanceof Element && Boolean(eventTarget.closest('[data-code-space-inline-patch-review="true"]'));
+}
+
 function isMacLike(): boolean {
   if (typeof navigator === 'undefined') return false;
   return /Mac|iPhone|iPad|iPod/i.test(navigator.platform);
@@ -90,6 +144,17 @@ async function getActiveProject(): Promise<CodeSpaceProject | null> {
     projects.find((project) => Boolean(project.rootPath)) ??
     null
   );
+}
+
+async function resolveProjectIdForRoot(rootPath: string): Promise<string> {
+  const normalizedRoot = rootPath.replace(/\\/g, '/').replace(/\/+$/, '');
+  const preferences = readCodeSpacePreferences();
+  const projects = await readCodeSpaceProjects();
+  const project =
+    projects.find((item) => item.rootPath?.replace(/\\/g, '/').replace(/\/+$/, '') === normalizedRoot) ??
+    projects.find((item) => item.id === preferences.activeProjectId) ??
+    projects.find((item) => Boolean(item.rootPath));
+  return project?.id ?? preferences.activeProjectId ?? 'code-space-project';
 }
 
 async function resolveTargetFromButton(button: HTMLButtonElement): Promise<ExplorerTarget | null> {
@@ -147,9 +212,111 @@ export async function postFileAction(target: ExplorerTarget, body: Record<string
   return true;
 }
 
+function requestUrl(input: RequestInfo | URL): string {
+  if (typeof input === 'string') return input;
+  if (input instanceof URL) return input.toString();
+  return input.url;
+}
+
+async function requestBodyText(input: RequestInfo | URL, init?: RequestInit): Promise<string> {
+  if (typeof init?.body === 'string') return init.body;
+  if (input instanceof Request) return input.clone().text();
+  return '';
+}
+
+async function parseAgentDiffStream(
+  stream: ReadableStream<Uint8Array>,
+  context: AgentRequestContext,
+  onDiff: (event: AgentDiffEvent, context: AgentRequestContext, projectId: string) => void,
+): Promise<void> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  const projectId = await context.projectIdPromise;
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      try {
+        const event = JSON.parse(line.slice(6)) as { type?: string };
+        if (event.type === 'diff_proposed') {
+          onDiff(event as AgentDiffEvent, context, projectId);
+        }
+      } catch {
+        // Ignore malformed Server-Sent Event fragments; the workspace consumes its own copy.
+      }
+    }
+  }
+}
+
+function renderDiffLineClass(line: string): string {
+  if (line.startsWith('+') && !line.startsWith('+++')) return 'bg-[#12261b] text-[#3fb950]';
+  if (line.startsWith('-') && !line.startsWith('---')) return 'bg-[#2d1517] text-[#f85149]';
+  if (line.startsWith('@@')) return 'text-[#79c0ff]';
+  return 'text-[#c9d1d9]';
+}
+
+function resolvedContentForHunk(reviewDiff: ReviewDiff, extraAcceptedHunkId?: string): string {
+  const acceptedIds = acceptedHunkIdSet(reviewDiff.hunkStatus, extraAcceptedHunkId);
+  if (reviewDiff.deleted) return acceptedIds.size > 0 ? '' : reviewDiff.oldContent;
+  return applyAcceptedDiffHunks(reviewDiff.oldContent, reviewDiff.hunks, acceptedIds);
+}
+
+function findSidebarReviewButton(filePath: string, label: 'Accept' | 'Reject'): HTMLButtonElement | null {
+  const normalized = normalizeRelativePath(filePath);
+  const openButton = Array.from(document.querySelectorAll<HTMLButtonElement>('button[title]')).find((button) => {
+    const title = button.getAttribute('title') ?? '';
+    return title.startsWith('Open ') && normalizeRelativePath(title.replace(/^Open\s+/, '')) === normalized;
+  });
+  const card = openButton?.closest('div.rounded.border');
+  if (!card) return null;
+  return Array.from(card.querySelectorAll<HTMLButtonElement>('button')).find((button) => button.textContent?.trim() === label) ?? null;
+}
+
+function clearWorkspacePendingDiff(filePath: string): void {
+  window.setTimeout(() => {
+    findSidebarReviewButton(filePath, 'Reject')?.click();
+  }, 80);
+}
+
+function useCodeEditorRect(): EditorRect | null {
+  const [rect, setRect] = useState<EditorRect | null>(null);
+
+  useEffect(() => {
+    const update = () => {
+      const editorRegion = document.querySelector<HTMLElement>('.code-space-workbench > section');
+      if (!editorRegion) {
+        setRect(null);
+        return;
+      }
+      const next = editorRegion.getBoundingClientRect();
+      setRect({ left: next.left, top: next.top, width: next.width, height: next.height });
+    };
+
+    update();
+    const intervalId = window.setInterval(update, 400);
+    window.addEventListener('resize', update);
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('resize', update);
+    };
+  }, []);
+
+  return rect;
+}
+
 export function CodeSpaceWorkspaceEnhancements() {
   const [selectedTarget, setSelectedTarget] = useState<ExplorerTarget | null>(null);
   const [menu, setMenu] = useState<ExplorerMenuState | null>(null);
+  const [reviewDiffs, setReviewDiffs] = useState<ReviewDiff[]>([]);
+  const mountedRef = useRef(true);
+  const editorRect = useCodeEditorRect();
 
   const closeMenu = useCallback(() => setMenu(null), []);
 
@@ -210,6 +377,137 @@ export function CodeSpaceWorkspaceEnhancements() {
     await postFileAction(target, { action: 'delete', path: target.path }, dirname(target.path));
   }, [closeMenu]);
 
+  const updateReviewDiff = useCallback((diffId: string, updater: (current: ReviewDiff) => ReviewDiff) => {
+    setReviewDiffs((current) => current.map((item) => (item.diffId === diffId ? updater(item) : item)));
+  }, []);
+
+  const rejectHunk = useCallback((reviewDiff: ReviewDiff, hunk: DiffHunk) => {
+    updateReviewDiff(reviewDiff.diffId, (current) => {
+      const next = {
+        ...current,
+        hunkStatus: { ...current.hunkStatus, [hunk.id]: 'rejected' as const },
+        error: undefined,
+      };
+      if (everyHunkResolved(next.hunks, next.hunkStatus)) clearWorkspacePendingDiff(next.filePath);
+      return next;
+    });
+  }, [updateReviewDiff]);
+
+  const acceptHunk = useCallback(async (reviewDiff: ReviewDiff, hunk: DiffHunk) => {
+    updateReviewDiff(reviewDiff.diffId, (current) => ({ ...current, applyingHunkId: hunk.id, error: undefined }));
+
+    const beforeContent = resolvedContentForHunk(reviewDiff);
+    const afterContent = resolvedContentForHunk(reviewDiff, hunk.id);
+
+    try {
+      const response = await fetch('/api/code-space/patches', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'apply',
+          rootPath: reviewDiff.rootPath,
+          projectId: reviewDiff.projectId,
+          runId: reviewDiff.runId,
+          patchId: `${reviewDiff.diffId}:${hunk.id}`,
+          files: [
+            {
+              path: reviewDiff.filePath,
+              beforeContent,
+              afterContent,
+              deleted: reviewDiff.deleted && afterContent === '',
+            },
+          ],
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? 'Patch apply failed');
+
+      updateReviewDiff(reviewDiff.diffId, (current) => {
+        const next = {
+          ...current,
+          applyingHunkId: undefined,
+          hunkStatus: { ...current.hunkStatus, [hunk.id]: 'accepted' as const },
+          error: undefined,
+        };
+        if (everyHunkResolved(next.hunks, next.hunkStatus)) clearWorkspacePendingDiff(next.filePath);
+        return next;
+      });
+      document.querySelector<HTMLButtonElement>('.code-space-workbench button[title="Refresh tree"]')?.click();
+    } catch (error) {
+      updateReviewDiff(reviewDiff.diffId, (current) => ({
+        ...current,
+        applyingHunkId: undefined,
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    }
+  }, [updateReviewDiff]);
+
+  const clearResolvedReviewDiffs = useCallback(() => {
+    setReviewDiffs((current) => current.filter((item) => !everyHunkResolved(item.hunks, item.hunkStatus)));
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    const originalFetch = window.fetch.bind(window);
+
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = requestUrl(input);
+      let context: AgentRequestContext | null = null;
+
+      if (url.includes('/api/code-space/agent')) {
+        const bodyText = await requestBodyText(input, init).catch(() => '');
+        try {
+          const parsed = JSON.parse(bodyText) as { projectRoot?: string; sessionId?: string };
+          if (parsed.projectRoot) {
+            context = {
+              rootPath: parsed.projectRoot,
+              runId: parsed.sessionId,
+              projectIdPromise: resolveProjectIdForRoot(parsed.projectRoot),
+            };
+          }
+        } catch {
+          context = null;
+        }
+      }
+
+      const response = await originalFetch(input, init);
+      if (!context || !response.body) return response;
+
+      const [workspaceBody, reviewBody] = response.body.tee();
+      void parseAgentDiffStream(reviewBody, context, (event, streamContext, projectId) => {
+        if (!mountedRef.current) return;
+        const hunks = splitUnifiedDiffIntoHunks(event.unifiedDiff, event.oldContent, event.newContent);
+        const nextReviewDiff: ReviewDiff = {
+          diffId: event.diffId,
+          filePath: event.filePath,
+          oldContent: event.oldContent,
+          newContent: event.newContent,
+          deleted: event.deleted,
+          explanation: event.explanation,
+          unifiedDiff: event.unifiedDiff,
+          rootPath: streamContext.rootPath,
+          projectId,
+          runId: streamContext.runId,
+          hunks,
+          hunkStatus: {},
+          createdAt: Date.now(),
+        };
+        setReviewDiffs((current) => [...current.filter((item) => item.diffId !== event.diffId), nextReviewDiff]);
+      }).catch(() => undefined);
+
+      return new Response(workspaceBody, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
+    };
+
+    return () => {
+      mountedRef.current = false;
+      window.fetch = originalFetch;
+    };
+  }, []);
+
   useEffect(() => {
     const handleClickCapture = (event: MouseEvent) => {
       const element = event.target instanceof Element ? event.target : null;
@@ -223,7 +521,7 @@ export function CodeSpaceWorkspaceEnhancements() {
         return;
       }
 
-      if (isClickInsideExplorerMenu(event.target)) return;
+      if (isClickInsideExplorerMenu(event.target) || isClickInsideInlinePatchReview(event.target)) return;
 
       const button = findExplorerNodeButton(event.target);
       if (!button) {
@@ -236,6 +534,7 @@ export function CodeSpaceWorkspaceEnhancements() {
     };
 
     const handleContextMenu = (event: MouseEvent) => {
+      if (isClickInsideInlinePatchReview(event.target)) return;
       const button = findExplorerNodeButton(event.target);
       if (!button) return;
       event.preventDefault();
@@ -289,38 +588,127 @@ export function CodeSpaceWorkspaceEnhancements() {
     return () => window.clearInterval(intervalId);
   }, []);
 
-  if (!menu) return null;
+  const visibleReviewDiffs = useMemo(
+    () => reviewDiffs.filter((item) => !everyHunkResolved(item.hunks, item.hunkStatus)).sort((a, b) => a.createdAt - b.createdAt),
+    [reviewDiffs],
+  );
 
-  const { target } = menu;
-  const directoryLabel = target.type === 'dir' ? target.path : target.directoryPath || 'project root';
+  const reviewStyle = editorRect
+    ? {
+        left: `${editorRect.left + 18}px`,
+        top: `${editorRect.top + 72}px`,
+        width: `${Math.max(320, editorRect.width - 36)}px`,
+        maxHeight: `${Math.max(260, editorRect.height - 130)}px`,
+      }
+    : undefined;
+
+  const target = menu?.target;
+  const directoryLabel = target ? (target.type === 'dir' ? target.path : target.directoryPath || 'project root') : '';
 
   return (
-    <div
-      data-code-space-explorer-menu="true"
-      className="fixed z-[1000] min-w-48 rounded-md border border-[#3a3a3a] bg-[#1f1f1f] py-1 text-[12px] text-[#d4d4d4] shadow-2xl"
-      style={{ left: menu.x, top: menu.y }}
-      onClick={(event) => event.stopPropagation()}
-      role="menu"
-    >
-      <button type="button" className="block w-full px-3 py-1.5 text-left hover:bg-[#2a2d2e]" onClick={() => void renameTarget(target)} role="menuitem">
-        Edit name
-      </button>
-      <button type="button" className="block w-full px-3 py-1.5 text-left hover:bg-[#2a2d2e]" onClick={() => void createFileInDirectory(target)} role="menuitem">
-        Create file
-      </button>
-      <button type="button" className="block w-full px-3 py-1.5 text-left hover:bg-[#2a2d2e]" onClick={() => void createFolderInDirectory(target)} role="menuitem">
-        Create folder
-      </button>
-      <button type="button" className="block w-full px-3 py-1.5 text-left hover:bg-[#2a2d2e]" onClick={() => void duplicateTarget(target)} role="menuitem">
-        Duplicate
-      </button>
-      <div className="my-1 border-t border-[#333]" />
-      <button type="button" className="block w-full px-3 py-1.5 text-left text-red-300 hover:bg-red-500/10" onClick={() => void deleteTarget(target)} role="menuitem">
-        Delete
-      </button>
-      <div className="border-t border-[#333] px-3 py-1 text-[10px] text-[#8b8b8b]">
-        Target: {directoryLabel}
-      </div>
-    </div>
+    <>
+      {editorRect && reviewStyle && visibleReviewDiffs.length > 0 ? (
+        <div
+          data-code-space-inline-patch-review="true"
+          className="fixed z-[900] overflow-hidden rounded-xl border border-[#30363d] bg-[#0d1117ee] font-mono text-xs text-[#e6edf3] shadow-2xl backdrop-blur"
+          style={reviewStyle}
+        >
+          <div className="flex items-center gap-2 border-b border-[#30363d] bg-[#161b22] px-3 py-2">
+            <span className="text-[10px] uppercase tracking-[0.2em] text-[#58a6ff]">Editor patch review</span>
+            <span className="text-[10px] text-[#8b949e]">Review each proposed patch independently, directly over the code editor.</span>
+            <button type="button" onClick={clearResolvedReviewDiffs} className="ml-auto rounded border border-[#30363d] px-2 py-1 text-[10px] text-[#8b949e] hover:bg-[#21262d]">
+              Clear resolved
+            </button>
+          </div>
+          <div className="overflow-auto p-3" style={{ maxHeight: reviewStyle.maxHeight }}>
+            <div className="space-y-3">
+              {visibleReviewDiffs.map((reviewDiff) => (
+                <div key={reviewDiff.diffId} className="rounded-lg border border-[#30363d] bg-[#0f1114]">
+                  <div className="flex flex-wrap items-center gap-2 border-b border-[#1f242d] px-3 py-2">
+                    <span className="truncate text-[11px] text-[#58a6ff]">{reviewDiff.filePath}</span>
+                    <span className="rounded border border-[#30363d] px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[#8b949e]">
+                      {reviewDiff.deleted ? 'delete' : `${reviewDiff.hunks.length} patch${reviewDiff.hunks.length === 1 ? '' : 'es'}`}
+                    </span>
+                  </div>
+                  {reviewDiff.explanation ? <p className="px-3 pt-2 text-[10px] leading-4 text-[#8b949e]">{reviewDiff.explanation}</p> : null}
+                  {reviewDiff.error ? <p className="mx-3 mt-2 rounded border border-[#f8514944] bg-[#2d1517] px-2 py-1 text-[10px] text-[#f85149]">{reviewDiff.error}</p> : null}
+                  <div className="space-y-2 p-3">
+                    {reviewDiff.hunks.map((hunk) => {
+                      const status = reviewDiff.hunkStatus[hunk.id];
+                      const isBusy = reviewDiff.applyingHunkId === hunk.id;
+                      const isResolved = status === 'accepted' || status === 'rejected';
+                      return (
+                        <div key={hunk.id} className="overflow-hidden rounded border border-[#242a32] bg-[#0d1117]">
+                          <div className="flex items-center gap-2 border-b border-[#1f242d] bg-[#111827] px-2 py-1.5">
+                            <span className="text-[9px] uppercase tracking-wider text-[#79c0ff]">Patch {hunk.index + 1}</span>
+                            <span className="truncate text-[9px] text-[#6e7681]">{hunk.header}</span>
+                            {status ? <span className={status === 'accepted' ? 'ml-auto text-[9px] uppercase text-[#3fb950]' : 'ml-auto text-[9px] uppercase text-[#f85149]'}>{status}</span> : null}
+                          </div>
+                          <div className="max-h-52 overflow-auto py-1 text-[10px] leading-4">
+                            {[hunk.header, ...hunk.lines].map((line, index) => (
+                              <div key={`${hunk.id}:${index}:${line.slice(0, 16)}`} className={`whitespace-pre-wrap break-all px-2 ${renderDiffLineClass(line)}`}>
+                                {line || ' '}
+                              </div>
+                            ))}
+                          </div>
+                          <div className="flex justify-end gap-2 border-t border-[#1f242d] bg-[#0f1114] px-2 py-1.5">
+                            <button
+                              type="button"
+                              disabled={isBusy || isResolved}
+                              onClick={() => rejectHunk(reviewDiff, hunk)}
+                              className="rounded border border-[#30363d] px-2 py-1 text-[10px] text-[#f85149] hover:bg-[#2d1517] disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              Reject patch
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isBusy || isResolved}
+                              onClick={() => void acceptHunk(reviewDiff, hunk)}
+                              className="rounded bg-[#238636] px-2 py-1 text-[10px] text-white hover:bg-[#2ea043] disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              {isBusy ? 'Applying…' : 'Accept patch'}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {menu && target ? (
+        <div
+          data-code-space-explorer-menu="true"
+          className="fixed z-[1000] min-w-48 rounded-md border border-[#3a3a3a] bg-[#1f1f1f] py-1 text-[12px] text-[#d4d4d4] shadow-2xl"
+          style={{ left: menu.x, top: menu.y }}
+          onClick={(event) => event.stopPropagation()}
+          role="menu"
+        >
+          <button type="button" className="block w-full px-3 py-1.5 text-left hover:bg-[#2a2d2e]" onClick={() => void renameTarget(target)} role="menuitem">
+            Edit name
+          </button>
+          <button type="button" className="block w-full px-3 py-1.5 text-left hover:bg-[#2a2d2e]" onClick={() => void createFileInDirectory(target)} role="menuitem">
+            Create file
+          </button>
+          <button type="button" className="block w-full px-3 py-1.5 text-left hover:bg-[#2a2d2e]" onClick={() => void createFolderInDirectory(target)} role="menuitem">
+            Create folder
+          </button>
+          <button type="button" className="block w-full px-3 py-1.5 text-left hover:bg-[#2a2d2e]" onClick={() => void duplicateTarget(target)} role="menuitem">
+            Duplicate
+          </button>
+          <div className="my-1 border-t border-[#333]" />
+          <button type="button" className="block w-full px-3 py-1.5 text-left text-red-300 hover:bg-red-500/10" onClick={() => void deleteTarget(target)} role="menuitem">
+            Delete
+          </button>
+          <div className="border-t border-[#333] px-3 py-1 text-[10px] text-[#8b8b8b]">
+            Target: {directoryLabel}
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
