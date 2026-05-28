@@ -1402,14 +1402,14 @@ export function CodeSpaceWorkspace() {
     if (!project || !project.rootPath) return;
     const requestedMode = options.modeOverride ?? agentMode;
     const buildPlanPath = options.buildPlanPath ?? extractBuildPlanPath(userPrompt);
-    const effectivePrompt = appendInstructionToPrompt(userPrompt, codeSpaceInstruction);
+
 
     const session = ensureSession();
     const now = Date.now();
     const userMessage: CodeSpaceMessage = {
       id: nowId('msg'),
       role: 'user',
-      content: effectivePrompt,
+      content: userPrompt,
       createdAt: now,
     };
     const sessionWithPrompt: CodeSpaceAgentSession = {
@@ -1467,7 +1467,13 @@ export function CodeSpaceWorkspace() {
         ? (provider.localApiKey ?? '')
         : (provider.apiKey || getApiKey(provider.provider));
     const enableThinking = provider.provider === 'anthropic';
-    const latestHistory = sessionWithPrompt.messages;
+    // Root Cause vs Logic: instructions were leaking into the chat feed, so we keep stored user messages clean
+    // and only merge the customization text when preparing the agent payload.
+    const latestHistory = sessionWithPrompt.messages.map((message) =>
+      message.role === 'user'
+        ? { ...message, content: appendInstructionToPrompt(message.content, codeSpaceInstruction) }
+        : message,
+    );
     let liveAssistantMessageId: string | null = null;
     const liveToolMessageIds = new Map<string, string>();
 
