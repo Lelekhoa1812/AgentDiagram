@@ -111,7 +111,7 @@ function summarizeContextFile(filePath: string, content: string, symbols: string
   if (/validation|terminal|test/i.test(lowerPath)) return `Validation, terminal, test, or repair-loop surface.${symbolHint}`;
   if (/components\/code-space|panel|workspace|selector/i.test(lowerPath)) return `Code Space UI/session state surface.${symbolHint}`;
   if (/test|spec/i.test(lowerPath)) return `Executable test surface or behavior example.${symbolHint}`;
-  if (/pubmed|clinical|guideline|mesh/.test(lower)) return `Domain-specific evidence or query behavior surface.${symbolHint}`;
+  if (/mongo|database|rag|retrieval|faiss|vector|embedding|chatbot|clinical|guideline|pubmed|mesh/.test(`${lowerPath}\n${lower}`)) return `Data, retrieval, chatbot, or clinical evidence integration surface.${symbolHint}`;
   return `Implementation surface selected by repository context scoring.${symbolHint}`;
 }
 
@@ -125,6 +125,10 @@ function promptNeedsCodeSpaceUi(prompt: string): boolean {
 
 function promptNeedsAgentHarness(prompt: string): boolean {
   return /\b(agent|tool|grep|shell|terminal|context|evidence|explor|self[-\s]?explor|analy[sz]e?|harness|workflow|patch|planner|runtime|apply|edit)\b/i.test(prompt);
+}
+
+function promptNeedsDataRetrievalSurface(prompt: string): boolean {
+  return /\b(mongo(?:db)?|pymongo|database|db_manager|rag|retrieval|retrieve|clinical|passage|faiss|vector|embedding|chatbot|medical|guideline|pubmed)\b/i.test(prompt);
 }
 
 function contextCharLimit(filePath: string, prompt: string, reasons: Set<ContextReason>): number {
@@ -148,30 +152,19 @@ function contextCharLimit(filePath: string, prompt: string, reasons: Set<Context
   if (promptNeedsAgentHarness(prompt) && /^app\/api\/code-space\/agent\//i.test(lowerPath)) {
     return DEEP_CONTEXT_CHAR_LIMIT;
   }
+  if (promptNeedsDataRetrievalSurface(prompt) && /(^|\/)(api|backend|src)\//i.test(lowerPath) && /database|db|mongo|rag|retriev|chatbot|clinical|passage|vector|embedding|faiss|app\.py|routes\.py/i.test(lowerPath)) {
+    return DEEP_CONTEXT_CHAR_LIMIT;
+  }
   return DEFAULT_CONTEXT_CHAR_LIMIT;
 }
 
 function extractReferencedFiles(content: string, candidateSet: Set<string>): string[] {
   const references = new Set<string>();
-  const seen = new Set<string>();
   const pathPattern =
-    /(?<![\w./-])(?:\.{1,2}\/)?([A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)+(?:\.(?:ts|tsx|js|jsx|json|md|mdx|py|go|rs|java|kt|php|rb|sh|yml|yaml|toml|css|scss))?)(?![\w./-])/g;
+    /(?<![\w./-])(?:\.{1,2}\/)?([A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)+(?:\.(?:ts|tsx|js|jsx|json|md|mdx|py|go|rs|java|kt|cs|php|rb|sh|yml|yaml|toml|css|scss))?)(?![\w./-])/g;
 
   for (const match of content.matchAll(pathPattern)) {
-    const raw = match[1];
-    if (!raw) continue;
-    const normalized = normalizeContextPath(raw);
-    if (!normalized || seen.has(normalized)) continue;
-    seen.add(normalized);
-    if (candidateSet.has(normalized)) {
-      references.add(normalized);
-      continue;
-    }
-    for (const candidate of candidateSet) {
-      if (candidate === normalized || candidate.startsWith(`${normalized}/`)) {
-        references.add(candidate);
-      }
-    }
+    for (const resolved of resolveCandidatePaths(match[1] ?? '', candidateSet)) references.add(resolved);
   }
 
   return Array.from(references);
@@ -179,14 +172,58 @@ function extractReferencedFiles(content: string, candidateSet: Set<string>): str
 
 function extractPromptReferencedFiles(prompt: string, candidateSet: Set<string>): string[] {
   const references = new Set<string>(extractReferencedFiles(prompt, candidateSet));
-  for (const match of prompt.matchAll(/File\s+"(?:\/[^"\n]+\/)?([^"\n]+\.(?:py|ts|tsx|js|jsx|json|md|yml|yaml|java|kt|cs|go|rs|php|rb|sh))"/g)) {
-    const normalized = normalizeContextPath(match[1] ?? '');
-    if (normalized && candidateSet.has(normalized)) references.add(normalized);
-    for (const candidate of candidateSet) {
-      if (normalized && candidate.endsWith(`/${normalized}`)) references.add(candidate);
-    }
+  const quotedRuntimePathPattern = /File\s+"([^"]+\.(?:py|ts|tsx|js|jsx|json|md|yml|yaml|java|kt|cs|go|rs|php|rb|sh))"/g;
+  const absolutePathPattern = /(?:^|[\s'"`(])((?:\/[A-Za-z0-9_.-]+)+\.(?:py|ts|tsx|js|jsx|json|md|yml|yaml|java|kt|cs|go|rs|php|rb|sh))(?![\w./-])/g;
+
+  for (const match of prompt.matchAll(quotedRuntimePathPattern)) {
+    for (const resolved of resolveCandidatePaths(match[1] ?? '', candidateSet)) references.add(resolved);
+  }
+  for (const match of prompt.matchAll(absolutePathPattern)) {
+    for (const resolved of resolveCandidatePaths(match[1] ?? '', candidateSet)) references.add(resolved);
   }
   return Array.from(references);
+}
+
+function resolveCandidatePaths(rawPath: string, candidateSet: Set<string>): string[] {
+  const normalized = normalizeRuntimeFilePath(rawPath);
+  if (!normalized) return [];
+  const matches = new Set<string>();
+  const variants = runtimePathVariants(normalized);
+  for (const variant of variants) {
+    if (candidateSet.has(variant)) matches.add(variant);
+  }
+  for (const candidate of candidateSet) {
+    for (const variant of variants) {
+      if (candidate === variant || candidate.endsWith(`/${variant}`) || variant.endsWith(`/${candidate}`)) {
+        matches.add(candidate);
+      }
+    }
+  }
+  return Array.from(matches);
+}
+
+function normalizeRuntimeFilePath(rawPath: string): string {
+  return rawPath
+    .replace(/\\/g, '/')
+    .replace(/^file:\/\//i, '')
+    .replace(/^['"`(]+|['"`),.;:]+$/g, '')
+    .replace(/^\/+/, '')
+    .replace(/\/+/g, '/');
+}
+
+function runtimePathVariants(normalizedPath: string): string[] {
+  const variants = new Set<string>();
+  const parts = normalizedPath.split('/').filter(Boolean);
+  variants.add(parts.join('/'));
+  for (const prefix of ['app', 'workspace', 'workspaces', 'repo', 'project', 'src']) {
+    const index = parts.indexOf(prefix);
+    if (index >= 0 && index + 1 < parts.length) variants.add(parts.slice(index + 1).join('/'));
+  }
+  for (let index = 0; index < parts.length - 1; index += 1) {
+    const suffix = parts.slice(index).join('/');
+    if (suffix.includes('/')) variants.add(suffix);
+  }
+  return Array.from(variants).filter(Boolean);
 }
 
 export class ContextGraphEngine {
@@ -198,6 +235,7 @@ export class ContextGraphEngine {
     const buildPlanPath = normalizeContextPath(options.buildPlanPath ?? extractBuildPlanPath(prompt) ?? '');
     const needsCodeSpaceUi = promptNeedsCodeSpaceUi(prompt);
     const needsAgentHarness = promptNeedsAgentHarness(prompt);
+    const needsDataRetrievalSurface = promptNeedsDataRetrievalSurface(prompt);
 
     for (const file of candidates) {
       const lower = file.toLowerCase();
@@ -215,6 +253,15 @@ export class ContextGraphEngine {
         addScore(scores, file, 85, 'route_runtime_surface', 'agent harness capability prompt');
       }
       if (needsAgentHarness && /^app\/api\/code-space\/(agent|terminal)\//.test(file)) addScore(scores, file, 70, 'route_runtime_surface', 'agent API capability prompt');
+      // Motivation vs Logic: user bug reports often name a capability (MongoDB/RAG/retrieval)
+      // rather than every file. Boost likely data-path modules so the agent can inspect the
+      // database/bootstrap/chatbot surfaces before deciding how to disable or refactor them.
+      if (needsDataRetrievalSurface && /(^|\/)(api|backend|src)\//i.test(file) && /database|db|mongo|rag|retriev|chatbot|clinical|passage|vector|embedding|faiss|app\.py|routes\.py/i.test(lower)) {
+        addScore(scores, file, 150, 'route_runtime_surface', 'data/retrieval capability prompt');
+      }
+      if (needsDataRetrievalSurface && /requirements\.txt|pyproject\.toml|\.env|config|settings/i.test(lower)) {
+        addScore(scores, file, 70, 'package_config', 'data/retrieval configuration prompt');
+      }
       if (/(__tests__|\.test\.|\.spec\.|tests?\/)/i.test(file)) addScore(scores, file, 10, 'test_surface');
       if (/^(docs|README\.md)/i.test(file)) addScore(scores, file, 8, 'documentation_spec');
       if (/AGENTS\.md|CLAUDE\.md|INSTRUCTIONS\.md|PROJECT_RULES\.md/i.test(file)) addScore(scores, file, 24, 'project_rule');
