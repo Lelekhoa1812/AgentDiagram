@@ -2,7 +2,7 @@
 
 ## Objective
 
-Code Space must behave like a real coding agent surface with Cursor-style Ask / Plan / Code modes, reviewable diffs, checkpointed writes, bounded terminal feedback, and repair loops. The implementation is not complete until the UI, route, runtime tools, patch system, validation, and rollback paths all satisfy the DoDs below.
+Code Space must behave like a capable coding agent surface with Ask / Plan / Code modes, reviewable diffs, checkpointed writes, bounded terminal feedback, and repair loops. The implementation is not complete until the UI, route, runtime tools, patch system, validation, and rollback paths all satisfy the DoDs below.
 
 ## DoD 1 — Ask / Plan / Code mode parity
 
@@ -29,7 +29,7 @@ Code Space must behave like a real coding agent surface with Cursor-style Ask / 
 - Explorer outputs must include proposed approach, evidence, file list, risks, and confidence.
 - The Critic must compare proposals, reject hallucinated claims, and select or synthesize the implementation plan.
 - The Executor is the only role allowed to propose patches.
-- Subagents start with blank context except inherited project rules such as `.cursorrules`, `CLAUDE.md`, `AGENTS.md`, or equivalent project guidance.
+- Subagents start with blank context except inherited project rules such as `AGENTS.md`, `CLAUDE.md`, or equivalent repository guidance.
 
 ## DoD 4 — Surgical editing
 
