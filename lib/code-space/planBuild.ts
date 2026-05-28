@@ -5,6 +5,14 @@ export interface CodeSpacePromptOptions {
   buildPlanPath?: string;
 }
 
+export function appendInstructionToPrompt(prompt: string, instruction?: string | null): string {
+  const trimmedInstruction = instruction?.trim();
+  if (!trimmedInstruction) return prompt;
+
+  // Motivation vs Logic: Code Space should honor user-specific coding preferences without forcing every caller to duplicate prompt stitching, so we keep the merge rule in one reusable helper.
+  return [prompt, '', 'Additional instruction from Code Space preferences:', trimmedInstruction].join('\n');
+}
+
 export function buildPlanImplementationPrompt(filePath: string): string {
   return [
     `Build from the approved plan at ${filePath}.`,

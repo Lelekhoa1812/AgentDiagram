@@ -17,6 +17,7 @@ export interface CodeSpaceLayoutPreferences {
   activeSessionId?: string | null;
   activeTabId?: string | null;
   agentMode?: CodeSpaceAgentMode;
+  instruction?: string;
   leftSidebarVisible?: boolean;
   rightSidebarVisible?: boolean;
   leftWidth?: number;

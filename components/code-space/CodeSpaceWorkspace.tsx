@@ -80,7 +80,7 @@ import type { AgentSSEEvent } from '@/lib/code-space/agent/types';
 import { nameSessionAsync } from '@/lib/code-space/sessionNaming';
 import { useMentionIndex } from '@/lib/code-space/mentions/useMentionIndex';
 import type { SelectedMention } from '@/lib/code-space/mentions/types';
-import { extractBuildPlanPath, type CodeSpacePromptOptions } from '@/lib/code-space/planBuild';
+import { appendInstructionToPrompt, extractBuildPlanPath, type CodeSpacePromptOptions } from '@/lib/code-space/planBuild';
 
 interface FilePayload {
   path: string;
@@ -284,6 +284,7 @@ export function CodeSpaceWorkspace() {
   const [projectSearch, setProjectSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [providerConfigOpen, setProviderConfigOpen] = useState(false);
+  const [codeSpaceInstruction, setCodeSpaceInstruction] = useState(() => readCodeSpacePreferences().instruction ?? '');
   const [zipSummary, setZipSummary] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [projectNameInput, setProjectNameInput] = useState('');
@@ -370,6 +371,7 @@ export function CodeSpaceWorkspace() {
     setWordWrap(preferences.wordWrap ?? true);
     setRevealHidden(preferences.revealHiddenFiles ?? false);
     setExecutionPolicy(preferences.executionPolicy ?? DEFAULT_CODE_SPACE_EXECUTION_POLICY);
+    setCodeSpaceInstruction(preferences.instruction ?? '');
 
     void Promise.all([readCodeSpaceProjects(), readCodeSpaceSessions(), readCodeSpaceTabs()]).then(
       ([storedProjects, storedSessions, storedTabs]) => {
@@ -422,6 +424,7 @@ export function CodeSpaceWorkspace() {
       bottomPanelVisible: bottomVisible,
       bottomActiveTab,
       minimapEnabled,
+      instruction: codeSpaceInstruction.trim() ? codeSpaceInstruction : undefined,
       wordWrap,
       revealHiddenFiles: revealHidden,
     });
@@ -432,6 +435,7 @@ export function CodeSpaceWorkspace() {
     agentMode,
     bottomVisible,
     bottomActiveTab,
+    codeSpaceInstruction,
     leftVisible,
     leftWidth,
     minimapEnabled,
@@ -1339,13 +1343,14 @@ export function CodeSpaceWorkspace() {
     if (!project || !project.rootPath) return;
     const requestedMode = options.modeOverride ?? agentMode;
     const buildPlanPath = options.buildPlanPath ?? extractBuildPlanPath(userPrompt);
+    const effectivePrompt = appendInstructionToPrompt(userPrompt, codeSpaceInstruction);
 
     const session = ensureSession();
     const now = Date.now();
     const userMessage: CodeSpaceMessage = {
       id: nowId('msg'),
       role: 'user',
-      content: userPrompt,
+      content: effectivePrompt,
       createdAt: now,
     };
     const sessionWithPrompt: CodeSpaceAgentSession = {
@@ -1695,6 +1700,7 @@ export function CodeSpaceWorkspace() {
     activeProjectId,
     agentMode,
     appendSessionMessage,
+    codeSpaceInstruction,
     ensureSession,
     openFile,
     patchSession,
@@ -2498,6 +2504,22 @@ export function CodeSpaceWorkspace() {
             </div>
             <div className="mt-4">
               <ProviderConfig />
+            </div>
+            <div className="mt-4 rounded-xl border border-[#2a2a2a] bg-[#111111] p-3">
+              <label htmlFor="code-space-instruction" className="block text-[10px] uppercase tracking-widest text-[#8b8b8b]">
+                Instruction
+              </label>
+              <textarea
+                id="code-space-instruction"
+                value={codeSpaceInstruction}
+                onChange={(event) => setCodeSpaceInstruction(event.target.value)}
+                placeholder="Add your coding preferences, constraints, or style notes here."
+                rows={4}
+                className="mt-2 w-full rounded-md border border-[#2a2a2a] bg-[#181818] px-3 py-1 text-sm text-[#d4d4d4] outline-none transition-colors placeholder:text-[#5f5f5f] focus:border-accent/60 focus:bg-[#1c1c1c]"
+              />
+              <p className="mt-2 text-[11px] leading-4 text-[#8b8b8b]">
+                Your custom instructions for the agent to follow.
+              </p>
             </div>
           </div>
         </div>
