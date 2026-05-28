@@ -26,9 +26,10 @@ export class PatchReview {
     for (const file of input.files) {
       resolvePatchTarget(input.root, file.path);
       if (!input.readFiles.has(file.path)) {
+        const hasBaseline = file.beforeContent.length > 0;
         const isNewFile = !file.deleted && file.beforeContent === '' && file.afterContent.length > 0;
-        if (!isNewFile) {
-          throw new Error(`Patch target ${file.path} has no read baseline and is not a new file.`);
+        if (!hasBaseline && !isNewFile) {
+          throw new Error(`Patch target ${file.path} has no usable baseline.`);
         }
       }
       if (!file.deleted) {
