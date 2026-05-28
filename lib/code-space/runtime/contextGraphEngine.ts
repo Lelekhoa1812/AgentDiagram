@@ -103,7 +103,7 @@ function summarizeContextFile(filePath: string, content: string, symbols: string
   const lower = content.toLowerCase();
   const symbolHint = symbols.length ? ` Key surfaces: ${symbols.slice(0, 4).join(', ')}.` : '';
   if (/readme|docs?\//i.test(filePath)) return `Project documentation, setup notes, or architecture constraints.${symbolHint}`;
-  if (/agents\.md|claude\.md|\.cursorrules/i.test(filePath)) return `Project rules and coding instructions that should shape runtime behavior.${symbolHint}`;
+  if (/agents\.md|claude\.md|instructions\.md|project[-_]?rules/i.test(filePath)) return `Project rules and coding instructions that should shape runtime behavior.${symbolHint}`;
   if (/package\.json|tsconfig|next\.config|vitest|playwright/i.test(lowerPath)) return `Package, framework, or validation configuration.${symbolHint}`;
   if (/route\.ts|app\/api|controller/i.test(lowerPath)) return `API route/runtime entrypoint selected for request handling evidence.${symbolHint}`;
   if (/agent|orchestrator|runtime|runner|manager/i.test(lowerPath)) return `Agent runtime, orchestration, state, or execution surface.${symbolHint}`;
@@ -116,7 +116,7 @@ function summarizeContextFile(filePath: string, content: string, symbols: string
 }
 
 function isPackageOrConfig(file: string): boolean {
-  return /package\.json|tsconfig|next\.config|vitest|playwright|tailwind|postcss|eslint|\.cursorrules/i.test(file);
+  return /package\.json|tsconfig|next\.config|vitest|playwright|tailwind|postcss|eslint|instructions\.md|project[-_]?rules/i.test(file);
 }
 
 function promptNeedsCodeSpaceUi(prompt: string): boolean {
@@ -124,7 +124,7 @@ function promptNeedsCodeSpaceUi(prompt: string): boolean {
 }
 
 function promptNeedsAgentHarness(prompt: string): boolean {
-  return /\b(agent|tool|grep|shell|terminal|context|evidence|explor|cursor|codex|claude\s*code)\b/i.test(prompt);
+  return /\b(agent|tool|grep|shell|terminal|context|evidence|explor|self[-\s]?explor|analy[sz]e?|harness|workflow|patch|planner|runtime|apply|edit)\b/i.test(prompt);
 }
 
 function contextCharLimit(filePath: string, prompt: string, reasons: Set<ContextReason>): number {
@@ -192,7 +192,7 @@ export class ContextGraphEngine {
       if (isPackageOrConfig(file)) addScore(scores, file, 18, 'package_config');
       if (/^app\/api\/code-space|lib\/code-space\/runtime|app\/api\/code-space\/agent/.test(file)) addScore(scores, file, 22, 'route_runtime_surface');
       if (/^components\/code-space/.test(file)) addScore(scores, file, 18, 'ui_surface');
-      // Motivation vs Logic: Cursor-like agents do not wait for users to paste every file; they
+      // Motivation vs Logic: capable coding agents do not wait for users to paste every file; they
       // use the request shape to route initial evidence. Code Space page/review prompts must bring
       // the workspace/editor/sidebar files forward before runtime internals crowd them out.
       if (needsCodeSpaceUi && /^components\/code-space\//.test(file)) addScore(scores, file, 80, 'ui_surface', 'Code Space UI prompt');
@@ -205,7 +205,7 @@ export class ContextGraphEngine {
       if (needsAgentHarness && /^app\/api\/code-space\/(agent|terminal)\//.test(file)) addScore(scores, file, 70, 'route_runtime_surface', 'agent API capability prompt');
       if (/(__tests__|\.test\.|\.spec\.|tests?\/)/i.test(file)) addScore(scores, file, 10, 'test_surface');
       if (/^(docs|README\.md)/i.test(file)) addScore(scores, file, 8, 'documentation_spec');
-      if (/AGENTS\.md|CLAUDE\.md|\.cursorrules/i.test(file)) addScore(scores, file, 24, 'project_rule');
+      if (/AGENTS\.md|CLAUDE\.md|INSTRUCTIONS\.md|PROJECT_RULES\.md/i.test(file)) addScore(scores, file, 24, 'project_rule');
       if (/^\.agent\/plans/.test(file)) addScore(scores, file, 8, 'plan_artifact');
       const pathHits = terms.reduce((sum, term) => sum + (lower.includes(term) ? 7 : 0), 0);
       if (pathHits) addScore(scores, file, pathHits, 'content_match', 'prompt/path overlap');
