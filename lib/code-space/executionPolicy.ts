@@ -11,15 +11,18 @@ export interface CodeSpaceExecutionPolicyMeta {
   menuItemClassName: string;
 }
 
-export const DEFAULT_CODE_SPACE_EXECUTION_POLICY: CodeSpaceExecutionPolicy = 'manual';
+// Motivation vs Logic: Code mode is expected to behave like a real coding agent, not just a diff
+// generator. The safe mutation boundary already lives in /api/code-space/patches, where every
+// proposed file goes through checkpointing and stale-content checks, so the default UX should route
+// generated patches through that apply path immediately. Manual review remains available as an
+// explicit opt-in gate for users who want to pause before writing files.
+export const DEFAULT_CODE_SPACE_EXECUTION_POLICY: CodeSpaceExecutionPolicy = 'auto';
 
 export const CODE_SPACE_EXECUTION_POLICY_META: Record<CodeSpaceExecutionPolicy, CodeSpaceExecutionPolicyMeta> = {
-  // Motivation vs Logic: the selector should signal risk in the same visual language as the review flow, so the
-  // automatically applied path reads as cautionary red while the user-confirmed path reads as the safe green default.
   auto: {
     policy: 'auto',
     label: 'Auto',
-    description: 'Apply agent changes automatically without asking.',
+    description: 'Apply agent changes through the checkpointed patch pipeline as soon as a diff is proposed.',
     accentClassName: 'text-[#f85149]',
     buttonClassName: 'border-[#be123c66] bg-[#2d1217] text-[#fb7185] hover:bg-[#3b151f]',
     menuItemClassName: 'text-[#fb7185] hover:bg-[#3b151f]',
@@ -27,7 +30,7 @@ export const CODE_SPACE_EXECUTION_POLICY_META: Record<CodeSpaceExecutionPolicy, 
   manual: {
     policy: 'manual',
     label: 'Confirm',
-    description: 'Require manual confirmation before applying code changes.',
+    description: 'Pause generated diffs for manual review before writing files.',
     accentClassName: 'text-[#3fb950]',
     buttonClassName: 'border-[#23863666] bg-[#0f2a1a] text-[#7ee787] hover:bg-[#12331f]',
     menuItemClassName: 'text-[#7ee787] hover:bg-[#12331f]',
@@ -43,7 +46,9 @@ export function isCodeSpaceAutoExecutionPolicy(policy: unknown): boolean {
   return normalizeCodeSpaceExecutionPolicy(policy) === 'auto';
 }
 
-// Root Cause vs Logic: auto mode only changed the persisted preference; the review UI still treated every diff as manual, so proposals continued to wait for a user click instead of flowing through the existing apply path.
+// Root Cause vs Logic: previously the default policy held patches in the review queue, so the agent
+// could truthfully show a diff while the underlying workspace still had no changed files. Generated
+// diffs now auto-apply unless the user explicitly selects Confirm/manual mode.
 export function shouldAutoApplyCodeSpaceDiffs(policy: unknown, autoApplied = false): boolean {
   return autoApplied || isCodeSpaceAutoExecutionPolicy(policy);
 }
