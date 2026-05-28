@@ -52,22 +52,21 @@ export function buildPlanCompletionResponse(input: PlanResponseInput): string {
 
 export function buildCodeCompletionResponse(input: CodeResponseInput): string {
   const lines: string[] = [];
-  const cleanSummary = input.files.length ? normalizeSummary(input.summary, true) : null;
+  const cleanSummary = input.files.length ? normalizeSummary(input.summary, true) : normalizeSummary(input.summary, false);
   if (cleanSummary) lines.push(cleanSummary);
 
   if (input.files.length) {
     const fileList = input.files.slice(0, 3).map((file) => `\`${file.path}\``);
     const suffix = input.files.length > fileList.length ? `, and ${input.files.length - fileList.length} more` : '';
     lines.push(
-      `Proposed ${input.files.length} reviewable patch${input.files.length === 1 ? '' : 'es'} for ${input.projectName}: ${formatList(fileList)}${suffix}. No project file is written until the patch is visible in Code changes and accepted or auto-apply succeeds.`,
+      `Proposed ${input.files.length} reviewable patch${input.files.length === 1 ? '' : 'es'} for ${input.projectName}: ${formatList(fileList)}${suffix}. Code changes are written through the checkpointed patch pipeline when accepted or auto-apply succeeds.`,
     );
   } else {
-    // Root Cause vs Logic: an empty patch result is a blocked run, not a useful completion. Never echo
-    // the model's own "I cannot / insufficient evidence" wording here; that message makes the agent
-    // look passive even when the runtime already attempted context recall. Keep the UX deterministic,
-    // actionable, and tied to the tool trace the user can inspect.
+    // Root Cause vs Logic: empty Code responses should only appear in defensive unit tests or hard
+    // provider failures. The runtime now creates a recovery artifact instead of ending with a zero-file
+    // completion, so this copy must not encourage users to attach files manually or accept a no-op run.
     lines.push(
-      `Needs review for ${input.projectName}: Code mode exhausted autonomous context recall and did not receive a valid reviewable file patch. No workspace files were changed; inspect the context_graph and patch_planner tool output for the missing target surface or model/provider response issue, then rerun with the named files attached if needed.`,
+      `Code mode did not receive a patch artifact for ${input.projectName}. The runtime should continue by recalling more repository context or creating an autonomous recovery artifact rather than treating this as complete.`,
     );
   }
 
