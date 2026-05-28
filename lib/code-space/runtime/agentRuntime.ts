@@ -368,6 +368,17 @@ function describeModeContract(mode: CodeSpaceAgentMode): string {
   return 'Code mode must read before edit, propose reviewable diffs, checkpoint through the unified apply path, and validate honestly.';
 }
 
+function describeEvidencePolicy(): string {
+  // Motivation vs Logic: patch planning can stall when the model treats the first evidence bundle as exhaustive.
+  // This policy tells the agent to keep recalling repository context until the implementation path is actually grounded.
+  return [
+    'When you are not fully certain how to implement something, do not guess from the current evidence set.',
+    'First expand your repository evidence by looking for related files, imports, tests, docs, configs, and neighboring runtime surfaces.',
+    'Treat the initial evidence bundle as a starting point, not a hard limit; recall more context whenever it would materially improve correctness.',
+    'Only finalize a plan or patch once the implementation path is grounded in enough repository evidence to explain the change confidently.',
+  ].join(' ');
+}
+
 async function callPatchPlannerModel(
   root: string,
   prompt: string,
@@ -381,6 +392,7 @@ async function callPatchPlannerModel(
     'You are Code Space Patch Planner.',
     'Return only JSON with shape {"summary":"string","files":[{"path":"relative/path","afterContent":"complete file content","deleted":false,"explanation":"why changed"}]}.',
     'Only edit files included in repository evidence unless creating a clearly necessary new file.',
+    describeEvidencePolicy(),
     'Prefer small, reviewable patches. Do not apply changes yourself.',
     `Instruction files loaded: ${instructionFiles.join(', ') || '(none)'}`,
   ].join('\n');

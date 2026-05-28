@@ -26,4 +26,22 @@ describe('ContextEngine', () => {
     expect(selected.some((f) => f.includes('.agent/plans'))).toBe(true);
     expect(['low','medium','high']).toContain(result.confidence);
   });
+
+  it('expands its own evidence by mining references from seed files', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ctx-engine-ref-'));
+    await mkdir(path.join(root, 'docs'), { recursive: true });
+    await mkdir(path.join(root, 'lib/code-space/runtime'), { recursive: true });
+    await writeFile(
+      path.join(root, 'README.md'),
+      'The Code Space runtime lives in `lib/code-space/runtime/agentRuntime.ts` and should be reused for all agent runs.',
+      'utf8',
+    );
+    await writeFile(path.join(root, 'lib/code-space/runtime/agentRuntime.ts'), 'export const runtime = true;', 'utf8');
+
+    const engine = new ContextEngine();
+    const result = await engine.collectProjectContext(root, 'Review the coding workflow for evidence gathering', [], 10);
+
+    expect(result.files.map((file) => file.path)).toContain('lib/code-space/runtime/agentRuntime.ts');
+    expect(result.files.map((file) => file.path)).toContain('README.md');
+  });
 });

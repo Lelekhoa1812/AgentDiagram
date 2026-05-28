@@ -117,6 +117,32 @@ function isPackageOrConfig(file: string): boolean {
   return /package\.json|tsconfig|next\.config|vitest|playwright|tailwind|postcss|eslint|\.cursorrules/i.test(file);
 }
 
+function extractReferencedFiles(content: string, candidateSet: Set<string>): string[] {
+  const references = new Set<string>();
+  const seen = new Set<string>();
+  const pathPattern =
+    /(?<![\w./-])(?:\.{1,2}\/)?([A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)+(?:\.(?:ts|tsx|js|jsx|json|md|mdx|py|go|rs|java|kt|php|rb|sh|yml|yaml|toml|css|scss))?)(?![\w./-])/g;
+
+  for (const match of content.matchAll(pathPattern)) {
+    const raw = match[1];
+    if (!raw) continue;
+    const normalized = normalizeContextPath(raw);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    if (candidateSet.has(normalized)) {
+      references.add(normalized);
+      continue;
+    }
+    for (const candidate of candidateSet) {
+      if (candidate === normalized || candidate.startsWith(`${normalized}/`)) {
+        references.add(candidate);
+      }
+    }
+  }
+
+  return Array.from(references);
+}
+
 export class ContextGraphEngine {
   async collectProjectContext(root: string, prompt: string, options: ContextGraphOptions = {}): Promise<ContextGraphResult> {
     const candidates = await listRepositoryFiles(root);
@@ -176,14 +202,54 @@ export class ContextGraphEngine {
       .filter(([file, scored]) => candidateSet.has(file) && scored.score > 0)
       .map(([file, scored]) => ({ file, ...scored }))
       .sort((a, b) => b.score - a.score || a.file.localeCompare(b.file));
-    const initialSelected = ranked.slice(0, budget).map((item) => item.file);
-    const trace = await traceDependencyEdges({ root, candidates, selected: initialSelected });
+    let tracedFiles = new Set<string>(ranked.slice(0, budget).map((item) => item.file));
 
-    for (const edge of trace.edges) {
-      addScore(scores, edge.to, 26, edge.reason === 'direct_import' ? 'direct_import_dependency' : 'reverse_importer', `${edge.reason} ${edge.from} -> ${edge.to}`);
-      addScore(scores, edge.from, 22, edge.reason === 'direct_import' ? 'direct_import_dependency' : 'reverse_importer', `${edge.reason} ${edge.from} -> ${edge.to}`);
+    // Motivation vs Logic: the first-ranked evidence set is often only the doorway into the real
+    // implementation. We intentionally mine those seed files for explicit file references, then
+    // re-trace dependencies so the agent can pull more context on its own instead of stopping at
+    // whatever the user typed first.
+    for (let pass = 0; pass < 2; pass += 1) {
+      const trace = await traceDependencyEdges({ root, candidates, selected: Array.from(tracedFiles) });
+      for (const edge of trace.edges) {
+        addScore(scores, edge.to, 26, edge.reason === 'direct_import' ? 'direct_import_dependency' : 'reverse_importer', `${edge.reason} ${edge.from} -> ${edge.to}`);
+        addScore(scores, edge.from, 22, edge.reason === 'direct_import' ? 'direct_import_dependency' : 'reverse_importer', `${edge.reason} ${edge.from} -> ${edge.to}`);
+      }
+
+      const seedFiles = Array.from(trace.files)
+        .map((file) => ({
+          file,
+          score: scores.get(file)?.score ?? 0,
+        }))
+        .sort((a, b) => b.score - a.score || a.file.localeCompare(b.file))
+        .slice(0, Math.min(budget, pass === 0 ? 10 : 16))
+        .map((item) => item.file);
+
+      const discovered = new Set<string>();
+      for (const seed of seedFiles) {
+        const content = await safeReadTextFile(root, seed);
+        if (!content) continue;
+        for (const ref of extractReferencedFiles(content, candidateSet)) {
+          discovered.add(ref);
+        }
+      }
+
+      for (const ref of discovered) {
+        addScore(scores, ref, pass === 0 ? 140 : 100, 'content_match', 'referenced by selected evidence');
+      }
+
+      const nextSelected = Array.from(scores.entries())
+        .filter(([file, scored]) => candidateSet.has(file) && scored.score > 0)
+        .map(([file, scored]) => ({ file, ...scored }))
+        .sort((a, b) => b.score - a.score || a.file.localeCompare(b.file))
+        .slice(0, budget)
+        .map((item) => item.file);
+      const nextSelectedSet = new Set(nextSelected);
+      const stable = nextSelected.length === tracedFiles.size && nextSelected.every((file) => tracedFiles.has(file));
+      tracedFiles = nextSelectedSet;
+      if (stable || discovered.size === 0) break;
     }
 
+    const trace = await traceDependencyEdges({ root, candidates, selected: Array.from(tracedFiles) });
     const finalRanked = Array.from(trace.files)
       .map((file) => {
         const scored = scores.get(file) ?? { score: 0, reasons: new Set<ContextReason>(), details: new Set<string>() };
