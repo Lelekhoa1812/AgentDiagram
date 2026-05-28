@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { postFileAction } from '../CodeSpaceWorkspaceEnhancements';
+import { isClickInsideExplorerMenu, postFileAction } from '../CodeSpaceWorkspaceEnhancements';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -43,5 +43,19 @@ describe('postFileAction', () => {
       }),
     );
     expect(alertSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('isClickInsideExplorerMenu', () => {
+  it('recognizes clicks inside the custom explorer menu container', () => {
+    const wrapper = document.createElement('div');
+    wrapper.setAttribute('data-code-space-explorer-menu', 'true');
+    const menuButton = document.createElement('button');
+    wrapper.appendChild(menuButton);
+    document.body.appendChild(wrapper);
+
+    expect(isClickInsideExplorerMenu(menuButton)).toBe(true);
+    expect(isClickInsideExplorerMenu(wrapper)).toBe(true);
+    expect(isClickInsideExplorerMenu(document.createElement('button'))).toBe(false);
   });
 });
