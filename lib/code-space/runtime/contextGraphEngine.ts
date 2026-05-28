@@ -132,11 +132,11 @@ function contextCharLimit(filePath: string, prompt: string, reasons: Set<Context
   if (reasons.has('explicit_file') || reasons.has('open_tab') || reasons.has('current_editor') || reasons.has('plan_artifact')) {
     return DEEP_CONTEXT_CHAR_LIMIT;
   }
-  // Root Cause vs Logic: the patch planner was asking for the full Code Space workspace after the
-  // initial evidence bundle truncated it, but the file was already marked as known. Primary Code
-  // Space and runtime surfaces now receive a deep-read budget up front so the model can ground and
-  // produce a concrete patch instead of ending with "need one more source file".
-  if (promptNeedsCodeSpaceUi(prompt) && /^components\/code-space\/(codespaceworkspace|agentpanel|filementioninput|agentmodeselector|executi.*selector)/i.test(lowerPath)) {
+  // Root Cause vs Logic: Code Space page work follows imports across many component surfaces
+  // (workspace, bottom panel, sidebars, selectors, input widgets). If any of those are truncated,
+  // the patch planner can keep requesting just one more file and never produce a patch. Treat all
+  // top-level Code Space React components and tests as deep-read evidence for UI-agent work.
+  if (promptNeedsCodeSpaceUi(prompt) && /^components\/code-space\/[^/]+\.tsx$/i.test(lowerPath)) {
     return DEEP_CONTEXT_CHAR_LIMIT;
   }
   if (promptNeedsCodeSpaceUi(prompt) && /^components\/code-space\/__tests__\//i.test(lowerPath)) {
@@ -196,7 +196,7 @@ export class ContextGraphEngine {
       // use the request shape to route initial evidence. Code Space page/review prompts must bring
       // the workspace/editor/sidebar files forward before runtime internals crowd them out.
       if (needsCodeSpaceUi && /^components\/code-space\//.test(file)) addScore(scores, file, 80, 'ui_surface', 'Code Space UI prompt');
-      if (needsCodeSpaceUi && /components\/code-space\/(CodeSpaceWorkspace|AgentPanel|FileMentionInput)\.tsx$/.test(file)) addScore(scores, file, 120, 'ui_surface', 'primary Code Space page surface');
+      if (needsCodeSpaceUi && /components\/code-space\/(CodeSpaceWorkspace|AgentPanel|BottomPanel|FileMentionInput)\.tsx$/.test(file)) addScore(scores, file, 120, 'ui_surface', 'primary Code Space page surface');
       if (needsCodeSpaceUi && /^components\/code-space\/__tests__/.test(file)) addScore(scores, file, 55, 'test_surface', 'Code Space UI regression surface');
       if (needsCodeSpaceUi && file === 'app/page.tsx') addScore(scores, file, 48, 'ui_surface', 'Code Space shell entrypoint');
       if (needsAgentHarness && /lib\/code-space\/runtime\/(agentRuntime|contextGraphEngine|toolRegistry|terminalPolicy|permissionManager|terminalRunner|validationRunner|repairLoop)\.ts$/.test(file)) {
