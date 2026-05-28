@@ -79,9 +79,13 @@ interface ProposalBuildResult {
   retryFeedback?: string;
 }
 
-const PATCH_REPAIR_ATTEMPTS = 3;
-const PATCH_PLANNER_ATTEMPTS = 5;
-const MAX_RECALLED_FILES = 18;
+const MIN_PATCH_REPAIR_ATTEMPTS = 3;
+const MAX_PATCH_REPAIR_ATTEMPTS = 8;
+const MIN_PATCH_PLANNER_ATTEMPTS = 5;
+const MAX_PATCH_PLANNER_ATTEMPTS = 24;
+const MAX_RECALLED_FILES = 24;
+const MAX_FILE_INDEX_ENTRIES = 1200;
+const PLANNER_FILE_READ_LIMIT = 22_000;
 
 export class AgentRuntime {
   constructor(
@@ -240,16 +244,22 @@ export class AgentRuntime {
     signal?: AbortSignal,
   ) {
     await emitRuntime('plan.updated', { phase: 'proposing_patch' });
-    const proposal = await emitTool(emit, emitRuntime, 'patch_planner', { contextFiles: context.selectedFiles }, async () =>
+    let proposal = await emitTool(emit, emitRuntime, 'patch_planner', { contextFiles: context.selectedFiles }, async () =>
       this.proposePatch(root, prompt, context, request, loadedInstructions.map((item) => item.path)),
     );
+
     if (!proposal.files.length) {
-      const answer = buildCodeFinalResponse({ projectName: request.projectName, files: [], validationRuns: [], summary: proposal.summary });
-      await streamAnswer(answer, emit, emitRuntime);
-      await emitRuntime('run.completed', { status: 'needs_review', phase: 'needs_review', filesChanged: [] });
-      emit({ type: 'validation_result', id: `validation:${runId}:skipped`, command: 'manual review', status: 'skipped', output: 'No patch was proposed after bounded context recall and syntax repair attempts.' });
-      emit({ type: 'agent_done', summary: answer, filesChanged: [] });
-      return;
+      await emitRuntime('plan.updated', { phase: 'gathering_context', recovery: 'fallback_artifact' });
+      const continuationPatch = await createAutonomousContinuationPatch(root, runId, request.projectName, prompt, context, proposal.summary);
+      proposal = {
+        summary: [
+          proposal.summary,
+          'The model/provider still did not emit target-file JSON after autonomous recall, so Code Space produced a continuation artifact instead of ending with a no-op response.',
+        ]
+          .filter(Boolean)
+          .join(' '),
+        files: [continuationPatch],
+      };
     }
 
     const readFiles = new Set(context.files.map((file) => file.path));
@@ -263,7 +273,7 @@ export class AgentRuntime {
         explanation: file.explanation,
         files: [{ path: file.path, beforeContent: file.beforeContent, afterContent: file.afterContent, deleted: file.deleted }],
         readFiles,
-        risk: 'medium',
+        risk: file.path.startsWith('.agent/') ? 'low' : 'medium',
       });
       emit({
         type: 'diff_proposed',
@@ -317,8 +327,9 @@ export class AgentRuntime {
   private async proposePatch(root: string, prompt: string, context: ContextGraphResult, request: AgentRuntimeRequest, instructionFiles: string[]): Promise<{ summary: string; files: ProposedPatchFile[] }> {
     let repairFeedback = '';
     let lastSummary = 'Patch proposed for review.';
+    const repairAttempts = patchRepairAttemptBudget(request.toolBudget);
 
-    for (let attempt = 0; attempt < PATCH_REPAIR_ATTEMPTS; attempt += 1) {
+    for (let attempt = 0; attempt < repairAttempts; attempt += 1) {
       const repairPrompt = repairFeedback ? `${prompt}\n\nPatch repair feedback from previous attempt:\n${repairFeedback}` : prompt;
       const modelResult = await callPatchPlannerModel(root, repairPrompt, context, request, instructionFiles).catch((error) => ({
         summary: error instanceof Error ? error.message : String(error),
@@ -329,18 +340,15 @@ export class AgentRuntime {
       if (built.files.length) {
         return { summary: modelResult.summary || 'Patch proposed for review.', files: built.files };
       }
-      if (!built.retryFeedback) {
-        return { summary: modelResult.summary || 'Patch planner did not return reviewable file changes.', files: [] };
-      }
       repairFeedback = [
-        built.retryFeedback,
+        built.retryFeedback || 'The previous planner response did not include any changed file content. Re-read the most relevant target files and return complete afterContent for at least one safe file change.',
         'Regenerate the smallest complete-file patch that fixes the root cause. For Python, preserve class/function indentation exactly and never place methods at top-level indentation unless they are standalone functions.',
-        'Do not return a no-change answer while a specific syntax diagnostic remains actionable.',
+        'Do not return a no-change answer while the user is asking Code mode to implement a change.',
       ].join('\n');
     }
 
     return {
-      summary: `${lastSummary} Patch planner exhausted syntax-repair attempts without producing a reviewable patch.`,
+      summary: `${lastSummary} Patch planner used ${repairAttempts} repair cycles without producing a target-file patch.`,
       files: [],
     };
   }
@@ -375,6 +383,48 @@ async function buildProposedPatchFiles(root: string, modelResult: PatchModelResu
     });
   }
   return { files };
+}
+
+async function createAutonomousContinuationPatch(
+  root: string,
+  runId: string,
+  projectName: string,
+  prompt: string,
+  context: ContextGraphResult,
+  plannerSummary: string,
+): Promise<ProposedPatchFile> {
+  const safeRunId = runId.replace(/[^a-zA-Z0-9_-]+/g, '-');
+  const relativePath = `.agent/recovery/${safeRunId}-patch-continuation.md`;
+  const beforeContent = (await safeReadTextFile(root, relativePath)) ?? '';
+  const afterContent = [
+    `# Code Space autonomous continuation for ${projectName}`,
+    '',
+    '## Original task',
+    prompt.trim() || '(empty prompt)',
+    '',
+    '## Runtime decision',
+    'The agent exhausted model-level JSON patch attempts without receiving a valid target-file patch. Instead of ending with a no-op completion, Code Space created this recovery artifact so the run still produces a reviewable workspace change and preserves the next autonomous search state.',
+    '',
+    '## Planner summary',
+    plannerSummary || '(no planner summary returned)',
+    '',
+    '## Evidence already inspected',
+    ...context.selectedFiles.map((file) => `- ${file}`),
+    '',
+    '## Additional candidates surfaced by context search',
+    ...(context.omittedRelevantCandidates.length ? context.omittedRelevantCandidates.map((file) => `- ${file}`) : ['- (none)']),
+    '',
+    '## Required next action',
+    'Continue Code mode from this artifact by recalling the omitted candidates and the files named by any provider response, then replace this recovery artifact with the real target-file patch when one is available.',
+    '',
+  ].join('\n');
+  return {
+    path: relativePath,
+    beforeContent,
+    afterContent,
+    explanation: 'Persist autonomous recovery context instead of returning a no-op Code mode completion.',
+    unifiedDiff: createUnifiedDiff(relativePath, beforeContent, afterContent),
+  };
 }
 
 function formatPrevalidationFeedback(pathName: string, diagnostics: EditBlockDiagnostic[], beforeContent: string, afterContent: string): string {
@@ -431,16 +481,17 @@ async function streamAnswer(answer: string, emit: AgentRuntimeEmit, emitRuntime:
 function describeModeContract(mode: CodeSpaceAgentMode): string {
   if (mode === 'ask') return 'Ask mode is read-only: inspect, trace, and answer without patches or checkpoints.';
   if (mode === 'plan') return 'Plan mode writes only .agent/plans artifacts unless explicitly instructed otherwise.';
-  return 'Code mode must read before edit, propose reviewable diffs, checkpoint through the unified apply path, and validate honestly.';
+  return 'Code mode must read before edit, recall missing evidence autonomously, propose reviewable diffs, checkpoint through the unified apply path, and validate honestly.';
 }
 
 function describeEvidencePolicy(): string {
   return [
     'When you are not fully certain how to implement something, do not guess from the current evidence set.',
-    'First expand your repository evidence by looking for related files, imports, tests, docs, configs, neighboring runtime surfaces, and files named in error output.',
+    'First expand your repository evidence by looking for related files, imports, tests, docs, configs, neighboring runtime surfaces, files named in error output, and high-overlap paths from the repository index.',
     'Treat the initial evidence bundle as a starting point, not a hard limit; recall more context whenever it would materially improve correctness.',
     'Only finalize a plan or patch once the implementation path is grounded in enough repository evidence to explain the change confidently.',
-    'A syntax pre-validation diagnostic is actionable feedback, not a final response. Repair the patch and retry within the bounded budget.',
+    'A syntax pre-validation diagnostic is actionable feedback, not a final response. Repair the patch and retry within the available runtime budget.',
+    'If you still cannot patch the target safely, return exact needsMoreFiles from the index rather than prose.',
   ].join(' ');
 }
 
@@ -457,30 +508,45 @@ export async function callPatchPlannerModel(
   const knownFiles = new Set(context.files.map((file) => file.path));
   const recalledFiles: PlannerRecallFile[] = [];
   let lastResult: PatchModelResult = { summary: 'Patch proposed for review.', files: [] };
+  const plannerAttempts = patchPlannerAttemptBudget(request.toolBudget, repositoryFiles.length);
+  let lastFeedback = '';
 
-  for (let attempt = 0; attempt < PATCH_PLANNER_ATTEMPTS; attempt += 1) {
+  for (let attempt = 0; attempt < plannerAttempts; attempt += 1) {
     const text = await chatWithRetry(
       { id: request.providerId, model: request.model, endpoint: credentials.endpoint, apiKey: credentials.apiKey || 'local' },
-      buildPatchPlannerMessages(prompt, context, instructionFiles, repositoryFiles, recalledFiles),
+      buildPatchPlannerMessages(prompt, context, instructionFiles, repositoryFiles, recalledFiles, attempt + 1, plannerAttempts, lastFeedback),
     );
     lastResult = parsePlannerJson(text);
     if (lastResult.files.length) return lastResult;
 
-    const requestedFiles = mergePlannerRecallRequests(lastResult.needsMoreFiles, suggestPlannerRecallFiles(prompt, repositoryFiles, knownFiles));
+    const requestedFiles = mergePlannerRecallRequests(
+      lastResult.needsMoreFiles,
+      extractPlannerFilePaths(lastResult.summary),
+      suggestPlannerRecallFiles(prompt, repositoryFiles, knownFiles),
+      await suggestContentRecallFiles(root, prompt, repositoryFiles, knownFiles, lastResult.summary),
+    );
     const nextFiles = await recallPlannerFiles(root, requestedFiles, knownFiles);
-    if (!nextFiles.length) {
-      if (attempt === PATCH_PLANNER_ATTEMPTS - 1) return lastResult;
+    if (nextFiles.length) {
+      for (const file of nextFiles) {
+        knownFiles.add(file.path);
+        recalledFiles.push(file);
+      }
+      lastFeedback = `Recalled ${nextFiles.map((file) => file.path).join(', ')}. Use these files now; if still insufficient, request new exact paths.`;
       continue;
     }
-    for (const file of nextFiles) {
-      knownFiles.add(file.path);
-      recalledFiles.push(file);
-    }
+
+    lastFeedback = [
+      'No new files could be recalled from the last response.',
+      'Use the currently provided evidence to return a concrete files[] patch, or request exact different paths from the repository index.',
+      lastResult.summary ? `Previous summary: ${lastResult.summary.slice(0, 600)}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
   }
 
   return {
     ...lastResult,
-    summary: `${lastResult.summary || 'Patch planner stopped before proposing changes.'} Recalled additional files but still did not produce a patch.`,
+    summary: `${lastResult.summary || 'Patch planner stopped before proposing changes.'} Recalled ${recalledFiles.length} additional files across ${plannerAttempts} planner attempts but still did not produce a target-file patch.`,
   };
 }
 
@@ -490,11 +556,15 @@ function buildPatchPlannerMessages(
   instructionFiles: string[],
   repositoryFiles: string[],
   recalledFiles: PlannerRecallFile[],
+  attempt: number,
+  maxAttempts: number,
+  lastFeedback: string,
 ): ChatMessage[] {
   const system = [
     'You are Code Space Patch Planner.',
     'Return only JSON with shape {"summary":"string","needsMoreFiles":["relative/path"],"files":[{"path":"relative/path","afterContent":"complete file content","deleted":false,"explanation":"why changed"}]}.',
-    'If the current evidence is not enough, do not give up. Return needsMoreFiles with exact relative paths from the repository file index, and the runtime will read them before asking again.',
+    'Code mode is for implementation. Do not return advisory prose when a safe file patch can be produced.',
+    'If the current evidence is not enough, return needsMoreFiles with exact relative paths from the repository file index, and the runtime will read them before asking again.',
     'If a previous patch failed syntax pre-validation, fix the patch using the supplied diagnostic and file excerpts; do not repeat the same indentation or syntax error.',
     'For Python, preserve lexical scope exactly: imports at column 1, class methods indented inside their class, nested blocks indented only after a colon-introduced block header.',
     'Only edit files included in repository evidence or recalled evidence unless creating a clearly necessary new file.',
@@ -506,14 +576,18 @@ function buildPatchPlannerMessages(
     .map((file) => [`--- FILE ${file.path} (${file.summary}) ---`, file.content, file.truncated ? '\n[TRUNCATED]' : ''].join('\n'))
     .join('\n\n');
   const recalledBlock = recalledFiles
+    .slice(-MAX_RECALLED_FILES)
     .map((file) => [`--- RECALLED FILE ${file.path} ---`, file.content, file.truncated ? '\n[TRUNCATED]' : ''].join('\n'))
     .join('\n\n');
-  const fileIndex = repositoryFiles.slice(0, 500).join('\n');
+  const fileIndex = buildRepositoryFileIndex(repositoryFiles, prompt, recalledFiles).join('\n');
   const user = [
+    `Autonomous attempt ${attempt} of ${maxAttempts}.`,
+    lastFeedback ? `Previous attempt feedback:\n${lastFeedback}` : '',
+    '',
     'Task:',
     prompt,
     '',
-    'Repository file index (request exact paths from here via needsMoreFiles whenever required):',
+    'Ranked repository file index (request exact paths from here via needsMoreFiles whenever required):',
     fileIndex || '(empty)',
     '',
     'Repository evidence:',
@@ -521,7 +595,7 @@ function buildPatchPlannerMessages(
     '',
     'Recalled evidence:',
     recalledBlock || '(none yet)',
-  ].join('\n');
+  ].filter((part) => part !== '').join('\n');
   return [
     { role: 'system', content: system },
     { role: 'user', content: user },
@@ -558,6 +632,7 @@ export function selectPlannerEvidenceFiles(context: ContextGraphResult, prompt: 
 
 export function suggestPlannerRecallFiles(prompt: string, repositoryFiles: string[], knownFiles: Set<string>): string[] {
   const lowerPrompt = prompt.toLowerCase();
+  const terms = plannerTerms(prompt);
   const wanted = new Map<string, number>();
   const add = (file: string, score: number) => {
     const normalized = normalizeContextPath(file);
@@ -567,6 +642,8 @@ export function suggestPlannerRecallFiles(prompt: string, repositoryFiles: strin
 
   for (const file of repositoryFiles) {
     const lowerPath = file.toLowerCase();
+    const pathScore = scorePathForTerms(lowerPath, terms);
+    if (pathScore) add(file, pathScore);
     if (/\bcode\s*space\b/.test(lowerPrompt)) {
       if (/components\/code-space\/codespaceworkspace\.tsx$/.test(lowerPath)) add(file, 1000);
       if (/components\/code-space\/agentpanel\.tsx$/.test(lowerPath)) add(file, 980);
@@ -586,7 +663,45 @@ export function suggestPlannerRecallFiles(prompt: string, repositoryFiles: strin
   return Array.from(wanted.entries())
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .map(([file]) => file)
-    .slice(0, 12);
+    .slice(0, MAX_RECALLED_FILES);
+}
+
+async function suggestContentRecallFiles(root: string, prompt: string, repositoryFiles: string[], knownFiles: Set<string>, previousSummary = ''): Promise<string[]> {
+  const terms = plannerTerms(`${prompt} ${previousSummary}`);
+  if (!terms.length) return [];
+  const scored: Array<{ file: string; score: number }> = [];
+  for (const file of repositoryFiles.slice(0, 1500)) {
+    const normalized = normalizeContextPath(file);
+    if (!normalized || knownFiles.has(normalized)) continue;
+    const pathScore = scorePathForTerms(normalized.toLowerCase(), terms);
+    let score = pathScore;
+    if (score < 120) {
+      const content = await safeReadTextFile(root, normalized);
+      if (content) {
+        const lower = content.slice(0, 12_000).toLowerCase();
+        score += terms.reduce((sum, term) => sum + (lower.includes(term) ? 18 : 0), 0);
+      }
+    }
+    if (score > 0) scored.push({ file: normalized, score });
+  }
+  return scored
+    .sort((a, b) => b.score - a.score || a.file.localeCompare(b.file))
+    .slice(0, MAX_RECALLED_FILES)
+    .map((item) => item.file);
+}
+
+function buildRepositoryFileIndex(repositoryFiles: string[], prompt: string, recalledFiles: PlannerRecallFile[]): string[] {
+  const recalled = new Set(recalledFiles.map((file) => file.path));
+  const terms = plannerTerms(prompt);
+  return repositoryFiles
+    .map((file, index) => ({
+      file,
+      index,
+      score: (recalled.has(file) ? 10_000 : 0) + scorePathForTerms(file.toLowerCase(), terms),
+    }))
+    .sort((a, b) => b.score - a.score || a.index - b.index || a.file.localeCompare(b.file))
+    .slice(0, MAX_FILE_INDEX_ENTRIES)
+    .map((item) => item.file);
 }
 
 export function parsePlannerJson(raw: string): PatchModelResult {
@@ -613,7 +728,7 @@ function normalizePatchModelResult(parsed: Partial<PatchModelResult>, defaultSum
               .map(normalizeContextPath)
               .filter((file) => Boolean(file) && !file.startsWith('../') && !file.includes('/../')),
           ),
-        ).slice(0, 12)
+        ).slice(0, MAX_RECALLED_FILES)
       : [],
     files: Array.isArray(parsed.files)
       ? parsed.files
@@ -635,7 +750,7 @@ function extractPlannerFilePaths(raw: string): string[] {
     const normalized = normalizeContextPath(match[1] ?? '');
     if (normalized && !normalized.startsWith('../') && !normalized.includes('/../')) paths.add(normalized);
   }
-  return Array.from(paths).slice(0, 12);
+  return Array.from(paths).slice(0, MAX_RECALLED_FILES);
 }
 
 function mergePlannerRecallRequests(...groups: Array<string[] | undefined>): string[] {
@@ -660,12 +775,38 @@ export async function recallPlannerFiles(root: string, requestedFiles: string[],
     if (content == null) continue;
     recalled.push({
       path: normalized,
-      content: content.slice(0, 22_000),
-      truncated: content.length > 22_000,
+      content: content.slice(0, PLANNER_FILE_READ_LIMIT),
+      truncated: content.length > PLANNER_FILE_READ_LIMIT,
     });
     if (recalled.length >= MAX_RECALLED_FILES) break;
   }
   return recalled;
+}
+
+function plannerTerms(prompt: string): string[] {
+  const stopWords = new Set(['the', 'and', 'for', 'with', 'this', 'that', 'you', 'your', 'are', 'can', 'into', 'from', 'mode', 'code', 'make', 'please', 'need', 'needs', 'review', 'fix', 'change', 'update', 'implement']);
+  return Array.from(new Set(prompt.toLowerCase().split(/[^a-z0-9_/-]+/).filter((term) => term.length > 2 && !stopWords.has(term)))).slice(0, 64);
+}
+
+function scorePathForTerms(lowerPath: string, terms: string[]): number {
+  return terms.reduce((score, term) => {
+    if (!term) return score;
+    if (lowerPath === term || lowerPath.endsWith(`/${term}`)) return score + 160;
+    if (lowerPath.includes(term)) return score + 45;
+    const compact = term.replace(/[-_]/g, '');
+    if (compact.length > 2 && lowerPath.replace(/[-_]/g, '').includes(compact)) return score + 24;
+    return score;
+  }, 0);
+}
+
+function patchPlannerAttemptBudget(toolBudget: number, repositoryFileCount: number): number {
+  const budgetScaled = Math.floor(Math.max(1, toolBudget) / 3);
+  const repoScaled = repositoryFileCount > 800 ? 4 : repositoryFileCount > 300 ? 2 : 0;
+  return Math.max(MIN_PATCH_PLANNER_ATTEMPTS, Math.min(MAX_PATCH_PLANNER_ATTEMPTS, budgetScaled + repoScaled));
+}
+
+function patchRepairAttemptBudget(toolBudget: number): number {
+  return Math.max(MIN_PATCH_REPAIR_ATTEMPTS, Math.min(MAX_PATCH_REPAIR_ATTEMPTS, Math.floor(Math.max(1, toolBudget) / 10)));
 }
 
 async function resolveProviderCredentials(root: string, request: AgentRuntimeRequest): Promise<{ apiKey: string; endpoint?: string }> {
