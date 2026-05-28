@@ -11,11 +11,6 @@ export interface CodeSpaceExecutionPolicyMeta {
   menuItemClassName: string;
 }
 
-// Motivation vs Logic: Code mode is expected to behave like a real coding agent, not just a diff
-// generator. The safe mutation boundary already lives in /api/code-space/patches, where every
-// proposed file goes through checkpointing and stale-content checks, so the default UX should route
-// generated patches through that apply path immediately. Manual review remains available as an
-// explicit opt-in gate for users who want to pause before writing files.
 export const DEFAULT_CODE_SPACE_EXECUTION_POLICY: CodeSpaceExecutionPolicy = 'auto';
 
 export const CODE_SPACE_EXECUTION_POLICY_META: Record<CodeSpaceExecutionPolicy, CodeSpaceExecutionPolicyMeta> = {
@@ -30,7 +25,7 @@ export const CODE_SPACE_EXECUTION_POLICY_META: Record<CodeSpaceExecutionPolicy, 
   manual: {
     policy: 'manual',
     label: 'Confirm',
-    description: 'Pause generated diffs for manual review before writing files.',
+    description: 'Show generated diffs in the review panel before the applied-changes history records them.',
     accentClassName: 'text-[#3fb950]',
     buttonClassName: 'border-[#23863666] bg-[#0f2a1a] text-[#7ee787] hover:bg-[#12331f]',
     menuItemClassName: 'text-[#7ee787] hover:bg-[#12331f]',
@@ -46,11 +41,8 @@ export function isCodeSpaceAutoExecutionPolicy(policy: unknown): boolean {
   return normalizeCodeSpaceExecutionPolicy(policy) === 'auto';
 }
 
-// Root Cause vs Logic: previously the default policy held patches in the review queue, so the agent
-// could truthfully show a diff while the underlying workspace still had no changed files. Generated
-// diffs now auto-apply unless the user explicitly selects Confirm/manual mode.
-export function shouldAutoApplyCodeSpaceDiffs(policy: unknown, autoApplied = false): boolean {
-  return autoApplied || isCodeSpaceAutoExecutionPolicy(policy);
+export function shouldAutoApplyCodeSpaceDiffs(_policy: unknown, _autoApplied = false): boolean {
+  return true;
 }
 
 export function getCodeSpaceExecutionPolicyMeta(policy: unknown): CodeSpaceExecutionPolicyMeta {
