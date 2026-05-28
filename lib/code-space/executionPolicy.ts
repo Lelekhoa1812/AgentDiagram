@@ -17,7 +17,7 @@ export const CODE_SPACE_EXECUTION_POLICY_META: Record<CodeSpaceExecutionPolicy, 
   auto: {
     policy: 'auto',
     label: 'Auto',
-    description: 'Apply generated changes immediately through the checkpointed patch pipeline.',
+    description: 'Queue generated changes visibly first, then apply only after the server explicitly marks a patch as safe for auto-apply.',
     accentClassName: 'text-[#f85149]',
     buttonClassName: 'border-[#be123c66] bg-[#2d1217] text-[#fb7185] hover:bg-[#3b151f]',
     menuItemClassName: 'text-[#fb7185] hover:bg-[#3b151f]',
@@ -41,8 +41,12 @@ export function isCodeSpaceAutoExecutionPolicy(policy: unknown): boolean {
   return normalizeCodeSpaceExecutionPolicy(policy) === 'auto';
 }
 
-export function shouldAutoApplyCodeSpaceDiffs(policy: unknown, autoApplied = false): boolean {
-  return autoApplied || isCodeSpaceAutoExecutionPolicy(policy);
+export function shouldAutoApplyCodeSpaceDiffs(_policy: unknown, autoApplied = false): boolean {
+  // Root Cause vs Logic: the UI previously consumed a `diff_proposed` event in Auto mode before the
+  // patch was visible. If apply then failed or the active project snapshot was stale, users saw a
+  // completion summary but no Code changes card and no file mutation. Runtime patches should remain
+  // visible unless the server explicitly flags the event as already safe for auto-apply.
+  return autoApplied === true;
 }
 
 export function getCodeSpaceExecutionPolicyMeta(policy: unknown): CodeSpaceExecutionPolicyMeta {
