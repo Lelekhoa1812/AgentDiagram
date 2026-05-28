@@ -24,10 +24,9 @@ describe('ValidationManager', () => {
     const commands = await new ValidationManager().detectValidationCommands(tmpDir);
 
     expect(commands).toEqual([
-      { kind: 'test', command: 'npm', args: ['run', 'test'] },
       { kind: 'typecheck', command: 'npm', args: ['run', 'typecheck'] },
+      { kind: 'test', command: 'npm', args: ['run', 'test'] },
       { kind: 'build', command: 'npm', args: ['run', 'build'] },
     ]);
   });
 });
-

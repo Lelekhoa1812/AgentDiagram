@@ -117,6 +117,17 @@ function getWorkingLabel(mode: CodeSpaceAgentMode) {
   return 'Working on the implementation…';
 }
 
+function formatPhaseLabel(phase?: string) {
+  if (!phase) return 'Idle';
+  return phase.replace(/_/g, ' ');
+}
+
+function modeContract(mode: CodeSpaceAgentMode) {
+  if (mode === 'ask') return 'Read-only answers from repository evidence';
+  if (mode === 'plan') return 'Writes an executable plan artifact';
+  return 'Reviewable patches with validation gates';
+}
+
 export function AgentPanel({
   session,
   sessions,
@@ -247,6 +258,30 @@ export function AgentPanel({
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2">
         <SessionListSection sessions={sessions} activeSessionId={session?.id ?? null} onSelectSession={onSelectSession} onRenameSession={onRenameSession} onDeleteSession={onDeleteSession} />
         <PlanClarificationPanel questions={session?.clarifyingQuestions ?? []} disabled={isRunning} onSubmitAnswers={onSubmitPrompt} />
+        <div className="rounded border border-[#30363d] bg-[#11182766] px-2 py-1.5 text-[10px] text-[#8b949e]">
+          <div className="flex items-center justify-between gap-2">
+            <span className="uppercase tracking-wider text-[#6e7681]">Mode contract</span>
+            <span className="text-[#c9d1d9]">{modeContract(agentMode)}</span>
+          </div>
+          <div className="mt-1 flex items-center justify-between gap-2">
+            <span className="uppercase tracking-wider text-[#6e7681]">Phase</span>
+            <span className={session?.runtimeStatus === 'needs_review' ? 'text-[#f0883e]' : session?.runtimeStatus === 'verified' ? 'text-[#3fb950]' : 'text-[#58a6ff]'}>
+              {formatPhaseLabel(session?.runtimePhase)}
+            </span>
+          </div>
+        </div>
+        {(session?.todos ?? []).length > 0 && (
+          <CollapsibleSection title="Todos" defaultOpen={false} compact rightSlot={<span className="text-[9px] text-[#6d6d6d]">{session?.todos.filter((todo) => !todo.done).length ?? 0}</span>}>
+            <div className="space-y-1 rounded border border-[#2a2a2a] bg-[#111111] p-2">
+              {(session?.todos ?? []).map((todo) => (
+                <div key={todo.id} className="flex items-start gap-2 text-[10px] text-[#c9d1d9]">
+                  <span className={todo.done ? 'text-[#3fb950]' : 'text-[#8b949e]'}>{todo.done ? 'done' : 'todo'}</span>
+                  <span className={todo.done ? 'text-[#6e7681] line-through' : ''}>{todo.text}</span>
+                </div>
+              ))}
+            </div>
+          </CollapsibleSection>
+        )}
 
         <div className="min-h-0 flex-1 overflow-y-auto rounded border border-[#2a2a2a] bg-[#111111] p-2">
           {chatEntries.length === 0 ? (

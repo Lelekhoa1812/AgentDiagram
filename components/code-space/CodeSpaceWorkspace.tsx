@@ -76,6 +76,8 @@ import {
 import { registerDslLanguage } from '@/components/editor/dslLanguage';
 import { ProviderConfig } from '@/components/agent/ProviderConfig';
 import { AgentPanel } from '@/components/code-space/AgentPanel';
+import { CodeSpaceWorkspaceEnhancements } from '@/components/code-space/CodeSpaceWorkspaceEnhancements';
+import { SessionRenameDialog } from '@/components/shared/SessionRenameDialog';
 import type { AgentSSEEvent } from '@/lib/code-space/agent/types';
 import { nameSessionAsync } from '@/lib/code-space/sessionNaming';
 import { useMentionIndex } from '@/lib/code-space/mentions/useMentionIndex';
@@ -316,6 +318,8 @@ export function CodeSpaceWorkspace() {
   const [projectNameInput, setProjectNameInput] = useState('');
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
   const [projectToDelete, setProjectToDelete] = useState<CodeSpaceProject | null>(null);
+  const [sessionRenameTarget, setSessionRenameTarget] = useState<CodeSpaceAgentSession | null>(null);
+  const [sessionRenameInput, setSessionRenameInput] = useState('');
   const [isDeletingProject, setIsDeletingProject] = useState(false);
   const [folderBrowserOpen, setFolderBrowserOpen] = useState(false);
   const [folderBrowserRoot, setFolderBrowserRoot] = useState<string>('');
@@ -553,15 +557,41 @@ export function CodeSpaceWorkspace() {
     return session;
   }, [activeProjectId, activeSession, updateSession]);
 
-  // Motivation vs Logic: Keep naming and cleanup inside the sidebar so session management stays in the context of the chat list.
+  // Motivation vs Logic: Keep renaming in the session sidebar, but route the actual edit through a modal so the flow is visible, recoverable, and keyboard-friendly.
   const renameSession = useCallback(
     (session: CodeSpaceAgentSession) => {
-      const nextTitle = window.prompt('Rename session', session.title)?.trim();
-      if (!nextTitle || nextTitle === session.title) return;
-      updateSession({ ...session, title: nextTitle, updatedAt: Date.now() });
+      setSessionRenameTarget(session);
+      setSessionRenameInput(session.title);
     },
-    [updateSession],
+    [],
   );
+
+  const closeSessionRenameDialog = useCallback(() => {
+    setSessionRenameTarget(null);
+    setSessionRenameInput('');
+  }, []);
+
+  useEffect(() => {
+    if (!sessionRenameTarget) return;
+    const stillExists = sessions.some((session) => session.id === sessionRenameTarget.id);
+    if (!stillExists) closeSessionRenameDialog();
+  }, [closeSessionRenameDialog, sessionRenameTarget, sessions]);
+
+  const handleSessionRenameSave = useCallback(() => {
+    if (!sessionRenameTarget) return;
+    const nextTitle = sessionRenameInput.trim();
+    if (!nextTitle || nextTitle === sessionRenameTarget.title) {
+      closeSessionRenameDialog();
+      return;
+    }
+    updateSession({ ...sessionRenameTarget, title: nextTitle, updatedAt: Date.now() });
+    closeSessionRenameDialog();
+  }, [closeSessionRenameDialog, sessionRenameInput, sessionRenameTarget, updateSession]);
+
+  const handleSessionRenameCancel = useCallback(() => {
+    closeSessionRenameDialog();
+  }, [closeSessionRenameDialog]);
+
   const deleteSession = useCallback(
     async (session: CodeSpaceAgentSession) => {
       if (!window.confirm(`Delete session "${session.title}"? This cannot be undone.`)) {
@@ -1594,6 +1624,38 @@ export function CodeSpaceWorkspace() {
                   setPlanBuildStatus('completed');
                 }
               }
+            } else if (event.type === 'structured_event') {
+              if (event.event.type === 'plan.updated') {
+                const payload = event.event.payload as { phase?: string; state?: { status?: CodeSpaceAgentSession['runtimeStatus'] } };
+                patchSession(sessionWithPrompt.id, (current) => ({
+                  ...current,
+                  runtimePhase: payload.phase ?? current.runtimePhase,
+                  runtimeStatus: payload.state?.status ?? current.runtimeStatus,
+                  status:
+                    payload.phase === 'awaiting_patch_review'
+                      ? 'waiting_review'
+                      : payload.phase === 'validating'
+                        ? 'checking'
+                        : payload.phase === 'needs_review'
+                          ? 'needs_review'
+                          : payload.phase === 'verified'
+                            ? 'verified'
+                            : current.status,
+                  updatedAt: Date.now(),
+                }));
+              } else if (event.event.type === 'run.completed') {
+                const payload = event.event.payload as { status?: string; phase?: string };
+                patchSession(sessionWithPrompt.id, (current) => ({
+                  ...current,
+                  runtimePhase: payload.phase ?? current.runtimePhase,
+                  runtimeStatus:
+                    payload.status === 'verified' || payload.status === 'needs_review' || payload.status === 'failed' || payload.status === 'cancelled'
+                      ? payload.status
+                      : current.runtimeStatus,
+                  status: payload.status === 'verified' ? 'verified' : payload.status === 'needs_review' ? 'needs_review' : current.status,
+                  updatedAt: Date.now(),
+                }));
+              }
             } else if (event.type === 'tool_start') {
               const toolMessageId = nowId('msg');
               liveToolMessageIds.set(event.toolCallId, toolMessageId);
@@ -2537,6 +2599,14 @@ export function CodeSpaceWorkspace() {
           </div>
         </div>
       )}
+      <CodeSpaceWorkspaceEnhancements />
+      <SessionRenameDialog
+        open={!!sessionRenameTarget}
+        currentName={sessionRenameInput}
+        onChange={setSessionRenameInput}
+        onSave={handleSessionRenameSave}
+        onCancel={handleSessionRenameCancel}
+      />
       {providerConfigOpen && (
         <div
           role="dialog"

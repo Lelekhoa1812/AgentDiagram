@@ -2,8 +2,8 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { createFileCheckpoint } from '@/lib/code-space/runtime';
-import { applyGroupedEditBlocks, createUnifiedDiff, validateSyntaxLightweight } from '@/lib/code-space/agent/editBlocks';
+import { applyGroupedEditBlocks, validateSyntaxLightweight } from '@/lib/code-space/agent/editBlocks';
+import { applyPatchFiles, PatchApplyError } from '@/lib/code-space/runtime/patchApply';
 import { guardPath } from '@/lib/security/pathGuard';
 
 export const runtime = 'nodejs';
@@ -63,18 +63,6 @@ async function readCurrentFiles(root: string, filePaths: string[]): Promise<Reco
   return files;
 }
 
-function firstDifference(a: string, b: string): { index: number; line: number; column: number } | null {
-  const max = Math.max(a.length, b.length);
-  for (let index = 0; index < max; index += 1) {
-    if (a[index] === b[index]) continue;
-    const prefix = a.slice(0, index);
-    const lines = prefix.split('\n');
-    const lastLine = lines[lines.length - 1] ?? '';
-    return { index, line: lines.length, column: lastLine.length + 1 };
-  }
-  return null;
-}
-
 export async function POST(req: Request) {
   const json = await req.json().catch(() => ({}));
   const parsed = Body.safeParse(json);
@@ -110,101 +98,23 @@ export async function POST(req: Request) {
       });
     }
 
-    const alreadyApplied: string[] = [];
-    const conflicts: Array<{ path: string; line: number; column: number; currentPreview: string; expectedPreview: string }> = [];
-
-    for (const file of parsed.data.files) {
-      const target = resolveInside(guarded.resolved, file.path);
-      let current = '';
-      let fileExists = true;
-      try {
-        current = await fs.readFile(target, 'utf8');
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-        fileExists = false;
-      }
-
-      if (file.deleted) {
-        if (!fileExists) {
-          alreadyApplied.push(file.path);
-          continue;
-        }
-      } else if (current === file.afterContent) {
-        alreadyApplied.push(file.path);
-        continue;
-      }
-
-      if (!file.deleted && current !== file.beforeContent) {
-        const diff = firstDifference(current, file.beforeContent) ?? { index: 0, line: 1, column: 1 };
-        conflicts.push({
-          path: file.path,
-          line: diff.line,
-          column: diff.column,
-          currentPreview: current.slice(Math.max(0, diff.index - 160), diff.index + 160),
-          expectedPreview: file.beforeContent.slice(Math.max(0, diff.index - 160), diff.index + 160),
-        });
-      }
-    }
-
-    if (conflicts.length) {
-      return NextResponse.json(
-        {
-          error: 'Patch conflict. The file changed since the proposal was created. Refresh the diff or regenerate the patch from the latest file content.',
-          code: 'PATCH_CONFLICT',
-          conflicts,
-          alreadyApplied,
-        },
-        { status: 409 },
-      );
-    }
-
-    if (alreadyApplied.length === parsed.data.files.length) {
-      return NextResponse.json({
-        patchId: parsed.data.patchId,
-        status: 'already_applied',
-        filesChanged: [],
-        alreadyApplied,
-        appliedAt: Date.now(),
-      });
-    }
-
-    const filesToWrite = parsed.data.files.filter((file) => !alreadyApplied.includes(file.path));
-    const checkpoint = await createFileCheckpoint({
+    // Motivation vs Logic: all mutation now funnels through one checkpointed apply helper, so preview,
+    // manual approval, auto approval, and stored-patch application enforce the same stale-content boundary.
+    const result = await applyPatchFiles({
+      root: guarded.resolved,
       projectId: parsed.data.projectId,
-      projectRoot: guarded.resolved,
       runId: parsed.data.runId,
-      reason: `before applying ${parsed.data.patchId}`,
-      files: filesToWrite.map((file) => file.path),
+      patchId: parsed.data.patchId,
+      files: parsed.data.files,
     });
-
-    for (const file of filesToWrite) {
-      const diagnostics = validateSyntaxLightweight(file.path, file.afterContent);
-      if (diagnostics.length) {
-        return NextResponse.json({ error: `Patch failed syntax pre-validation in ${file.path}.`, code: 'AST_PREVALIDATION_FAILED', diagnostics, checkpoint }, { status: 422 });
-      }
-    }
-
-    for (const file of filesToWrite) {
-      const target = resolveInside(guarded.resolved, file.path);
-      // Root Cause vs Logic: deletion requests previously wrote an empty string, which preserved the file; use a real filesystem removal when the patch is marked deleted.
-      if (file.deleted) {
-        await fs.rm(target, { force: false, recursive: true });
-      } else {
-        await fs.mkdir(path.dirname(target), { recursive: true });
-        await fs.writeFile(target, file.afterContent, 'utf8');
-      }
-    }
-
     return NextResponse.json({
       patchId: parsed.data.patchId,
-      status: 'applied',
-      filesChanged: filesToWrite.map((file) => file.path),
-      alreadyApplied,
-      unifiedDiff: filesToWrite.map((file) => createUnifiedDiff(file.path, file.beforeContent, file.afterContent)).join('\n'),
-      checkpoint,
-      appliedAt: Date.now(),
+      ...result,
     });
   } catch (err) {
+    if (err instanceof PatchApplyError) {
+      return NextResponse.json({ error: err.message, code: err.code, ...(typeof err.details === 'object' && err.details ? err.details : { details: err.details }) }, { status: err.status });
+    }
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }

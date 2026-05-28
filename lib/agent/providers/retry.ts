@@ -99,6 +99,9 @@ function rateLimitCooldownDelay(err: RetryError, fallbackDelayMs: number, opts: 
   const message = err.message ?? '';
   const isRateLimited = status === 429 || /\b(rate limit|too many requests|quota)\b/i.test(message);
   if (!isRateLimited) return null;
+  // Root Cause vs Logic: the provider-wide cooldown floor is for shared cooldown keys, not per-call retry delays.
+  // Without this guard, tests and callers that set retryAfterMs/baseDelayMs still slept for the 15s cooldown minimum.
+  if (!opts.cooldownKey) return fallbackDelayMs;
   const min = opts.cooldownMinMs ?? 15_000;
   const max = opts.cooldownMaxMs ?? 10 * 60_000;
   return Math.min(Math.max(fallbackDelayMs, min), max);

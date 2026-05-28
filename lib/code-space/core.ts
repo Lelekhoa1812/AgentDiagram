@@ -163,6 +163,8 @@ export interface CodeSpaceAgentSession {
     deleted?: boolean;
     acceptedAt: number;
   }>;
+  runtimePhase?: string;
+  runtimeStatus?: 'running' | 'verified' | 'needs_review' | 'failed' | 'cancelled';
 }
 
 export type CodeSpaceBottomTab = 'problems' | 'output' | 'debug' | 'terminal';

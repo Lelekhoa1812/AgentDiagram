@@ -1,10 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-vi.mock('@/lib/agent/planning/structuredOutput', () => ({
-  chatStructuredWithRetry: vi.fn(),
-}));
 import {
   buildClarifyingQuestions,
   buildPlan,
@@ -17,61 +14,61 @@ import {
   buildCodeCompletionResponse,
   buildPlanCompletionResponse,
 } from '@/lib/code-space/agent/runResponses';
-import { chatStructuredWithRetry } from '@/lib/agent/planning/structuredOutput';
 
 describe('Code Space agent route mode helpers', () => {
-  it('asks the model for workflow items and clarifying questions after context has been inspected', async () => {
-    vi.mocked(chatStructuredWithRetry).mockResolvedValue({
-      intent_summary: 'Modernize the workflow around the existing Code Space surface.',
-      plan_items: ['Inspect the current agent route', 'Use the observed context to shape the outline'],
-      clarifying_questions: [
-        {
-          id: 'implementation-boundary',
-          question: 'Which boundary should this implementation stay within?',
-          choices: ['Existing route', 'Dedicated service', 'Hybrid boundary'],
-          allowMultiple: false,
-        },
-      ],
-    } as never);
-
-    const request = {
-      providerId: 'openai',
-      model: 'gpt-test',
-      apiKey: 'test-key',
-      endpoint: '',
-    } as never;
-
+  it('builds deterministic workflow items from inspected context without route-local orchestration', async () => {
     const plan = await buildPlan('plan', ['feature_build'], 'make this better', {
       filesConsidered: 4,
       terms: [],
-      omittedRelevantFiles: [],
+      selectedFiles: ['components/code-space/AgentPanel.tsx'],
+      omittedRelevantCandidates: [],
+      dependencyEdges: [],
+      testCandidates: [],
+      validationCandidates: [],
+      missingContextWarnings: [],
+      confidence: 'medium',
       files: [
         {
           path: 'components/code-space/AgentPanel.tsx',
           content: '',
           truncated: false,
+          mode: 'full',
           lineCount: 1,
           score: 10,
-          reasons: ['test'],
+          reasons: ['ui_surface'],
+          reasonDetails: ['test'],
           summary: 'UI surface',
           symbols: [],
         },
       ],
-    }, request);
-    expect(plan).toEqual(['Inspect the current agent route', 'Use the observed context to shape the outline']);
+    });
+    expect(plan).toEqual([
+      'Map Code Space runtime entrypoints',
+      'Diagnose patch lifecycle and validation seams',
+      'Write implementation plan artifact',
+      'Define validation gates',
+    ]);
 
     const questions = await buildClarifyingQuestions('comprehensively improve the agent planning and Build button workflow', ['feature_build'], {
       filesConsidered: 4,
       terms: [],
-      omittedRelevantFiles: [],
+      selectedFiles: ['components/code-space/AgentPanel.tsx', 'app/api/code-space/agent/route.ts'],
+      omittedRelevantCandidates: [],
+      dependencyEdges: [],
+      testCandidates: [],
+      validationCandidates: [],
+      missingContextWarnings: [],
+      confidence: 'medium',
       files: [
         {
           path: 'components/code-space/AgentPanel.tsx',
           content: '',
           truncated: false,
+          mode: 'full',
           lineCount: 1,
           score: 10,
-          reasons: ['test'],
+          reasons: ['ui_surface'],
+          reasonDetails: ['test'],
           summary: 'UI surface',
           symbols: [],
         },
@@ -79,19 +76,17 @@ describe('Code Space agent route mode helpers', () => {
           path: 'app/api/code-space/agent/route.ts',
           content: '',
           truncated: false,
+          mode: 'full',
           lineCount: 1,
           score: 10,
-          reasons: ['test'],
+          reasons: ['route_runtime_surface'],
+          reasonDetails: ['test'],
           summary: 'API surface',
           symbols: [],
         },
       ],
-    }, request);
-    const questionIds = questions.map((question) => question.id);
-    expect(questionIds).toEqual(['implementation-boundary']);
-    expect(questions[0]?.choices).toEqual(['Existing route', 'Dedicated service', 'Hybrid boundary']);
-    expect(questions[0]?.question).toContain('boundary');
-    expect(vi.mocked(chatStructuredWithRetry)).toHaveBeenCalledTimes(2);
+    });
+    expect(questions).toEqual([]);
   });
 
   it('returns no workflow outline when context has not been inspected yet', async () => {
@@ -100,7 +95,13 @@ describe('Code Space agent route mode helpers', () => {
       await buildClarifyingQuestions('build a better planning workflow', ['feature_build'], {
         filesConsidered: 12,
         terms: [],
-        omittedRelevantFiles: [],
+        selectedFiles: [],
+        omittedRelevantCandidates: [],
+        dependencyEdges: [],
+        testCandidates: [],
+        validationCandidates: [],
+        missingContextWarnings: [],
+        confidence: 'low',
         files: [],
       }),
     ).toEqual([]);
@@ -139,15 +140,23 @@ describe('Code Space agent route mode helpers', () => {
       context: {
         filesConsidered: 1,
         terms: [],
-        omittedRelevantFiles: [],
+        selectedFiles: ['app/api/code-space/agent/route.ts'],
+        omittedRelevantCandidates: [],
+        dependencyEdges: [],
+        testCandidates: [],
+        validationCandidates: [],
+        missingContextWarnings: [],
+        confidence: 'medium',
         files: [
           {
             path: 'app/api/code-space/agent/route.ts',
             content: 'export function buildPlan() {}',
             truncated: false,
+            mode: 'full',
             lineCount: 1,
             score: 10,
-            reasons: ['test'],
+            reasons: ['route_runtime_surface'],
+            reasonDetails: ['test'],
             summary: 'Agent route',
             symbols: ['buildPlan'],
           },
@@ -174,13 +183,12 @@ describe('Code Space agent route mode helpers', () => {
     expect(content).not.toMatch(/\bMCQ\s*\d+\s*:/i);
     expect(content).not.toMatch(/Which boundary should this implementation stay within/i);
     expect(content).not.toMatch(/^\s*[-*]\s*[A-E]\)\s+/im);
-    expect(content).toContain('## Summary');
-    expect(content).toContain('## Key Changes');
-    expect(content).toContain('## Test Plans');
-    expect(content).toContain('## Assumptions');
-    expect(content).toContain('Improve the plan workflow using inspected repository evidence.');
-    expect(content).toContain('Inspect the agent route');
-    expect(content).toContain('Use context to drive the outline');
+    expect(content).toContain('## Request Understanding');
+    expect(content).toContain('## Repository Evidence Reviewed');
+    expect(content).toContain('## Validation and Test Plan');
+    expect(content).toContain('## Build Instructions');
+    expect(content).toContain('app/api/code-space/agent/route.ts');
+    expect(content).toContain('npm run test');
   });
 
   it('summarizes plan completion from the actual plan artifact instead of a canned template', () => {
