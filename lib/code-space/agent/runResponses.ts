@@ -59,7 +59,7 @@ export function buildCodeCompletionResponse(input: CodeResponseInput): string {
     const fileList = input.files.slice(0, 3).map((file) => `\`${file.path}\``);
     const suffix = input.files.length > fileList.length ? `, and ${input.files.length - fileList.length} more` : '';
     lines.push(
-      `Proposed ${input.files.length} reviewable patch${input.files.length === 1 ? '' : 'es'} for ${input.projectName}: ${formatList(fileList)}${suffix}. Code changes are written through the checkpointed patch pipeline when accepted or auto-apply succeeds.`,
+      `Updated ${input.files.length} file${input.files.length === 1 ? '' : 's'} in ${input.projectName}: ${formatList(fileList)}${suffix}. Code changes are written through the checkpointed patch pipeline when accepted or auto-apply succeeds.`,
     );
   } else {
     // Root Cause vs Logic: empty Code responses should only appear in defensive unit tests or hard
