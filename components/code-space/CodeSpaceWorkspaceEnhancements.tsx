@@ -73,6 +73,10 @@ function findExplorerNodeButton(eventTarget: EventTarget | null): HTMLButtonElem
   return isLikelyExplorerNodeButton(button) ? button : null;
 }
 
+export function isClickInsideExplorerMenu(eventTarget: EventTarget | null): boolean {
+  return eventTarget instanceof Element && Boolean(eventTarget.closest('[data-code-space-explorer-menu="true"]'));
+}
+
 function isMacLike(): boolean {
   if (typeof navigator === 'undefined') return false;
   return /Mac|iPhone|iPad|iPod/i.test(navigator.platform);
@@ -219,6 +223,8 @@ export function CodeSpaceWorkspaceEnhancements() {
         return;
       }
 
+      if (isClickInsideExplorerMenu(event.target)) return;
+
       const button = findExplorerNodeButton(event.target);
       if (!button) {
         closeMenu();
@@ -290,6 +296,7 @@ export function CodeSpaceWorkspaceEnhancements() {
 
   return (
     <div
+      data-code-space-explorer-menu="true"
       className="fixed z-[1000] min-w-48 rounded-md border border-[#3a3a3a] bg-[#1f1f1f] py-1 text-[12px] text-[#d4d4d4] shadow-2xl"
       style={{ left: menu.x, top: menu.y }}
       onClick={(event) => event.stopPropagation()}
