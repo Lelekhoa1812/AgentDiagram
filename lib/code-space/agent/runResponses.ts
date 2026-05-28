@@ -52,15 +52,17 @@ export function buildPlanCompletionResponse(input: PlanResponseInput): string {
 
 export function buildCodeCompletionResponse(input: CodeResponseInput): string {
   const lines: string[] = [];
-  const cleanSummary = normalizeSummary(input.summary);
+  const cleanSummary = normalizeSummary(input.summary, input.files.length > 0);
   if (cleanSummary) lines.push(cleanSummary);
 
   if (input.files.length) {
     const fileList = input.files.slice(0, 3).map((file) => `\`${file.path}\``);
     const suffix = input.files.length > fileList.length ? `, and ${input.files.length - fileList.length} more` : '';
-    lines.push(`Updated ${input.files.length} file${input.files.length === 1 ? '' : 's'} in ${input.projectName}: ${formatList(fileList)}${suffix}.`);
+    lines.push(
+      `Proposed ${input.files.length} reviewable patch${input.files.length === 1 ? '' : 'es'} for ${input.projectName}: ${formatList(fileList)}${suffix}. No project file is written until the patch is visible in Code changes and accepted or auto-apply succeeds.`,
+    );
   } else {
-    lines.push(`No files were changed in ${input.projectName}.`);
+    lines.push(`No reviewable code patch was produced for ${input.projectName}.`);
   }
 
   const failed = input.validationRuns.filter((run) => run.status === 'failed');
@@ -83,12 +85,20 @@ export function buildCodeCompletionResponse(input: CodeResponseInput): string {
   return lines.join(' ');
 }
 
-function normalizeSummary(summary?: string): string | null {
+function normalizeSummary(summary?: string, proposedOnly = false): string | null {
   const trimmed = summary?.trim();
   if (!trimmed) return null;
   if (/^done\b/i.test(trimmed)) return null;
   if (/^plan ready\b/i.test(trimmed)) return null;
-  return trimmed.replace(/\s+/g, ' ').slice(0, 240);
+  let normalized = trimmed.replace(/\s+/g, ' ').slice(0, 240);
+  if (proposedOnly) {
+    normalized = normalized
+      .replace(/^fixed\b/i, 'Proposed a fix for')
+      .replace(/^updated\b/i, 'Proposed an update to')
+      .replace(/^changed\b/i, 'Proposed changes to')
+      .replace(/^implemented\b/i, 'Proposed an implementation for');
+  }
+  return normalized;
 }
 
 function summarizeValidationCommands(commands: RunValidationCommand[], limit: number): string[] {
