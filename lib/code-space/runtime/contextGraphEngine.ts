@@ -66,6 +66,8 @@ export interface ContextGraphResult {
 }
 
 const STOP_WORDS = new Set(['the', 'and', 'for', 'with', 'this', 'that', 'you', 'your', 'are', 'can', 'into', 'from', 'mode', 'code', 'make', 'please', 'need', 'deeply', 'review', 'comprehensively', 'improve', 'plan']);
+const DEFAULT_CONTEXT_CHAR_LIMIT = 22_000;
+const DEEP_CONTEXT_CHAR_LIMIT = 140_000;
 
 function promptTerms(prompt: string): string[] {
   return Array.from(new Set(prompt.toLowerCase().split(/[^a-z0-9_/-]+/).filter((term) => term.length > 2 && !STOP_WORDS.has(term)))).slice(0, 48);
@@ -125,6 +127,30 @@ function promptNeedsAgentHarness(prompt: string): boolean {
   return /\b(agent|tool|grep|shell|terminal|context|evidence|explor|cursor|codex|claude\s*code)\b/i.test(prompt);
 }
 
+function contextCharLimit(filePath: string, prompt: string, reasons: Set<ContextReason>): number {
+  const lowerPath = filePath.toLowerCase();
+  if (reasons.has('explicit_file') || reasons.has('open_tab') || reasons.has('current_editor') || reasons.has('plan_artifact')) {
+    return DEEP_CONTEXT_CHAR_LIMIT;
+  }
+  // Root Cause vs Logic: the patch planner was asking for the full Code Space workspace after the
+  // initial evidence bundle truncated it, but the file was already marked as known. Primary Code
+  // Space and runtime surfaces now receive a deep-read budget up front so the model can ground and
+  // produce a concrete patch instead of ending with "need one more source file".
+  if (promptNeedsCodeSpaceUi(prompt) && /^components\/code-space\/(codespaceworkspace|agentpanel|filementioninput|agentmodeselector|executi.*selector)/i.test(lowerPath)) {
+    return DEEP_CONTEXT_CHAR_LIMIT;
+  }
+  if (promptNeedsCodeSpaceUi(prompt) && /^components\/code-space\/__tests__\//i.test(lowerPath)) {
+    return DEEP_CONTEXT_CHAR_LIMIT;
+  }
+  if (promptNeedsAgentHarness(prompt) && /^lib\/code-space\/runtime\/(agentruntime|contextgraphengine|toolregistry|terminalpolicy|permissionmanager|terminalrunner|validationrunner|repairloop)\.ts$/i.test(lowerPath)) {
+    return DEEP_CONTEXT_CHAR_LIMIT;
+  }
+  if (promptNeedsAgentHarness(prompt) && /^app\/api\/code-space\/agent\//i.test(lowerPath)) {
+    return DEEP_CONTEXT_CHAR_LIMIT;
+  }
+  return DEFAULT_CONTEXT_CHAR_LIMIT;
+}
+
 function extractReferencedFiles(content: string, candidateSet: Set<string>): string[] {
   const references = new Set<string>();
   const seen = new Set<string>();
@@ -170,10 +196,10 @@ export class ContextGraphEngine {
       // use the request shape to route initial evidence. Code Space page/review prompts must bring
       // the workspace/editor/sidebar files forward before runtime internals crowd them out.
       if (needsCodeSpaceUi && /^components\/code-space\//.test(file)) addScore(scores, file, 80, 'ui_surface', 'Code Space UI prompt');
-      if (needsCodeSpaceUi && /components\/code-space\/(CodeSpaceWorkspace|AgentPanel)\.tsx$/.test(file)) addScore(scores, file, 120, 'ui_surface', 'primary Code Space page surface');
+      if (needsCodeSpaceUi && /components\/code-space\/(CodeSpaceWorkspace|AgentPanel|FileMentionInput)\.tsx$/.test(file)) addScore(scores, file, 120, 'ui_surface', 'primary Code Space page surface');
       if (needsCodeSpaceUi && /^components\/code-space\/__tests__/.test(file)) addScore(scores, file, 55, 'test_surface', 'Code Space UI regression surface');
       if (needsCodeSpaceUi && file === 'app/page.tsx') addScore(scores, file, 48, 'ui_surface', 'Code Space shell entrypoint');
-      if (needsAgentHarness && /lib\/code-space\/runtime\/(agentRuntime|contextGraphEngine|toolRegistry|terminalPolicy|permissionManager|terminalRunner)\.ts$/.test(file)) {
+      if (needsAgentHarness && /lib\/code-space\/runtime\/(agentRuntime|contextGraphEngine|toolRegistry|terminalPolicy|permissionManager|terminalRunner|validationRunner|repairLoop)\.ts$/.test(file)) {
         addScore(scores, file, 85, 'route_runtime_surface', 'agent harness capability prompt');
       }
       if (needsAgentHarness && /^app\/api\/code-space\/(agent|terminal)\//.test(file)) addScore(scores, file, 70, 'route_runtime_surface', 'agent API capability prompt');
@@ -288,11 +314,13 @@ export class ContextGraphEngine {
       const reasons = new Set(item.reasons);
       if (contentHits.length) reasons.add('content_match');
       if (symbols.some((symbol) => terms.includes(symbol.toLowerCase()))) reasons.add('symbol_match');
+      const charLimit = contextCharLimit(item.file, prompt, reasons);
+      const truncated = content.length > charLimit;
       files.push({
         path: item.file,
-        content: content.slice(0, 22_000),
-        truncated: content.length > 22_000,
-        mode: content.length > 22_000 ? 'partial' : 'full',
+        content: content.slice(0, charLimit),
+        truncated,
+        mode: truncated ? 'partial' : 'full',
         lineCount: content.split('\n').length,
         score: item.score + contentHits.length * 3,
         reasons: Array.from(reasons),
@@ -314,6 +342,11 @@ export class ContextGraphEngine {
     }
     if (buildPlanPath && !selectedFiles.includes(buildPlanPath)) missingContextWarnings.push(`Referenced plan artifact was not readable: ${buildPlanPath}`);
     if (!files.length) missingContextWarnings.push('No high-signal project files were readable.');
+    for (const file of files) {
+      if (file.truncated && (file.reasons.includes('explicit_file') || file.reasons.includes('open_tab') || file.reasons.includes('current_editor'))) {
+        missingContextWarnings.push(`High-priority context file is still truncated after deep read: ${file.path}`);
+      }
+    }
 
     const confidence: ContextGraphResult['confidence'] = files.length >= 24 ? 'high' : files.length >= 8 ? 'medium' : 'low';
     return {
