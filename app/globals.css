@@ -248,3 +248,12 @@ textarea {
   pointer-events: none;
 }
 
+
+.code-space-diff-added-line {
+  background: rgba(63, 185, 80, 0.16);
+}
+
+.code-space-diff-glyph {
+  background: #3fb950;
+  width: 4px !important;
+}

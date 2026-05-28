@@ -120,6 +120,32 @@ function nowId(prefix: string): string {
   return `${prefix}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function extractChangedLineNumbers(unifiedDiff?: string): number[] {
+  if (!unifiedDiff) return [];
+  const lines = unifiedDiff.split('\n');
+  const changed = new Set<number>();
+  let newLine = 0;
+  for (const line of lines) {
+    if (line.startsWith('@@')) {
+      const match = line.match(/\+([0-9]+)(?:,([0-9]+))?/);
+      if (!match) continue;
+      newLine = Number.parseInt(match[1] ?? '1', 10);
+      continue;
+    }
+    if (!newLine) continue;
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      changed.add(newLine);
+      newLine += 1;
+      continue;
+    }
+    if (line.startsWith('-') && !line.startsWith('---')) {
+      continue;
+    }
+    newLine += 1;
+  }
+  return Array.from(changed.values()).sort((a, b) => a - b);
+}
+
 function getApiKey(providerId: string): string {
   try {
     const stored = localStorage.getItem(`provider_config_${providerId}`);
@@ -334,6 +360,7 @@ export function CodeSpaceWorkspace() {
   const runningSessionIdRef = useRef<string | null>(null);
   const applyingDiffIdsRef = useRef<Set<string>>(new Set());
   const executionPolicyRef = useRef<CodeSpaceExecutionPolicy>(executionPolicy);
+  const diffDecorationIdsRef = useRef<string[]>([]);
 
   useEffect(() => {
     projectsRef.current = projects;
@@ -1772,6 +1799,11 @@ export function CodeSpaceWorkspace() {
     setPendingDiffs((current) => current.filter((item) => item.diffId !== diffId));
   }, []);
 
+  const openDiffFile = useCallback((filePath: string) => {
+    if (!activeProject) return;
+    void openFile(activeProject, filePath);
+  }, [activeProject, openFile]);
+
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       const mod = event.metaKey || event.ctrlKey;
@@ -1916,6 +1948,25 @@ export function CodeSpaceWorkspace() {
         );
       });
   };
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || !monacoRef.current || !activeTab) return;
+    const diff = pendingDiffs.find((item) => item.filePath === activeTab.path);
+    const changedLines = extractChangedLineNumbers(diff?.unifiedDiff);
+    const decorations = changedLines.map((line) => ({
+      range: new monacoRef.current!.Range(line, 1, line, 1),
+      options: {
+        isWholeLine: true,
+        className: 'code-space-diff-added-line',
+        glyphMarginClassName: 'code-space-diff-glyph',
+      },
+    }));
+    diffDecorationIdsRef.current = editor.deltaDecorations(diffDecorationIdsRef.current, decorations);
+    return () => {
+      diffDecorationIdsRef.current = editor.deltaDecorations(diffDecorationIdsRef.current, []);
+    };
+  }, [activeTab, pendingDiffs]);
 
   const activeContent = activeTab ? fileContents[activeTab.id]?.content ?? '' : '';
   const activeTabProject = activeTab ? projects.find((project) => project.id === activeTab.projectId) ?? activeProject : null;
@@ -2275,6 +2326,7 @@ export function CodeSpaceWorkspace() {
             onCancelRun={handleCancelRun}
             onAcceptDiff={(diffId) => void acceptPendingDiff(diffId)}
             onRejectDiff={rejectPendingDiff}
+            onOpenDiffFile={openDiffFile}
             mentionIndex={mentionIndexHook.index}
             indexStatus={mentionIndexHook.status}
             indexError={mentionIndexHook.error}
