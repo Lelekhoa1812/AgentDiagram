@@ -157,6 +157,30 @@ describe('AgentPanel', () => {
     expect(buildButton).toBeUndefined();
   });
 
+
+
+  it('opens changed file when clicking diff file button', () => {
+    const onOpenDiffFile = vi.fn();
+    const pendingDiffs = [
+      { diffId: 'd1', filePath: 'src/example.ts', oldContent: 'a', newContent: 'b', unifiedDiff: `@@ -1 +1 @@\n-a\n+b` },
+    ];
+    const { container } = renderPanel(vi.fn(), { pendingDiffs, onOpenDiffFile });
+    const fileButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('src/example.ts'));
+    act(() => {
+      fileButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(onOpenDiffFile).toHaveBeenCalledWith('src/example.ts');
+  });
+
+  it('shows Accept and Reject actions in confirm mode for pending changes', () => {
+    const pendingDiffs = [
+      { diffId: 'd1', filePath: 'src/example.ts', oldContent: 'a', newContent: 'b' },
+    ];
+    const { container } = renderPanel(vi.fn(), { pendingDiffs, executionPolicy: 'manual' as CodeSpaceExecutionPolicy });
+    expect(container.textContent).toContain('Accept');
+    expect(container.textContent).toContain('Reject');
+  });
+
   it('keeps applied patch containers visible in the code changes rail', () => {
     const appliedDiffs = [
       {

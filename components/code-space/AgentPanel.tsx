@@ -54,6 +54,7 @@ interface AgentPanelProps {
   onCancelRun: () => void;
   onAcceptDiff: (diffId: string) => void;
   onRejectDiff: (diffId: string) => void;
+  onOpenDiffFile?: (filePath: string) => void;
   onOpenPlanFile?: (filePath: string) => void;
   onBuildFromPlan?: (filePath: string) => void;
   mentionIndex?: FileMentionIndex;
@@ -138,6 +139,7 @@ export function AgentPanel({
   onCancelRun,
   onAcceptDiff,
   onRejectDiff,
+  onOpenDiffFile,
   onOpenPlanFile,
   onBuildFromPlan,
   mentionIndex,
@@ -283,7 +285,14 @@ export function AgentPanel({
               {visibleDiffs.map((diff) => (
                 <div key={diff.diffId} className="rounded border border-[#30363d] bg-[#0f1114]">
                   <div className="flex items-center gap-2 border-b border-[#1f1f1f] px-2 py-1">
-                    <span className="truncate text-[10px] text-[#e6edf3]">{diff.filePath}</span>
+                    <button
+                      type="button"
+                      onClick={() => onOpenDiffFile?.(diff.filePath)}
+                      className="truncate text-[10px] text-[#58a6ff] underline-offset-2 hover:underline"
+                      title={`Open ${diff.filePath}`}
+                    >
+                      {diff.filePath}
+                    </button>
                     <span className={`ml-auto text-[9px] uppercase tracking-wider ${executionPolicyMeta.accentClassName}`}>
                       {diff.kind === 'applied' ? 'applied' : executionPolicy === 'auto' ? 'auto mode enabled' : 'confirm mode required'}
                     </span>
@@ -298,7 +307,7 @@ export function AgentPanel({
                     ) : (
                       <>
                         <button type="button" onClick={() => onRejectDiff(diff.diffId)} className="rounded border border-[#30363d] px-2 py-1 text-[10px] text-[#f85149] hover:bg-[#2d1517]">Reject</button>
-                        <button type="button" onClick={() => onAcceptDiff(diff.diffId)} className="rounded bg-[#238636] px-2 py-1 text-[10px] text-white hover:bg-[#2ea043]">Apply</button>
+                        <button type="button" onClick={() => onAcceptDiff(diff.diffId)} className="rounded bg-[#238636] px-2 py-1 text-[10px] text-white hover:bg-[#2ea043]">Accept</button>
                       </>
                     )}
                   </div>
