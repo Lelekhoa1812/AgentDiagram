@@ -54,6 +54,7 @@ interface ReviewDiff {
   hunks: DiffHunk[];
   hunkStatus: DiffHunkStatus;
   applyingHunkId?: string;
+  applyingAll?: boolean;
   error?: string;
   createdAt: number;
 }
@@ -256,8 +257,8 @@ async function parseAgentDiffStream(
 }
 
 function renderDiffLineClass(line: string): string {
-  if (line.startsWith('+') && !line.startsWith('+++')) return 'bg-[#12261b] text-[#3fb950]';
-  if (line.startsWith('-') && !line.startsWith('---')) return 'bg-[#2d1517] text-[#f85149]';
+  if (line.startsWith('+') && !line.startsWith('+++')) return 'bg-[#12351f] text-[#3fb950]';
+  if (line.startsWith('-') && !line.startsWith('---')) return 'bg-[#3a1618] text-[#f85149]';
   if (line.startsWith('@@')) return 'text-[#79c0ff]';
   return 'text-[#c9d1d9]';
 }
@@ -266,6 +267,10 @@ function resolvedContentForHunk(reviewDiff: ReviewDiff, extraAcceptedHunkId?: st
   const acceptedIds = acceptedHunkIdSet(reviewDiff.hunkStatus, extraAcceptedHunkId);
   if (reviewDiff.deleted) return acceptedIds.size > 0 ? '' : reviewDiff.oldContent;
   return applyAcceptedDiffHunks(reviewDiff.oldContent, reviewDiff.hunks, acceptedIds);
+}
+
+function hasAcceptedHunks(reviewDiff: ReviewDiff): boolean {
+  return Object.values(reviewDiff.hunkStatus).some((status) => status === 'accepted');
 }
 
 function findSidebarReviewButton(filePath: string, label: 'Accept' | 'Reject'): HTMLButtonElement | null {
@@ -280,9 +285,21 @@ function findSidebarReviewButton(filePath: string, label: 'Accept' | 'Reject'): 
 }
 
 function clearWorkspacePendingDiff(filePath: string): void {
-  window.setTimeout(() => {
-    findSidebarReviewButton(filePath, 'Reject')?.click();
-  }, 80);
+  let attempts = 0;
+  const tryClear = () => {
+    attempts += 1;
+    const rejectButton = findSidebarReviewButton(filePath, 'Reject');
+    if (rejectButton) {
+      rejectButton.click();
+      return true;
+    }
+    return attempts >= 40;
+  };
+
+  if (tryClear()) return;
+  const intervalId = window.setInterval(() => {
+    if (tryClear()) window.clearInterval(intervalId);
+  }, 120);
 }
 
 function useCodeEditorRect(): EditorRect | null {
@@ -311,12 +328,35 @@ function useCodeEditorRect(): EditorRect | null {
   return rect;
 }
 
+function useActiveCodeSpaceFilePath(): string | null {
+  const [filePath, setFilePath] = useState<string | null>(null);
+
+  useEffect(() => {
+    const update = () => {
+      const activeExplorerButton = document.querySelector<HTMLButtonElement>('.code-space-workbench button[aria-current="true"][title]');
+      const activePath = activeExplorerButton?.getAttribute('title');
+      setFilePath(activePath ? normalizeRelativePath(activePath) : null);
+    };
+
+    update();
+    const intervalId = window.setInterval(update, 300);
+    document.addEventListener('click', update, true);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener('click', update, true);
+    };
+  }, []);
+
+  return filePath;
+}
+
 export function CodeSpaceWorkspaceEnhancements() {
   const [selectedTarget, setSelectedTarget] = useState<ExplorerTarget | null>(null);
   const [menu, setMenu] = useState<ExplorerMenuState | null>(null);
   const [reviewDiffs, setReviewDiffs] = useState<ReviewDiff[]>([]);
   const mountedRef = useRef(true);
   const editorRect = useCodeEditorRect();
+  const activeFilePath = useActiveCodeSpaceFilePath();
 
   const closeMenu = useCallback(() => setMenu(null), []);
 
@@ -377,9 +417,18 @@ export function CodeSpaceWorkspaceEnhancements() {
     await postFileAction(target, { action: 'delete', path: target.path }, dirname(target.path));
   }, [closeMenu]);
 
+  const removeReviewDiff = useCallback((diffId: string) => {
+    setReviewDiffs((current) => current.filter((item) => item.diffId !== diffId));
+  }, []);
+
   const updateReviewDiff = useCallback((diffId: string, updater: (current: ReviewDiff) => ReviewDiff) => {
     setReviewDiffs((current) => current.map((item) => (item.diffId === diffId ? updater(item) : item)));
   }, []);
+
+  const markDiffResolved = useCallback((reviewDiff: ReviewDiff) => {
+    removeReviewDiff(reviewDiff.diffId);
+    clearWorkspacePendingDiff(reviewDiff.filePath);
+  }, [removeReviewDiff]);
 
   const rejectHunk = useCallback((reviewDiff: ReviewDiff, hunk: DiffHunk) => {
     updateReviewDiff(reviewDiff.diffId, (current) => {
@@ -388,10 +437,12 @@ export function CodeSpaceWorkspaceEnhancements() {
         hunkStatus: { ...current.hunkStatus, [hunk.id]: 'rejected' as const },
         error: undefined,
       };
-      if (everyHunkResolved(next.hunks, next.hunkStatus)) clearWorkspacePendingDiff(next.filePath);
+      if (everyHunkResolved(next.hunks, next.hunkStatus)) {
+        window.setTimeout(() => markDiffResolved(next), 0);
+      }
       return next;
     });
-  }, [updateReviewDiff]);
+  }, [markDiffResolved, updateReviewDiff]);
 
   const acceptHunk = useCallback(async (reviewDiff: ReviewDiff, hunk: DiffHunk) => {
     updateReviewDiff(reviewDiff.diffId, (current) => ({ ...current, applyingHunkId: hunk.id, error: undefined }));
@@ -429,7 +480,9 @@ export function CodeSpaceWorkspaceEnhancements() {
           hunkStatus: { ...current.hunkStatus, [hunk.id]: 'accepted' as const },
           error: undefined,
         };
-        if (everyHunkResolved(next.hunks, next.hunkStatus)) clearWorkspacePendingDiff(next.filePath);
+        if (everyHunkResolved(next.hunks, next.hunkStatus)) {
+          window.setTimeout(() => markDiffResolved(next), 0);
+        }
         return next;
       });
       document.querySelector<HTMLButtonElement>('.code-space-workbench button[title="Refresh tree"]')?.click();
@@ -440,11 +493,49 @@ export function CodeSpaceWorkspaceEnhancements() {
         error: error instanceof Error ? error.message : String(error),
       }));
     }
-  }, [updateReviewDiff]);
+  }, [markDiffResolved, updateReviewDiff]);
 
-  const clearResolvedReviewDiffs = useCallback(() => {
-    setReviewDiffs((current) => current.filter((item) => !everyHunkResolved(item.hunks, item.hunkStatus)));
-  }, []);
+  const acceptAllForDiff = useCallback(async (reviewDiff: ReviewDiff) => {
+    updateReviewDiff(reviewDiff.diffId, (current) => ({ ...current, applyingAll: true, error: undefined }));
+    const beforeContent = resolvedContentForHunk(reviewDiff);
+    const afterContent = reviewDiff.deleted ? '' : reviewDiff.newContent;
+
+    try {
+      const response = await fetch('/api/code-space/patches', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'apply',
+          rootPath: reviewDiff.rootPath,
+          projectId: reviewDiff.projectId,
+          runId: reviewDiff.runId,
+          patchId: `${reviewDiff.diffId}:all`,
+          files: [
+            {
+              path: reviewDiff.filePath,
+              beforeContent,
+              afterContent,
+              deleted: reviewDiff.deleted,
+            },
+          ],
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? 'Patch apply failed');
+      markDiffResolved(reviewDiff);
+      document.querySelector<HTMLButtonElement>('.code-space-workbench button[title="Refresh tree"]')?.click();
+    } catch (error) {
+      updateReviewDiff(reviewDiff.diffId, (current) => ({
+        ...current,
+        applyingAll: false,
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    }
+  }, [markDiffResolved, updateReviewDiff]);
+
+  const rejectAllForDiff = useCallback((reviewDiff: ReviewDiff) => {
+    markDiffResolved(reviewDiff);
+  }, [markDiffResolved]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -588,19 +679,37 @@ export function CodeSpaceWorkspaceEnhancements() {
     return () => window.clearInterval(intervalId);
   }, []);
 
-  const visibleReviewDiffs = useMemo(
+  const unresolvedReviewDiffs = useMemo(
     () => reviewDiffs.filter((item) => !everyHunkResolved(item.hunks, item.hunkStatus)).sort((a, b) => a.createdAt - b.createdAt),
     [reviewDiffs],
   );
+  const visibleReviewDiffs = useMemo(() => {
+    if (!activeFilePath) return unresolvedReviewDiffs;
+    const scoped = unresolvedReviewDiffs.filter((item) => normalizeRelativePath(item.filePath) === activeFilePath);
+    return scoped.length ? scoped : unresolvedReviewDiffs;
+  }, [activeFilePath, unresolvedReviewDiffs]);
 
+  const hasVisibleBusyDiff = visibleReviewDiffs.some((item) => item.applyingAll || Boolean(item.applyingHunkId));
   const reviewStyle = editorRect
     ? {
-        left: `${editorRect.left + 18}px`,
-        top: `${editorRect.top + 72}px`,
-        width: `${Math.max(320, editorRect.width - 36)}px`,
-        maxHeight: `${Math.max(260, editorRect.height - 130)}px`,
+        left: `${editorRect.left}px`,
+        top: `${editorRect.top + 36}px`,
+        width: `${editorRect.width}px`,
+        height: `${Math.max(220, editorRect.height - 36)}px`,
       }
     : undefined;
+
+  const acceptAllVisible = useCallback(() => {
+    for (const reviewDiff of visibleReviewDiffs) {
+      void acceptAllForDiff(reviewDiff);
+    }
+  }, [acceptAllForDiff, visibleReviewDiffs]);
+
+  const rejectAllVisible = useCallback(() => {
+    for (const reviewDiff of visibleReviewDiffs) {
+      rejectAllForDiff(reviewDiff);
+    }
+  }, [rejectAllForDiff, visibleReviewDiffs]);
 
   const target = menu?.target;
   const directoryLabel = target ? (target.type === 'dir' ? target.path : target.directoryPath || 'project root') : '';
@@ -608,64 +717,53 @@ export function CodeSpaceWorkspaceEnhancements() {
   return (
     <>
       {editorRect && reviewStyle && visibleReviewDiffs.length > 0 ? (
-        <div
-          data-code-space-inline-patch-review="true"
-          className="fixed z-[900] overflow-hidden rounded-xl border border-[#30363d] bg-[#0d1117ee] font-mono text-xs text-[#e6edf3] shadow-2xl backdrop-blur"
-          style={reviewStyle}
-        >
-          <div className="flex items-center gap-2 border-b border-[#30363d] bg-[#161b22] px-3 py-2">
-            <span className="text-[10px] uppercase tracking-[0.2em] text-[#58a6ff]">Editor patch review</span>
-            <span className="text-[10px] text-[#8b949e]">Review each proposed patch independently, directly over the code editor.</span>
-            <button type="button" onClick={clearResolvedReviewDiffs} className="ml-auto rounded border border-[#30363d] px-2 py-1 text-[10px] text-[#8b949e] hover:bg-[#21262d]">
-              Clear resolved
+        <div data-code-space-inline-patch-review="true" className="fixed z-[900] font-mono text-xs text-[#e6edf3]" style={reviewStyle}>
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#1e1e1ef2] via-[#1e1e1ed9] to-[#1e1e1ef2]" />
+          <div className="pointer-events-auto absolute right-4 top-2 z-10 flex items-center gap-2 rounded-md border border-[#30363d] bg-[#161b22e6] px-2 py-1 shadow-lg backdrop-blur">
+            <span className="px-1 text-[10px] text-[#8b949e]">{visibleReviewDiffs.length} file{visibleReviewDiffs.length === 1 ? '' : 's'}</span>
+            <button type="button" disabled={hasVisibleBusyDiff} onClick={rejectAllVisible} className="rounded border border-[#30363d] px-2 py-1 text-[10px] text-[#f85149] hover:bg-[#2d1517] disabled:cursor-not-allowed disabled:opacity-40">
+              Reject All
+            </button>
+            <button type="button" disabled={hasVisibleBusyDiff} onClick={acceptAllVisible} className="rounded bg-[#238636] px-2 py-1 text-[10px] text-white hover:bg-[#2ea043] disabled:cursor-not-allowed disabled:opacity-40">
+              Accept All
             </button>
           </div>
-          <div className="overflow-auto p-3" style={{ maxHeight: reviewStyle.maxHeight }}>
-            <div className="space-y-3">
+          <div className="pointer-events-auto absolute inset-0 overflow-auto px-10 pb-8 pt-14">
+            <div className="mx-auto max-w-6xl space-y-4">
               {visibleReviewDiffs.map((reviewDiff) => (
-                <div key={reviewDiff.diffId} className="rounded-lg border border-[#30363d] bg-[#0f1114]">
+                <div key={reviewDiff.diffId} className="rounded-md border border-[#30363d] bg-[#0d1117f2] shadow-xl">
                   <div className="flex flex-wrap items-center gap-2 border-b border-[#1f242d] px-3 py-2">
-                    <span className="truncate text-[11px] text-[#58a6ff]">{reviewDiff.filePath}</span>
+                    <span className="truncate text-[12px] text-[#58a6ff]">{reviewDiff.filePath}</span>
                     <span className="rounded border border-[#30363d] px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[#8b949e]">
                       {reviewDiff.deleted ? 'delete' : `${reviewDiff.hunks.length} patch${reviewDiff.hunks.length === 1 ? '' : 'es'}`}
                     </span>
+                    {hasAcceptedHunks(reviewDiff) ? <span className="rounded border border-[#3fb95055] px-1.5 py-0.5 text-[9px] uppercase text-[#3fb950]">partial applied</span> : null}
                   </div>
                   {reviewDiff.explanation ? <p className="px-3 pt-2 text-[10px] leading-4 text-[#8b949e]">{reviewDiff.explanation}</p> : null}
                   {reviewDiff.error ? <p className="mx-3 mt-2 rounded border border-[#f8514944] bg-[#2d1517] px-2 py-1 text-[10px] text-[#f85149]">{reviewDiff.error}</p> : null}
-                  <div className="space-y-2 p-3">
+                  <div className="space-y-3 p-3">
                     {reviewDiff.hunks.map((hunk) => {
                       const status = reviewDiff.hunkStatus[hunk.id];
-                      const isBusy = reviewDiff.applyingHunkId === hunk.id;
+                      const isBusy = reviewDiff.applyingHunkId === hunk.id || reviewDiff.applyingAll;
                       const isResolved = status === 'accepted' || status === 'rejected';
                       return (
-                        <div key={hunk.id} className="overflow-hidden rounded border border-[#242a32] bg-[#0d1117]">
-                          <div className="flex items-center gap-2 border-b border-[#1f242d] bg-[#111827] px-2 py-1.5">
-                            <span className="text-[9px] uppercase tracking-wider text-[#79c0ff]">Patch {hunk.index + 1}</span>
-                            <span className="truncate text-[9px] text-[#6e7681]">{hunk.header}</span>
-                            {status ? <span className={status === 'accepted' ? 'ml-auto text-[9px] uppercase text-[#3fb950]' : 'ml-auto text-[9px] uppercase text-[#f85149]'}>{status}</span> : null}
+                        <div key={hunk.id} className="overflow-hidden rounded border border-[#242a32] bg-[#0b0f14]">
+                          <div className="border-b border-[#1f242d] bg-[#111827] px-3 py-1.5 text-[9px] uppercase tracking-wider text-[#79c0ff]">
+                            Patch {hunk.index + 1} <span className="ml-2 normal-case tracking-normal text-[#6e7681]">{hunk.header}</span>
                           </div>
-                          <div className="max-h-52 overflow-auto py-1 text-[10px] leading-4">
+                          <div className="overflow-auto py-1 text-[11px] leading-5">
                             {[hunk.header, ...hunk.lines].map((line, index) => (
-                              <div key={`${hunk.id}:${index}:${line.slice(0, 16)}`} className={`whitespace-pre-wrap break-all px-2 ${renderDiffLineClass(line)}`}>
+                              <div key={`${hunk.id}:${index}:${line.slice(0, 20)}`} className={`whitespace-pre-wrap break-all px-3 ${renderDiffLineClass(line)}`}>
                                 {line || ' '}
                               </div>
                             ))}
                           </div>
-                          <div className="flex justify-end gap-2 border-t border-[#1f242d] bg-[#0f1114] px-2 py-1.5">
-                            <button
-                              type="button"
-                              disabled={isBusy || isResolved}
-                              onClick={() => rejectHunk(reviewDiff, hunk)}
-                              className="rounded border border-[#30363d] px-2 py-1 text-[10px] text-[#f85149] hover:bg-[#2d1517] disabled:cursor-not-allowed disabled:opacity-40"
-                            >
+                          <div className="flex items-center justify-end gap-2 border-t border-[#1f242d] bg-[#0f1114] px-3 py-2">
+                            {status ? <span className={status === 'accepted' ? 'mr-auto text-[9px] uppercase text-[#3fb950]' : 'mr-auto text-[9px] uppercase text-[#f85149]'}>{status}</span> : null}
+                            <button type="button" disabled={isBusy || isResolved} onClick={() => rejectHunk(reviewDiff, hunk)} className="rounded border border-[#30363d] px-2 py-1 text-[10px] text-[#f85149] hover:bg-[#2d1517] disabled:cursor-not-allowed disabled:opacity-40">
                               Reject patch
                             </button>
-                            <button
-                              type="button"
-                              disabled={isBusy || isResolved}
-                              onClick={() => void acceptHunk(reviewDiff, hunk)}
-                              className="rounded bg-[#238636] px-2 py-1 text-[10px] text-white hover:bg-[#2ea043] disabled:cursor-not-allowed disabled:opacity-40"
-                            >
+                            <button type="button" disabled={isBusy || isResolved} onClick={() => void acceptHunk(reviewDiff, hunk)} className="rounded bg-[#238636] px-2 py-1 text-[10px] text-white hover:bg-[#2ea043] disabled:cursor-not-allowed disabled:opacity-40">
                               {isBusy ? 'Applying…' : 'Accept patch'}
                             </button>
                           </div>
