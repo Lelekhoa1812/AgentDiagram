@@ -10,6 +10,7 @@ Code Space must behave like a capable coding agent surface with Ask / Plan / Cod
 - Ask mode can classify the task, inspect repository context, report evidence, and recommend next actions.
 - Ask mode never emits `diff_proposed`, `file_applied`, or checkpoint-creating events.
 - Plan mode creates or updates a markdown plan artifact under `.agent/plans/` using a stable template with `Summary`, `Key Changes`, and `Test Plans`, adding `Assumptions` and other optional sections only when they materially help the implementer.
+- Plan mode must include a concrete validation matrix for the touched stack before presenting the plan as ready.
 - Code mode emits reviewable diffs and never writes directly from the model response.
 - Code mode always routes mutation through server-side patch preview/apply APIs.
 
@@ -38,6 +39,7 @@ Code Space must behave like a capable coding agent surface with Ask / Plan / Cod
 - The patch preview API rejects non-unique SEARCH blocks.
 - The patch preview API rejects path traversal.
 - Lightweight syntax pre-validation runs before any accepted patch is written.
+- Python patches must be rejected before review when obvious indentation errors are detected, including unexpected top-level indentation, mixed tabs/spaces on the same line, missing indentation after a block header, or indentation that does not match an outer level.
 - Whole-file rewrites are allowed only for new files or explicit full-file regeneration tasks.
 
 ## DoD 5 — Reviewable patch apply
@@ -53,6 +55,7 @@ Code Space must behave like a capable coding agent surface with Ask / Plan / Cod
 ## DoD 6 — Verification and self-healing
 
 - The runtime detects package-manager validation commands from project configuration.
+- Plan mode must propose the validation commands that Code mode will run; Code mode must run the detected commands before claiming verification.
 - After accepted code patches, the agent should run available typecheck, lint, test, and build commands.
 - Full command output is stored as an artifact, not injected wholesale into the model context.
 - The agent reads targeted failure ranges from artifacts for repair.
@@ -61,7 +64,21 @@ Code Space must behave like a capable coding agent surface with Ask / Plan / Cod
 - A session is marked `verified` only when required validation passes after accepted changes.
 - Refactor turns that rename or move files/folders must follow a move-first sequence: use shell-native operations (`mv`, `cp`, or `git mv` when available), search every affected importer and re-export, update references, then run the detected validation commands before the turn is considered complete.
 
-## DoD 7 — Checkpoint and rollback
+## DoD 7 — Stack-aware validation matrix
+
+The agent must select commands from the project itself when scripts/configs exist. If a tool is missing, the failure must be surfaced as validation output rather than silently skipped.
+
+- Python: run `python3 -m compileall .` for syntax/indentation and `python3 -m pytest` for tests.
+- JavaScript/TypeScript: run package scripts in this order when present: `typecheck`, `lint`, `test`, `build`. If `tsconfig.json` exists but no `typecheck` script exists, run an equivalent no-emit TypeScript compile command using the detected package manager.
+- C#/.NET: run `dotnet build --no-restore` and `dotnet test --no-build` for `.sln`, `.csproj`, `.fsproj`, or `.vbproj` workspaces.
+- Java/Kotlin JVM: run `mvn test`, `./gradlew test`, or `gradle test` depending on whether Maven, Gradle wrapper, or Gradle project files are present.
+- Go: run `go test ./...`; use `go test ./... -run ^$` as a compile-focused pass when a separate compile gate is needed.
+- Rust: run `cargo check` and `cargo test`.
+- PHP: run `composer test` when configured, otherwise at least run `php -l` over changed PHP files where feasible.
+- Ruby: run `bundle exec rspec` when configured, otherwise run the project test command from `Rakefile` or `Gemfile` guidance.
+- Docker/service work: run the narrowest build or compose validation available and record the command output as an artifact.
+
+## DoD 8 — Checkpoint and rollback
 
 - Every patch apply creates a checkpoint snapshot of touched files.
 - Checkpoints preserve whether a file existed before the patch.
@@ -69,7 +86,7 @@ Code Space must behave like a capable coding agent surface with Ask / Plan / Cod
 - Restore is deterministic and project-root guarded.
 - UI must refresh tabs, file tree, pending diffs, and git status after restore.
 
-## DoD 8 — Terminal safety
+## DoD 9 — Terminal safety
 
 - Terminal commands are executed with command/args, not arbitrary shell strings, whenever possible.
 - Shell-backed refactors should use `rg`/`grep` to find references, `mv`/`cp` for file moves and copies, and validation commands to confirm the workspace still compiles after path changes.
@@ -78,7 +95,7 @@ Code Space must behave like a capable coding agent surface with Ask / Plan / Cod
 - Terminal logs are redacted for secrets before display or storage.
 - Long logs are summarized and persisted as artifacts with read hints.
 
-## DoD 9 — UI completeness
+## DoD 10 — UI completeness
 
 - The agent panel shows streamed chat, tool call status, validation results, and pending diffs.
 - Pending diffs expose Apply and Reject actions.
@@ -86,7 +103,7 @@ Code Space must behave like a capable coding agent surface with Ask / Plan / Cod
 - Checkpoint restore is reachable from applied patch state.
 - Ask, Plan, and Code mode contracts are visible enough that users understand whether mutation will occur.
 
-## DoD 10 — Non-regression gates
+## DoD 11 — Non-regression gates
 
 Before merging this runtime, run:
 
