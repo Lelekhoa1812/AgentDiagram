@@ -177,6 +177,18 @@ function extractReferencedFiles(content: string, candidateSet: Set<string>): str
   return Array.from(references);
 }
 
+function extractPromptReferencedFiles(prompt: string, candidateSet: Set<string>): string[] {
+  const references = new Set<string>(extractReferencedFiles(prompt, candidateSet));
+  for (const match of prompt.matchAll(/File\s+"(?:\/[^"\n]+\/)?([^"\n]+\.(?:py|ts|tsx|js|jsx|json|md|yml|yaml|java|kt|cs|go|rs|php|rb|sh))"/g)) {
+    const normalized = normalizeContextPath(match[1] ?? '');
+    if (normalized && candidateSet.has(normalized)) references.add(normalized);
+    for (const candidate of candidateSet) {
+      if (normalized && candidate.endsWith(`/${normalized}`)) references.add(candidate);
+    }
+  }
+  return Array.from(references);
+}
+
 export class ContextGraphEngine {
   async collectProjectContext(root: string, prompt: string, options: ContextGraphOptions = {}): Promise<ContextGraphResult> {
     const candidates = await listRepositoryFiles(root);
@@ -241,6 +253,10 @@ export class ContextGraphEngine {
       for (const file of candidates) {
         if (file.startsWith(`${mention.replace(/\/$/, '')}/`)) addScore(scores, file, 115, 'explicit_folder');
       }
+    }
+
+    for (const referenced of extractPromptReferencedFiles(prompt, candidateSet)) {
+      addScore(scores, referenced, 520, 'explicit_file', 'file path referenced in prompt, traceback, or error output');
     }
 
     const baseBudget = options.mode === 'ask' ? 15 : options.mode === 'plan' ? 35 : 50;
