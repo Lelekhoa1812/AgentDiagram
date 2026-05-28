@@ -11,13 +11,13 @@ export interface CodeSpaceExecutionPolicyMeta {
   menuItemClassName: string;
 }
 
-export const DEFAULT_CODE_SPACE_EXECUTION_POLICY: CodeSpaceExecutionPolicy = 'auto';
+export const DEFAULT_CODE_SPACE_EXECUTION_POLICY: CodeSpaceExecutionPolicy = 'manual';
 
 export const CODE_SPACE_EXECUTION_POLICY_META: Record<CodeSpaceExecutionPolicy, CodeSpaceExecutionPolicyMeta> = {
   auto: {
     policy: 'auto',
     label: 'Auto',
-    description: 'Apply agent changes through the checkpointed patch pipeline as soon as a diff is proposed.',
+    description: 'Apply generated changes immediately through the checkpointed patch pipeline.',
     accentClassName: 'text-[#f85149]',
     buttonClassName: 'border-[#be123c66] bg-[#2d1217] text-[#fb7185] hover:bg-[#3b151f]',
     menuItemClassName: 'text-[#fb7185] hover:bg-[#3b151f]',
@@ -25,7 +25,7 @@ export const CODE_SPACE_EXECUTION_POLICY_META: Record<CodeSpaceExecutionPolicy, 
   manual: {
     policy: 'manual',
     label: 'Confirm',
-    description: 'Show generated diffs in the review panel before the applied-changes history records them.',
+    description: 'Keep generated diffs pending for editor review before accepting them.',
     accentClassName: 'text-[#3fb950]',
     buttonClassName: 'border-[#23863666] bg-[#0f2a1a] text-[#7ee787] hover:bg-[#12331f]',
     menuItemClassName: 'text-[#7ee787] hover:bg-[#12331f]',
@@ -41,8 +41,8 @@ export function isCodeSpaceAutoExecutionPolicy(policy: unknown): boolean {
   return normalizeCodeSpaceExecutionPolicy(policy) === 'auto';
 }
 
-export function shouldAutoApplyCodeSpaceDiffs(_policy: unknown, _autoApplied = false): boolean {
-  return true;
+export function shouldAutoApplyCodeSpaceDiffs(policy: unknown, autoApplied = false): boolean {
+  return autoApplied || isCodeSpaceAutoExecutionPolicy(policy);
 }
 
 export function getCodeSpaceExecutionPolicyMeta(policy: unknown): CodeSpaceExecutionPolicyMeta {
