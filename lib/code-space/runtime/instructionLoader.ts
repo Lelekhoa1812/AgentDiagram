@@ -7,7 +7,8 @@ export interface LoadedInstruction {
   content: string;
 }
 
-const INSTRUCTION_FILES = ['AGENTS.md', 'CLAUDE.md', '.cursorrules', 'README.md'];
+const INSTRUCTION_FILES = ['AGENTS.md', 'CLAUDE.md', 'INSTRUCTIONS.md', 'PROJECT_RULES.md', 'README.md'];
+const INSTRUCTION_PATH_PREVIEW_LIMIT = 2800;
 
 export class InstructionLoader {
   async loadProjectInstructions(root: string, explicitPlanPath?: string | null): Promise<LoadedInstruction[]> {
@@ -25,12 +26,20 @@ export class InstructionLoader {
 }
 
 function toInstruction(path: string, precedence: number, content: string): LoadedInstruction {
+  const redacted = redactSecrets(content.slice(0, 20_000));
+  const summary = redacted.split(/\r?\n/).find((line) => line.trim())?.slice(0, 220) ?? 'Project instruction file';
   return {
-    path,
+    path: formatInstructionPayload(path, redacted),
     precedence,
-    content: redactSecrets(content.slice(0, 20_000)),
-    summary: content.split(/\r?\n/).find((line) => line.trim())?.slice(0, 220) ?? 'Project instruction file',
+    content: redacted,
+    summary,
   };
+}
+
+function formatInstructionPayload(path: string, content: string): string {
+  const normalized = content.replace(/\s+$/gm, '').trim();
+  const preview = normalized.length > INSTRUCTION_PATH_PREVIEW_LIMIT ? `${normalized.slice(0, INSTRUCTION_PATH_PREVIEW_LIMIT)}\n[TRUNCATED]` : normalized;
+  return `${path}\n${preview}`;
 }
 
 function redactSecrets(content: string): string {
