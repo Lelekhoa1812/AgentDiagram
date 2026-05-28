@@ -21,6 +21,7 @@ import type { SelectedMention } from '@/lib/code-space/mentions/types';
 interface AgentPanelProps {
   session: CodeSpaceAgentSession | null;
   sessions: CodeSpaceAgentSession[];
+  activeProjectName?: string;
   isRunning: boolean;
   toolBudget: number;
   pendingDiffs: Array<{
@@ -131,6 +132,7 @@ function modeContract(mode: CodeSpaceAgentMode) {
 export function AgentPanel({
   session,
   sessions,
+  activeProjectName,
   isRunning,
   pendingDiffs,
   appliedDiffs,
@@ -249,6 +251,11 @@ export function AgentPanel({
       <div className="flex flex-wrap items-center gap-2 border-b border-[#30363d] px-3 py-2">
         <Bot size={14} className="text-[#58a6ff]" />
         <span className="text-[10px] uppercase tracking-wider text-[#8b949e]">Agent</span>
+        {activeProjectName ? (
+          <span className="rounded-full border border-[#1f6feb66] bg-[#1f6feb22] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.18em] text-[#79b8ff]">
+            {activeProjectName}
+          </span>
+        ) : null}
         <span className="ml-auto truncate text-[10px] text-[#6e7681]">{providerSummary}</span>
         <button type="button" onClick={onOpenModelConfig} className="text-[10px] text-[#58a6ff] underline underline-offset-2 hover:text-[#79b8ff]">
           Model Configuration
@@ -256,7 +263,14 @@ export function AgentPanel({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2">
-        <SessionListSection sessions={sessions} activeSessionId={session?.id ?? null} onSelectSession={onSelectSession} onRenameSession={onRenameSession} onDeleteSession={onDeleteSession} />
+        <SessionListSection
+          sessions={sessions}
+          activeSessionId={session?.id ?? null}
+          activeProjectName={activeProjectName}
+          onSelectSession={onSelectSession}
+          onRenameSession={onRenameSession}
+          onDeleteSession={onDeleteSession}
+        />
         <PlanClarificationPanel questions={session?.clarifyingQuestions ?? []} disabled={isRunning} onSubmitAnswers={onSubmitPrompt} />
         <div className="rounded border border-[#30363d] bg-[#11182766] px-2 py-1.5 text-[10px] text-[#8b949e]">
           <div className="flex items-center justify-between gap-2">

@@ -1396,7 +1396,9 @@ export function CodeSpaceWorkspace() {
   );
 
   const handleRunAgent = useCallback(async (userPrompt: string, attachments: SelectedMention[] = [], options: CodeSpacePromptOptions = {}) => {
-    const project = projects.find((item) => item.id === activeProjectId);
+    // Motivation vs Logic: the left sidebar owns project selection, so every agent run should resolve against the
+    // same active project snapshot instead of re-deriving a potentially stale root during async hydration.
+    const project = activeProject;
     if (!project || !project.rootPath) return;
     const requestedMode = options.modeOverride ?? agentMode;
     const buildPlanPath = options.buildPlanPath ?? extractBuildPlanPath(userPrompt);
@@ -1786,14 +1788,13 @@ export function CodeSpaceWorkspace() {
       runningSessionIdRef.current = null;
     }
   }, [
-    activeProjectId,
+    activeProject,
     agentMode,
     appendSessionMessage,
     codeSpaceInstruction,
     ensureSession,
     openFile,
     patchSession,
-    projects,
     provider.apiKey,
     provider.customModel,
     provider.endpoint,
@@ -2367,6 +2368,7 @@ export function CodeSpaceWorkspace() {
           <AgentPanel
             session={activeSession}
             sessions={sessions.filter((session) => !session.projectId || session.projectId === activeProjectId)}
+            activeProjectName={activeProject?.name}
             isRunning={agentRunning}
             toolBudget={activeSession?.toolBudget ?? 50}
             pendingDiffs={pendingDiffs}

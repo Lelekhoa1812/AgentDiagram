@@ -8,6 +8,7 @@ import { CollapsibleSection } from './CollapsibleSection';
 interface SessionListSectionProps {
   sessions: CodeSpaceAgentSession[];
   activeSessionId: string | null;
+  activeProjectName?: string;
   onSelectSession: (sessionId: string) => void;
   onRenameSession: (session: CodeSpaceAgentSession) => void;
   onDeleteSession: (session: CodeSpaceAgentSession) => void;
@@ -24,6 +25,7 @@ function buildSessionSubtitle(session: CodeSpaceAgentSession): string {
 export function SessionListSection({
   sessions,
   activeSessionId,
+  activeProjectName,
   onSelectSession,
   onRenameSession,
   onDeleteSession,
@@ -33,7 +35,16 @@ export function SessionListSection({
       title="Session"
       defaultOpen={false}
       compact
-      rightSlot={<span className="text-[9px] text-[#6d6d6d]">{sessions.length}</span>}
+      rightSlot={
+        <div className="flex items-center gap-2">
+          {activeProjectName ? (
+            <span className="rounded-full border border-accent/40 bg-accent/15 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.18em] text-accent">
+              {activeProjectName}
+            </span>
+          ) : null}
+          <span className="text-[9px] text-[#6d6d6d]">{sessions.length}</span>
+        </div>
+      }
     >
       <div className="max-h-64 overflow-y-auto rounded border border-[#2a2a2a] bg-[#111111] p-1">
         {sessions.length === 0 ? (
