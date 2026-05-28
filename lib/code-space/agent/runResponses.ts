@@ -52,7 +52,7 @@ export function buildPlanCompletionResponse(input: PlanResponseInput): string {
 
 export function buildCodeCompletionResponse(input: CodeResponseInput): string {
   const lines: string[] = [];
-  const cleanSummary = normalizeSummary(input.summary, input.files.length > 0);
+  const cleanSummary = input.files.length ? normalizeSummary(input.summary, true) : null;
   if (cleanSummary) lines.push(cleanSummary);
 
   if (input.files.length) {
@@ -62,11 +62,12 @@ export function buildCodeCompletionResponse(input: CodeResponseInput): string {
       `Proposed ${input.files.length} reviewable patch${input.files.length === 1 ? '' : 'es'} for ${input.projectName}: ${formatList(fileList)}${suffix}. No project file is written until the patch is visible in Code changes and accepted or auto-apply succeeds.`,
     );
   } else {
-    // Root Cause vs Logic: an empty patch result is a blocked run, not a useful completion. Surface
-    // the recovery path so users can inspect context/patch-planner tool output instead of seeing a
-    // canned success-looking sentence that hides why the workspace stayed unchanged.
+    // Root Cause vs Logic: an empty patch result is a blocked run, not a useful completion. Never echo
+    // the model's own "I cannot / insufficient evidence" wording here; that message makes the agent
+    // look passive even when the runtime already attempted context recall. Keep the UX deterministic,
+    // actionable, and tied to the tool trace the user can inspect.
     lines.push(
-      `Needs review for ${input.projectName}: Code mode could not produce a reviewable file patch from the gathered context. No workspace files were changed; inspect the context_graph and patch_planner tool output, then rerun with the missing target files attached or after fixing the model/provider response.`,
+      `Needs review for ${input.projectName}: Code mode exhausted autonomous context recall and did not receive a valid reviewable file patch. No workspace files were changed; inspect the context_graph and patch_planner tool output for the missing target surface or model/provider response issue, then rerun with the named files attached if needed.`,
     );
   }
 
@@ -95,6 +96,7 @@ function normalizeSummary(summary?: string, proposedOnly = false): string | null
   if (!trimmed) return null;
   if (/^done\b/i.test(trimmed)) return null;
   if (/^plan ready\b/i.test(trimmed)) return null;
+  if (/\b(unable to produce|cannot produce|could not produce|insufficient evidence|not enough evidence|no reviewable code patch was produced)\b/i.test(trimmed)) return null;
   let normalized = trimmed.replace(/\s+/g, ' ').slice(0, 240);
   if (proposedOnly) {
     normalized = normalized
