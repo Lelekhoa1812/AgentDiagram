@@ -128,7 +128,7 @@ function refreshExplorerPath(folderPath: string): void {
   }, 80);
 }
 
-async function postFileAction(target: ExplorerTarget, body: Record<string, unknown>, refreshPath: string): Promise<boolean> {
+export async function postFileAction(target: ExplorerTarget, body: Record<string, unknown>, refreshPath: string): Promise<boolean> {
   const response = await fetch('/api/code-space/files', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
