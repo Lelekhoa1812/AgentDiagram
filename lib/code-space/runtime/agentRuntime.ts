@@ -28,6 +28,7 @@ import { TerminalRunner } from './terminalRunner';
 import { getCodeSpaceStore } from './serverStore';
 import type { FileCheckpoint } from './checkpointManager';
 import { AutonomyLevelSchema } from '@/lib/code-space/domain';
+import { assessContextSufficiency, buildRecallDirective, type ContextSufficiencyReport } from './workflowPolicy';
 
 export const RuntimeMessageSchema = z.object({
   role: z.enum(['user', 'assistant', 'system', 'tool']),
@@ -132,6 +133,8 @@ export class AgentRuntime {
       const validationCommands = await emitTool(emit, emitRuntime, 'validation_strategy', { mode }, async () =>
         this.validation.detectValidationCommands(root),
       );
+      const sufficiency = assessContextSufficiency({ mode, prompt, context, buildPlanPath, validationCommands });
+      await emitRuntime('context.sufficiency.completed', sufficiency);
 
       if (mode === 'ask') {
         await this.finishAsk(request, prompt, context, emit, emitRuntime, runId, state, todos);
@@ -141,7 +144,7 @@ export class AgentRuntime {
         await this.finishPlan(request, root, prompt, context, validationCommands, emit, emitRuntime, runId, todos);
         return;
       }
-      await this.finishCode(request, root, prompt, context, validationCommands, emit, emitRuntime, runId, todos, loadedInstructions, signal);
+      await this.finishCode(request, root, prompt, context, validationCommands, emit, emitRuntime, runId, todos, loadedInstructions, sufficiency, signal);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await setPhase('failed', { message });
@@ -212,6 +215,7 @@ export class AgentRuntime {
     runId: string,
     todos: string[],
     loadedInstructions: LoadedInstruction[],
+    sufficiency: ContextSufficiencyReport,
     signal?: AbortSignal,
   ) {
     const credentials = await resolveProviderCredentials(root, request);
@@ -266,10 +270,17 @@ export class AgentRuntime {
     const loop = new CodeAgentLoop(new ToolExecutor(ctx.registry, ctx.permission));
     loop.seed(
       buildCodeSystemPrompt(request.projectName, loadedInstructions.map((item) => item.path)),
-      await buildCodeSeedMessage(root, prompt, context, validationCommands.map((command) => ({ command: command.command, args: command.args, reason: command.reason }))),
+      await buildCodeSeedMessage(root, prompt, context, validationCommands.map((command) => ({ command: command.command, args: command.args, reason: command.reason })), sufficiency),
     );
 
     let loopResult = await loop.run(ctx, loopOptions);
+
+    const MAX_CONTEXT_RECALL_ESCALATIONS = 2;
+    for (let attempt = 0; attempt < MAX_CONTEXT_RECALL_ESCALATIONS; attempt += 1) {
+      if (ledger.size > 0 || ctx.proposedFiles.size > 0 || sufficiency.status === 'ready') break;
+      if (loopOptions.budget.turnsExhausted()) break;
+      loopResult = await loop.continueWith(buildRecallDirective(sufficiency), ctx, loopOptions);
+    }
 
     // Motivation vs Logic: models surrender after recoverable edit_file diagnostics. Escalate back into
     // the live thread when nothing was applied/proposed but unresolved edit failures remain.
@@ -291,6 +302,22 @@ export class AgentRuntime {
       await streamAnswer(proposalAnswer, emit, emitRuntime);
       await emitRuntime('run.completed', { status: 'awaiting_review', phase: 'awaiting_patch_review', filesChanged: proposed });
       emit({ type: 'agent_done', summary: proposalAnswer, filesChanged: proposed });
+      return;
+    }
+
+    if (ledger.size === 0) {
+      const answer = [
+        loopResult.summary || 'Code mode ended without applying a patch.',
+        '',
+        'No files were changed. The run is marked needs_review because v3.2 requires concrete file changes for implementation tasks or an exact blocker after context recall.',
+        `Context gate: ${sufficiency.status} (${sufficiency.score}/100).`,
+        sufficiency.blockers.length ? `Blockers: ${sufficiency.blockers.join('; ')}` : '',
+        sufficiency.warnings.length ? `Warnings: ${sufficiency.warnings.join('; ')}` : '',
+      ].filter(Boolean).join('\n');
+      await streamAnswer(answer, emit, emitRuntime);
+      await emitRuntime('run.completed', { status: 'needs_review', phase: 'needs_review', filesChanged: [] });
+      emit({ type: 'validation_result', id: `validation:${runId}:no_changes`, command: 'v3.2 implementation gate', status: 'failed', output: 'Code mode produced no applied files after recall/repair gates.' });
+      emit({ type: 'agent_done', summary: answer, filesChanged: [] });
       return;
     }
 
@@ -383,8 +410,8 @@ async function streamAnswer(answer: string, emit: AgentRuntimeEmit, emitRuntime:
 
 function describeModeContract(mode: CodeSpaceAgentMode): string {
   if (mode === 'ask') return 'Ask mode is read-only: inspect, trace, and answer without patches or checkpoints.';
-  if (mode === 'plan') return 'Plan mode writes only .agent/plans artifacts unless explicitly instructed otherwise.';
-  return 'Code mode must read before edit, recall missing evidence autonomously, propose reviewable diffs, checkpoint through the unified apply path, and validate honestly.';
+  if (mode === 'plan') return 'Plan mode is read-only except for .agent/plans artifacts; it must score context sufficiency and produce an implementation-grade artifact before Build.';
+  return 'Code mode must read before edit, recall missing evidence autonomously, apply or propose concrete diffs, checkpoint through the unified apply path, validate honestly, and never claim implementation success with zero changed files.';
 }
 
 async function resolveProviderCredentials(root: string, request: AgentRuntimeRequest): Promise<{ apiKey: string; endpoint?: string }> {
