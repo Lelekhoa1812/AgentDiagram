@@ -20,7 +20,7 @@ import type { LoadedInstruction } from './instructionLoader';
 import { RepairLoop } from './repairLoop';
 import { buildAskFinalResponse, buildCodeFinalResponse, buildCodeProposalResponse, buildPlanFinalResponse, validationStatus } from './responsePolicy';
 import { CodeAgentLoop, buildCodeSystemPrompt, buildCodeSeedMessage, type CodeAgentLoopOptions } from './codeAgentLoop';
-import { ToolExecutor, createRunRevertCheckpoint, type CodeAgentContext, type LedgerEntry } from './toolExecutor';
+import { ToolExecutor, createRunRevertCheckpoint, buildEditEscalationDirective, type CodeAgentContext, type LedgerEntry } from './toolExecutor';
 import { ToolBudget } from './toolBudget';
 import { createDefaultToolRegistry } from './toolRegistry';
 import { PermissionManager } from './permissionManager';
@@ -247,6 +247,8 @@ export class AgentRuntime {
       emitRuntime,
       ledger,
       proposedFiles: new Set<string>(),
+      proposedLedger: new Map(),
+      editFailures: new Map(),
       readFiles: new Set(context.files.map((file) => file.path)),
       artifacts: new Map(),
       checkpoints: [],
@@ -267,7 +269,18 @@ export class AgentRuntime {
       await buildCodeSeedMessage(root, prompt, context, validationCommands.map((command) => ({ command: command.command, args: command.args, reason: command.reason }))),
     );
 
-    const loopResult = await loop.run(ctx, loopOptions);
+    let loopResult = await loop.run(ctx, loopOptions);
+
+    // Motivation vs Logic: models surrender after recoverable edit_file diagnostics. Escalate back into
+    // the live thread when nothing was applied/proposed but unresolved edit failures remain.
+    const MAX_EDIT_ESCALATIONS = 3;
+    for (let attempt = 0; attempt < MAX_EDIT_ESCALATIONS; attempt += 1) {
+      if (loopResult.success !== false) break;
+      if (ledger.size > 0 || ctx.proposedFiles.size > 0) break;
+      if (ctx.editFailures.size === 0) break;
+      if (loopOptions.budget.turnsExhausted() || loopOptions.budget.mutationBudgetExhausted()) break;
+      loopResult = await loop.continueWith(buildEditEscalationDirective(ctx), ctx, loopOptions);
+    }
 
     // Confirm mode (suggest_only): the loop proposed diffs but wrote nothing. Surface them for
     // accept/reject instead of validating/fixing unchanged code or reporting an autonomy failure.

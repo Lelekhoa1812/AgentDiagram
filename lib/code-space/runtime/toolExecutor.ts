@@ -6,7 +6,9 @@ import type { AgentSSEEvent } from '@/lib/code-space/agent/types';
 import {
   applyGroupedEditBlocks,
   createUnifiedDiff,
+  validateSyntaxLightweight,
   type EditBlock,
+  type EditBlockDiagnostic,
 } from '@/lib/code-space/agent/editBlocks';
 import { writeAgentArtifact, readArtifactRange, grepArtifact, type AgentArtifact } from '@/lib/code-space/agent/artifacts';
 import type { AgentEventType } from './events';
@@ -37,6 +39,15 @@ export interface ToolExecutionResult {
   isError?: boolean;
 }
 
+export type EditFailureCode = 'SEARCH_NOT_FOUND' | 'SEARCH_NOT_UNIQUE' | 'SYNTAX_ERROR' | 'AST_PREVALIDATION_FAILED';
+
+export interface EditFailure {
+  code: EditFailureCode;
+  message: string;
+  line?: number;
+  at: number;
+}
+
 /** Persisted checkpoint plus a hook so the runtime can record it to the store. */
 export type CheckpointSink = (checkpoint: FileCheckpoint) => void | Promise<void>;
 
@@ -52,6 +63,10 @@ export interface CodeAgentContext {
   ledger: Map<string, LedgerEntry>;
   /** Paths proposed (but NOT written) under suggest_only autonomy — pending user accept/reject. */
   proposedFiles: Set<string>;
+  /** Latest proposed before/after per path (suggest_only); used for final pre-completion validation. */
+  proposedLedger: Map<string, Pick<LedgerEntry, 'beforeContent' | 'afterContent'>>;
+  /** Recoverable edit_file failures per path — cleared when a working edit lands. */
+  editFailures: Map<string, EditFailure[]>;
   /** Files the model has read this run. */
   readFiles: Set<string>;
   /** Artifacts produced during the run, keyed by artifactId. */
@@ -157,6 +172,126 @@ function clip(output: string): string {
 
 function str(value: unknown): string {
   return typeof value === 'string' ? value : '';
+}
+
+function formatEditDiagnostics(diagnostics: EditBlockDiagnostic[]): string {
+  return diagnostics
+    .map((diagnostic) => `- ${diagnostic.path} [${diagnostic.code}]${diagnostic.line ? ` line ${diagnostic.line}` : ''}: ${diagnostic.message}`)
+    .join('\n');
+}
+
+
+function toEditFailureCode(code: EditBlockDiagnostic['code']): EditFailureCode | null {
+  if (code === 'SEARCH_NOT_FOUND' || code === 'SEARCH_NOT_UNIQUE' || code === 'SYNTAX_ERROR') return code;
+  return null;
+}
+
+export function recordEditFailures(ctx: CodeAgentContext, filePath: string, failures: EditFailure[]): void {
+  if (!failures.length) return;
+  const normalized = normalizeContextPath(filePath);
+  const existing = ctx.editFailures.get(normalized) ?? [];
+  ctx.editFailures.set(normalized, [...existing, ...failures]);
+}
+
+export function clearEditFailures(ctx: CodeAgentContext, filePath: string): void {
+  ctx.editFailures.delete(normalizeContextPath(filePath));
+}
+
+export function formatUnresolvedEditFailures(ctx: CodeAgentContext): string {
+  return Array.from(ctx.editFailures.entries())
+    .filter(([path, failures]) => failures.length > 0 && !ctx.ledger.has(path) && !ctx.proposedFiles.has(path))
+    .flatMap(([path, failures]) => failures.map((failure) => `- ${path} [${failure.code}]${failure.line ? ` line ${failure.line}` : ''}: ${failure.message}`))
+    .join('\n');
+}
+
+export function buildEditEscalationDirective(ctx: CodeAgentContext): string {
+  const detail = formatUnresolvedEditFailures(ctx);
+  if (!detail) {
+    return 'You returned without applying or proposing any edits. Re-read the target files, issue corrected edit_file calls, and do not call attempt_completion until at least one edit succeeds.';
+  }
+  return [
+    'You attempted to finish without resolving recoverable edit_file failures. This is not allowed.',
+    'Recoverable diagnostics MUST be retried — re-read the failing range and issue a smaller, corrected edit_file before attempt_completion.',
+    '',
+    detail,
+    '',
+    'After 2 failed retries on the same file: read_file the target range, replan with a smaller SEARCH, and retry edit_file.',
+  ].join('\n');
+}
+
+function locateSearchAnchor(content: string, search: string): number | undefined {
+  const lines = content.split('\n');
+  const needle = search.split('\n').find((line) => line.trim())?.trim();
+  if (!needle) return undefined;
+  for (let index = 0; index < lines.length; index += 1) {
+    if (lines[index]?.includes(needle)) return index + 1;
+  }
+  return undefined;
+}
+
+function buildReadWindow(content: string, centerLine: number, radius = 12): { start: number; end: number; text: string } {
+  const lines = content.split('\n');
+  const safeCenter = Math.max(1, Math.min(centerLine, lines.length || 1));
+  const start = Math.max(1, safeCenter - radius);
+  const end = Math.min(lines.length || 1, safeCenter + radius);
+  const numbered = lines.slice(start - 1, end).map((line, index) => `${start + index}\t${line}`).join('\n');
+  return { start, end, text: numbered };
+}
+
+function buildRepairProtocol(filePath: string): string {
+  return [
+    'Repair protocol:',
+    '1. Use a smaller SEARCH that copies these lines exactly.',
+    '2. Match existing indentation depth (Python: keep block-relative indent).',
+    `3. Re-issue edit_file on ${filePath}. Do NOT call attempt_completion until this file's edit succeeds.`,
+  ].join('\n');
+}
+
+function inferFailureCenterLine(
+  content: string,
+  failure: EditFailure,
+  search?: string,
+): number {
+  if (failure.line) return failure.line;
+  if (search && (failure.code === 'SEARCH_NOT_FOUND' || failure.code === 'SEARCH_NOT_UNIQUE')) {
+    const anchor = locateSearchAnchor(content, search);
+    if (anchor) return anchor;
+  }
+  const lines = content.split('\n');
+  return Math.max(1, Math.ceil(lines.length / 2));
+}
+
+function buildEditFailureResponse(
+  headline: string,
+  diagnostics: EditBlockDiagnostic[],
+  currentFiles: Record<string, string>,
+  edits: EditBlock[],
+): string {
+  const detail = formatEditDiagnostics(diagnostics);
+  const primary = diagnostics[0];
+  if (!primary) return `${headline}\n${detail}`;
+
+  const normalized = normalizeContextPath(primary.path);
+  const content = currentFiles[normalized] ?? '';
+  const relatedEdit = edits.find((edit) => normalizeContextPath(edit.path) === normalized);
+  const failureCode = toEditFailureCode(primary.code) ?? 'SYNTAX_ERROR';
+  const failure: EditFailure = {
+    code: failureCode,
+    message: primary.message,
+    line: primary.line,
+    at: Date.now(),
+  };
+  const center = inferFailureCenterLine(content, failure, relatedEdit?.search);
+  const window = buildReadWindow(content, center);
+  return clip([
+    headline,
+    detail,
+    '',
+    `Current state of ${normalized} around the failing region (lines ${window.start}-${window.end}):`,
+    window.text,
+    '',
+    buildRepairProtocol(normalized),
+  ].join('\n'));
 }
 
 export class ToolExecutor {
@@ -368,10 +503,44 @@ export class ToolExecutor {
 
     const grouped = applyGroupedEditBlocks(currentFiles, edits);
     if (!grouped.ok) {
-      const detail = grouped.diagnostics
-        .map((diagnostic) => `- ${diagnostic.path} [${diagnostic.code}]${diagnostic.line ? ` line ${diagnostic.line}` : ''}: ${diagnostic.message}`)
-        .join('\n');
-      return { content: `edit_file could not apply cleanly. Fix and retry:\n${detail}`, isError: true };
+      for (const diagnostic of grouped.diagnostics) {
+        const code = toEditFailureCode(diagnostic.code);
+        if (!code) continue;
+        recordEditFailures(ctx, diagnostic.path, [{
+          code,
+          message: diagnostic.message,
+          line: diagnostic.line,
+          at: Date.now(),
+        }]);
+      }
+      return {
+        content: buildEditFailureResponse('edit_file could not apply cleanly. Fix and retry:', grouped.diagnostics, currentFiles, edits),
+        isError: true,
+      };
+    }
+
+    // Root Cause vs Logic: suggest_only used to emit diff_proposed without the same syntax gate as
+    // applyPatchFiles, so users hit AST_PREVALIDATION_FAILED on accept. Validate every preview here
+    // (auto-apply and propose paths) before surfacing or writing.
+    const syntaxDiagnostics = grouped.previews.flatMap((preview) => validateSyntaxLightweight(preview.path, preview.afterContent));
+    if (syntaxDiagnostics.length) {
+      for (const diagnostic of syntaxDiagnostics) {
+        recordEditFailures(ctx, diagnostic.path, [{
+          code: 'SYNTAX_ERROR',
+          message: diagnostic.message,
+          line: diagnostic.line,
+          at: Date.now(),
+        }]);
+      }
+      return {
+        content: buildEditFailureResponse(
+          'edit_file rejected: proposed content failed syntax pre-validation. Re-read the file, fix indentation/structure, and retry:',
+          syntaxDiagnostics,
+          Object.fromEntries(grouped.previews.map((preview) => [normalizeContextPath(preview.path), preview.beforeContent])),
+          edits,
+        ),
+        isError: true,
+      };
     }
 
     const decision = this.decide('propose_edit_blocks', ctx.autonomy);
@@ -393,6 +562,8 @@ export class ToolExecutor {
           autoApplied: false,
         });
         ctx.proposedFiles.add(normalized);
+        ctx.proposedLedger.set(normalized, { beforeContent: preview.beforeContent, afterContent: preview.afterContent });
+        clearEditFailures(ctx, normalized);
         if (decision.approvalRequired) await ctx.emitRuntime('tool.approval.required', { tool: 'edit_file', path: normalized, reason: decision.reason });
         continue;
       }
@@ -412,10 +583,40 @@ export class ToolExecutor {
         }
       } catch (error) {
         if (error instanceof PatchApplyError) {
+          if (error.code === 'AST_PREVALIDATION_FAILED') {
+            const details = error.details as { diagnostics?: EditBlockDiagnostic[] } | undefined;
+            const patchDiagnostics = details?.diagnostics ?? [];
+            for (const diagnostic of patchDiagnostics) {
+              recordEditFailures(ctx, diagnostic.path || normalized, [{
+                code: 'AST_PREVALIDATION_FAILED',
+                message: diagnostic.message,
+                line: diagnostic.line,
+                at: Date.now(),
+              }]);
+            }
+            if (patchDiagnostics.length) {
+              return {
+                content: buildEditFailureResponse(
+                  `edit_file write rejected for ${normalized} [${error.code}]: ${error.message} Re-read the file and regenerate the edit.`,
+                  patchDiagnostics,
+                  currentFiles,
+                  edits,
+                ),
+                isError: true,
+              };
+            }
+          }
+          recordEditFailures(ctx, normalized, [{
+            code: 'AST_PREVALIDATION_FAILED',
+            message: error.message,
+            at: Date.now(),
+          }]);
           return { content: `edit_file write rejected for ${normalized} [${error.code}]: ${error.message}. Re-read the file and regenerate the edit.`, isError: true };
         }
         throw error;
       }
+
+      clearEditFailures(ctx, normalized);
 
       const existing = ctx.ledger.get(normalized);
       const original = existing ? existing.beforeContent : preview.beforeContent;

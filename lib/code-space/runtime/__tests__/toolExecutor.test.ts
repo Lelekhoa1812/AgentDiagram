@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ToolCall } from '@/lib/agent/providers';
@@ -32,6 +32,8 @@ function makeContext(events: AgentSSEEvent[], autonomy: AutonomyLevel = 'auto_sa
     emitRuntime: async () => {},
     ledger: new Map(),
     proposedFiles: new Set(),
+    proposedLedger: new Map(),
+    editFailures: new Map(),
     readFiles: new Set(),
     artifacts: new Map(),
     checkpoints: [],
@@ -76,6 +78,9 @@ describe('ToolExecutor.edit_file', () => {
 
     expect(result.isError).toBe(true);
     expect(result.content).toMatch(/could not apply|SEARCH/i);
+    expect(result.content).toMatch(/Current state of a\.ts/);
+    expect(result.content).toMatch(/Repair protocol:/);
+    expect(ctx.editFailures.get('a.ts')?.length).toBeGreaterThan(0);
     expect(await readFile(path.join(tmpDir, 'a.ts'), 'utf8')).toBe('export const x = 1;\n');
     expect(ctx.checkpoints.length).toBe(0);
   });
@@ -95,6 +100,62 @@ describe('ToolExecutor.edit_file', () => {
     expect(events.some((event) => event.type === 'diff_proposed')).toBe(true);
     expect(events.some((event) => event.type === 'file_applied')).toBe(false);
     expect(ctx.proposedFiles.has('a.ts')).toBe(true);
+    expect(ctx.proposedLedger.get('a.ts')?.afterContent).toContain('x = 2');
     expect(ctx.ledger.size).toBe(0);
+  });
+
+  it('rejects invalid Python proposals under suggest_only instead of surfacing them for review', async () => {
+    const target = path.join(tmpDir, 'backend/api/config.py');
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(
+      target,
+      ['class Config:', '    def __init__(self):', '        self.value = 1', ''].join('\n'),
+      'utf8',
+    );
+    const events: AgentSSEEvent[] = [];
+    const ctx = makeContext(events, 'suggest_only');
+    const executor = new ToolExecutor();
+
+    const result = await executor.execute(
+      call('edit_file', {
+        edits: [
+          {
+            path: 'backend/api/config.py',
+            search: '        self.value = 1',
+            replace: '    def broken(self):\n        pass\n        self.value = 1',
+            reason: 'bad indent',
+          },
+        ],
+      }),
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toMatch(/syntax pre-validation/i);
+    expect(events.some((event) => event.type === 'diff_proposed')).toBe(false);
+    expect(ctx.proposedFiles.size).toBe(0);
+    expect(ctx.proposedLedger.size).toBe(0);
+    expect(ctx.editFailures.get('backend/api/config.py')?.length).toBeGreaterThan(0);
+  });
+
+  it('clears editFailures after a successful retry on the same file', async () => {
+    await writeFile(path.join(tmpDir, 'a.ts'), 'export const x = 1;\n', 'utf8');
+    const events: AgentSSEEvent[] = [];
+    const ctx = makeContext(events);
+    const executor = new ToolExecutor();
+
+    await executor.execute(
+      call('edit_file', { edits: [{ path: 'a.ts', search: 'NONEXISTENT LINE', replace: 'whatever', reason: 'x' }] }),
+      ctx,
+    );
+    expect(ctx.editFailures.get('a.ts')?.length).toBeGreaterThan(0);
+
+    const result = await executor.execute(
+      call('edit_file', { edits: [{ path: 'a.ts', search: 'export const x = 1;', replace: 'export const x = 2;', reason: 'bump' }] }),
+      ctx,
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(ctx.editFailures.has('a.ts')).toBe(false);
   });
 });

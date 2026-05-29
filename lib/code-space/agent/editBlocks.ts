@@ -252,6 +252,7 @@ function validatePythonIndentation(path: string, content: string): EditBlockDiag
   const indentStack = [0];
   let previousRequiresIndent = false;
   let bracketDepth = 0;
+  let backslashContinuation = false;
   const lines = content.split(/\r?\n/);
 
   for (let index = 0; index < lines.length; index += 1) {
@@ -268,7 +269,9 @@ function validatePythonIndentation(path: string, content: string): EditBlockDiag
 
     const indent = indentationWidth(leading);
     const currentIndent = indentStack[indentStack.length - 1] ?? 0;
-    const inContinuation = bracketDepth > 0;
+    // A physical line is a continuation when the previous logical line left a bracket open or
+    // ended with a backslash. Continuation lines have free-form indentation, so skip indent checks.
+    const inContinuation = bracketDepth > 0 || backslashContinuation;
 
     if (!inContinuation && indent > currentIndent) {
       if (!previousRequiresIndent) {
@@ -293,8 +296,17 @@ function validatePythonIndentation(path: string, content: string): EditBlockDiag
       break;
     }
 
-    previousRequiresIndent = !inContinuation && pythonLineRequiresIndent(trimmed);
-    bracketDepth = Math.max(0, bracketDepth + bracketDelta(stripPythonComment(trimmed)));
+    const stripped = stripPythonComment(trimmed);
+    const newBracketDepth = Math.max(0, bracketDepth + bracketDelta(stripped));
+    const endsWithBackslash = stripped.trimEnd().endsWith('\\');
+    // Root Cause vs Logic: a block header can complete on the same physical line that closes a
+    // multi-line bracket (e.g. `for x in [\n ... \n]:`). The colon only opens an indented block once
+    // the statement's brackets are balanced and it is not a backslash continuation. Using the
+    // start-of-line continuation flag (the old code) cleared this requirement and falsely rejected
+    // the valid indented body that followed.
+    previousRequiresIndent = newBracketDepth === 0 && !endsWithBackslash && pythonLineRequiresIndent(trimmed);
+    bracketDepth = newBracketDepth;
+    backslashContinuation = newBracketDepth === 0 && endsWithBackslash;
   }
 
   return diagnostics;

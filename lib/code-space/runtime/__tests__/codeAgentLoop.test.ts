@@ -45,6 +45,8 @@ function makeContext(events: AgentSSEEvent[]): CodeAgentContext {
     emitRuntime: async () => {},
     ledger: new Map(),
     proposedFiles: new Set(),
+    proposedLedger: new Map(),
+    editFailures: new Map(),
     readFiles: new Set(),
     artifacts: new Map(),
     checkpoints: [],
@@ -120,5 +122,83 @@ describe('CodeAgentLoop', () => {
 
     expect(result.completed).toBe(false);
     expect(result.stopReason).toBe('turns_exhausted');
+  });
+
+  it('refuses attempt_completion after edit failure and completes after a corrected edit', async () => {
+    await writeFile(path.join(tmpDir, 'config.py'), ['class Config:', '    def __init__(self):', '        self.value = 1', ''].join('\n'), 'utf8');
+
+    mockedTurn
+      .mockResolvedValueOnce(turn({
+        toolCalls: [{
+          id: 't1',
+          name: 'edit_file',
+          input: {
+            edits: [{
+              path: 'config.py',
+              search: '        self.value = 1',
+              replace: '    def broken(self):\n        pass\n        self.value = 1',
+              reason: 'bad indent',
+            }],
+          },
+        }],
+      }))
+      .mockResolvedValueOnce(turn({
+        toolCalls: [{ id: 't2', name: 'attempt_completion', input: { success: false, summary: 'Syntax pre-validation blocked the edit.' } }],
+      }))
+      .mockResolvedValueOnce(turn({
+        toolCalls: [{
+          id: 't3',
+          name: 'edit_file',
+          input: {
+            edits: [{
+              path: 'config.py',
+              search: '        self.value = 1',
+              replace: '        self.value = 2',
+              reason: 'fix value',
+            }],
+          },
+        }],
+      }))
+      .mockResolvedValueOnce(turn({
+        toolCalls: [{ id: 't4', name: 'attempt_completion', input: { success: true, summary: 'Updated config value.' } }],
+      }));
+
+    const events: AgentSSEEvent[] = [];
+    const ctx = makeContext(events);
+    const loop = new CodeAgentLoop();
+    loop.seed('system', 'Update config.py value');
+
+    const budget = new ToolBudget(10, 40);
+    const result = await loop.run(ctx, { session: { id: 'openai', model: 'test', apiKey: '' }, budget });
+
+    expect(result.completed).toBe(true);
+    expect(result.success).toBe(true);
+    expect(await readFile(path.join(tmpDir, 'config.py'), 'utf8')).toContain('self.value = 2');
+    expect(budget.mutationsUsed).toBe(1);
+    expect(loop.messages.some((message) => message.role === 'tool' && message.toolResults?.some((entry) => entry.isError && entry.content.includes('Cannot complete')))).toBe(true);
+  });
+
+  it('does not charge mutation budget for failed edit_file', async () => {
+    await writeFile(path.join(tmpDir, 'a.ts'), 'export const x = 1;\n', 'utf8');
+
+    mockedTurn
+      .mockResolvedValueOnce(turn({
+        toolCalls: [{
+          id: 't1',
+          name: 'edit_file',
+          input: { edits: [{ path: 'a.ts', search: 'NONEXISTENT', replace: 'x', reason: 'fail' }] },
+        }],
+      }))
+      .mockResolvedValueOnce(turn({ stopReason: 'end_turn', text: 'Stopped after failed edit.', toolCalls: [] }));
+
+    const events: AgentSSEEvent[] = [];
+    const ctx = makeContext(events);
+    const loop = new CodeAgentLoop();
+    loop.seed('system', 'Edit a.ts');
+
+    const budget = new ToolBudget(10, 40);
+    await loop.run(ctx, { session: { id: 'openai', model: 'test', apiKey: '' }, budget });
+
+    expect(budget.mutationsUsed).toBe(0);
   });
 });

@@ -3,7 +3,8 @@ import { chatTurnWithTools } from '@/lib/agent/providers';
 import type { ContextGraphResult } from './contextGraphEngine';
 import { listRepositoryFiles } from './repoMap';
 import { ToolBudget, isReadOnlyTool } from './toolBudget';
-import { CODE_MODE_TOOL_SPECS, ToolExecutor, type CodeAgentContext } from './toolExecutor';
+import { validateSyntaxLightweight } from '@/lib/code-space/agent/editBlocks';
+import { CODE_MODE_TOOL_SPECS, ToolExecutor, formatUnresolvedEditFailures, type CodeAgentContext } from './toolExecutor';
 
 export interface CodeAgentLoopResult {
   /** attempt_completion was called (the model declared the task done). */
@@ -122,6 +123,31 @@ export class CodeAgentLoop {
 
     for (const call of turn.toolCalls) {
       if (call.name === 'attempt_completion') {
+        const pendingSyntax = ctx.autonomy === 'suggest_only'
+          ? Array.from(ctx.proposedLedger.entries()).flatMap(([filePath, entry]) => validateSyntaxLightweight(filePath, entry.afterContent))
+          : [];
+        if (pendingSyntax.length) {
+          const detail = pendingSyntax
+            .map((diagnostic) => `- ${diagnostic.path} [${diagnostic.code}]${diagnostic.line ? ` line ${diagnostic.line}` : ''}: ${diagnostic.message}`)
+            .join('\n');
+          toolResults.push({
+            toolCallId: call.id,
+            content: `Cannot complete: proposed patches still fail syntax pre-validation. Fix the edits and call edit_file again before attempt_completion:\n${detail}`,
+            isError: true,
+          });
+          continue;
+        }
+
+        const unresolvedDetail = formatUnresolvedEditFailures(ctx);
+        if (unresolvedDetail) {
+          toolResults.push({
+            toolCallId: call.id,
+            isError: true,
+            content: `Cannot complete: edit_file failed on these files and you have not produced a working edit. Recoverable diagnostics MUST be retried — re-read the failing range and issue a corrected edit_file before attempt_completion:\n${unresolvedDetail}`,
+          });
+          continue;
+        }
+
         const success = call.input?.success !== false;
         const summary = typeof call.input?.summary === 'string' ? call.input.summary : '';
         completion = { completed: true, success, summary: summary || (success ? 'Task completed.' : 'Task could not be completed.'), stopReason: 'completed' };
@@ -138,8 +164,8 @@ export class CodeAgentLoop {
       if (mutating && opts.budget.mutationBudgetExhausted()) {
         result = { content: `Mutation budget exhausted (${opts.budget.mutationsUsed}/${opts.budget.max}). Stop editing and call attempt_completion with what you have.`, isError: true };
       } else {
-        if (mutating) opts.budget.charge(call.name);
         result = await this.executor.execute(call, ctx);
+        if (mutating && !result.isError) opts.budget.charge(call.name);
       }
 
       await ctx.emit({ type: 'tool_result', toolCallId: call.id, tool: call.name, output: result.content, durationMs: Date.now() - startedAt, error: result.isError ? result.content : undefined });
@@ -160,13 +186,15 @@ export function buildCodeSystemPrompt(projectName: string, instructionFiles: str
     '',
     'Workflow you must follow:',
     '1. Understand the task. Read the relevant files with read_file and search the repo with search_text before editing anything. Reading is free — explore thoroughly; never guess.',
-    '2. Make focused edits with edit_file using exact SEARCH/REPLACE blocks. The "search" text must match the current file content exactly and uniquely. Re-read a file if an edit is rejected, then retry with a corrected block.',
+    '2. Make focused edits with edit_file using exact SEARCH/REPLACE blocks. The "search" text must match the current file content exactly and uniquely. If edit_file returns a diagnostic, treat it as repair feedback — not a stop signal. Re-read the failing region with read_file, replan with a smaller SEARCH and correct indentation, then call edit_file again. Repeat until the edit succeeds. NEVER call attempt_completion while any targeted file still has an unresolved recoverable diagnostic (SEARCH_NOT_FOUND, SEARCH_NOT_UNIQUE, SYNTAX_ERROR, AST_PREVALIDATION_FAILED).',
     '3. After editing, run the project validation commands with run_command (typecheck, lint, tests, build as available). Read the output.',
-    '4. If validation fails, read the failing output, fix the root cause with more edits, and run validation again. Repeat until it passes or you are confident no further automated fix is possible.',
-    '5. When the work is done (or genuinely cannot be done), call attempt_completion with an honest success flag and a concise summary of what changed.',
+    '4. If validation fails, read the failing output, fix the root cause with more edits, and run validation again. Repeat until it passes.',
+    '5. When the work is done, call attempt_completion with success=true and a concise summary of what changed.',
     '',
     'Hard rules:',
-    '- Never fabricate a result. If you cannot complete the task, call attempt_completion with success=false and explain why. Do NOT write planning notes, recovery files, or markdown summaries into the workspace as a substitute for real code.',
+    '- Never fabricate a result. Do NOT write planning notes, recovery files, or markdown summaries into the workspace as a substitute for real code.',
+    '- attempt_completion with success=false is reserved for genuinely impossible tasks: the requested file does not exist, the spec contradicts itself, or a hard policy gate blocks the only viable change. A tool diagnostic is NEVER sufficient cause to surrender.',
+    '- After 2 failed retries on the same file you MUST: (a) read_file its target range, (b) state in your reasoning what changed about your plan, (c) issue a smaller, more conservative edit_file.',
     '- Only edit files that the task requires. Do not refactor unrelated code, add speculative abstractions, or leave half-finished work.',
     '- Prefer the smallest change that correctly solves the problem.',
     '- Edits are applied to disk immediately and checkpointed, so they are reversible. Use restore_checkpoint if an edit made things worse.',
