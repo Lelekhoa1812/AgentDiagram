@@ -44,6 +44,7 @@ function makeContext(events: AgentSSEEvent[]): CodeAgentContext {
     },
     emitRuntime: async () => {},
     ledger: new Map(),
+    proposedFiles: new Set(),
     readFiles: new Set(),
     artifacts: new Map(),
     checkpoints: [],

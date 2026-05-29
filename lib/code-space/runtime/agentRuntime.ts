@@ -18,7 +18,7 @@ import { ValidationRunner, type ValidationRunResult } from './validationRunner';
 import type { TerminalCommand } from './terminalPolicy';
 import type { LoadedInstruction } from './instructionLoader';
 import { RepairLoop } from './repairLoop';
-import { buildAskFinalResponse, buildCodeFinalResponse, buildPlanFinalResponse, validationStatus } from './responsePolicy';
+import { buildAskFinalResponse, buildCodeFinalResponse, buildCodeProposalResponse, buildPlanFinalResponse, validationStatus } from './responsePolicy';
 import { CodeAgentLoop, buildCodeSystemPrompt, buildCodeSeedMessage, type CodeAgentLoopOptions } from './codeAgentLoop';
 import { ToolExecutor, createRunRevertCheckpoint, type CodeAgentContext, type LedgerEntry } from './toolExecutor';
 import { ToolBudget } from './toolBudget';
@@ -246,6 +246,7 @@ export class AgentRuntime {
       emit,
       emitRuntime,
       ledger,
+      proposedFiles: new Set<string>(),
       readFiles: new Set(context.files.map((file) => file.path)),
       artifacts: new Map(),
       checkpoints: [],
@@ -267,6 +268,18 @@ export class AgentRuntime {
     );
 
     const loopResult = await loop.run(ctx, loopOptions);
+
+    // Confirm mode (suggest_only): the loop proposed diffs but wrote nothing. Surface them for
+    // accept/reject instead of validating/fixing unchanged code or reporting an autonomy failure.
+    if (ledger.size === 0 && ctx.proposedFiles.size > 0) {
+      const proposed = Array.from(ctx.proposedFiles);
+      await emitRuntime('plan.updated', { phase: 'awaiting_patch_review' });
+      const proposalAnswer = buildCodeProposalResponse(request.projectName, proposed, loopResult.summary);
+      await streamAnswer(proposalAnswer, emit, emitRuntime);
+      await emitRuntime('run.completed', { status: 'awaiting_review', phase: 'awaiting_patch_review', filesChanged: proposed });
+      emit({ type: 'agent_done', summary: proposalAnswer, filesChanged: proposed });
+      return;
+    }
 
     await emitRuntime('plan.updated', { phase: 'awaiting_patch_review' });
     let validationRuns = await this.runAndEmitValidation(root, runId, validationCommands, signal, emit, emitRuntime);

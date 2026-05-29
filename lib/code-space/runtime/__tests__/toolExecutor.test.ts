@@ -31,6 +31,7 @@ function makeContext(events: AgentSSEEvent[], autonomy: AutonomyLevel = 'auto_sa
     },
     emitRuntime: async () => {},
     ledger: new Map(),
+    proposedFiles: new Set(),
     readFiles: new Set(),
     artifacts: new Map(),
     checkpoints: [],
@@ -93,5 +94,7 @@ describe('ToolExecutor.edit_file', () => {
     expect(await readFile(path.join(tmpDir, 'a.ts'), 'utf8')).toBe('export const x = 1;\n');
     expect(events.some((event) => event.type === 'diff_proposed')).toBe(true);
     expect(events.some((event) => event.type === 'file_applied')).toBe(false);
+    expect(ctx.proposedFiles.has('a.ts')).toBe(true);
+    expect(ctx.ledger.size).toBe(0);
   });
 });

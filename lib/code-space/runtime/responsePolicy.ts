@@ -28,6 +28,25 @@ export function buildCodeFinalResponse(input: CodeResponseInput): string {
   return buildCodeCompletionResponse(input);
 }
 
+/**
+ * Confirm-mode (suggest_only) completion: the agent proposed edits but wrote nothing.
+ * The summary points the user at the accept/reject panel rather than claiming applied work.
+ */
+export function buildCodeProposalResponse(projectName: string, proposedFiles: string[], summary?: string): string {
+  const lead = summary?.trim() ? `${summary.trim().replace(/\s+/g, ' ').slice(0, 240)} ` : '';
+  const list = proposedFiles.slice(0, 5).map((path) => `\`${path}\``);
+  const suffix = proposedFiles.length > list.length ? `, and ${proposedFiles.length - list.length} more` : '';
+  const count = `${proposedFiles.length} file${proposedFiles.length === 1 ? '' : 's'}`;
+  return `${lead}Proposed changes to ${count} in ${projectName}: ${formatList(list)}${suffix}. Review them in the Code changes panel and accept to apply, or reject to discard — nothing was written to disk in Confirm mode.`;
+}
+
+function formatList(items: string[]): string {
+  if (!items.length) return '';
+  if (items.length === 1) return items[0] ?? '';
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(', ')}, and ${items[items.length - 1]}`;
+}
+
 export function validationStatus(results: RunValidationResult[]): 'passed' | 'failed' | 'skipped' {
   if (!results.length) return 'skipped';
   if (results.some((result) => result.status === 'failed')) return 'failed';

@@ -1531,6 +1531,10 @@ export function CodeSpaceWorkspace() {
           openTabs,
           mode: requestedMode,
           toolBudget: sessionWithPrompt.toolBudget,
+          // Confirm mode must always surface the accept/reject diff panel and never write to disk on
+          // its own, so it runs the loop in suggest_only autonomy (edits become pending diff_proposed
+          // events). Auto mode applies edits during the loop with checkpoints.
+          autonomy: executionPolicyRef.current === 'auto' ? 'auto_safe_tools' : 'suggest_only',
           enableThinking,
           attachments: attachments.map((mention) => ({
             kind: mention.type,

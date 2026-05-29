@@ -50,6 +50,8 @@ export interface CodeAgentContext {
   emitRuntime: (type: AgentEventType, payload: unknown) => Promise<void>;
   /** Original → latest content per touched path; powers the final cumulative diff. */
   ledger: Map<string, LedgerEntry>;
+  /** Paths proposed (but NOT written) under suggest_only autonomy — pending user accept/reject. */
+  proposedFiles: Set<string>;
   /** Files the model has read this run. */
   readFiles: Set<string>;
   /** Artifacts produced during the run, keyed by artifactId. */
@@ -390,6 +392,7 @@ export class ToolExecutor {
           unifiedDiff: preview.unifiedDiff,
           autoApplied: false,
         });
+        ctx.proposedFiles.add(normalized);
         if (decision.approvalRequired) await ctx.emitRuntime('tool.approval.required', { tool: 'edit_file', path: normalized, reason: decision.reason });
         continue;
       }
