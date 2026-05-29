@@ -502,7 +502,7 @@ export function CodeSpaceWorkspace() {
   }, []);
 
   const appendSessionMessage = useCallback(
-    (sessionId: string, message: { id: string; role: 'user' | 'assistant' | 'system' | 'tool'; content: string; createdAt: number }) => {
+    (sessionId: string, message: { id: string; role: CodeSpaceMessage['role']; content: string; createdAt: number }) => {
       patchSession(sessionId, (session) => ({
         ...session,
         messages: [...session.messages, message],
@@ -1456,8 +1456,10 @@ export function CodeSpaceWorkspace() {
     };
 
     const openTabs = tabs.map((tab) => tab.path).filter((path): path is string => Boolean(path));
+    const usesCustomModel =
+      provider.provider === 'foundry' || provider.provider === 'deepseek' || provider.provider === 'nvidia';
     const model =
-      provider.provider === 'foundry'
+      usesCustomModel
         ? (provider.customModel ?? provider.model)
         : provider.provider === 'local'
           ? (provider.localModelName ?? '')
@@ -1475,6 +1477,7 @@ export function CodeSpaceWorkspace() {
         : message,
     );
     let liveAssistantMessageId: string | null = null;
+    let liveReasoningMessageId: string | null = null;
     const liveToolMessageIds = new Map<string, string>();
 
     // Fire-and-forget: auto-name the session on the first message, in parallel with the agent run.
@@ -1572,6 +1575,58 @@ export function CodeSpaceWorkspace() {
               } else {
                 setPendingDiffs((prev) => [...prev, diff]);
               }
+            } else if (event.type === 'file_applied') {
+              // The agent already wrote this file to disk during its loop. Do NOT re-apply;
+              // just record it into the change ledger for the "Code changes" card + revert, and refresh git.
+              const appliedAt = Date.now();
+              setAgentChangesets((current) => [
+                ...current.filter((item) => item.filePath !== event.filePath),
+                {
+                  filePath: event.filePath,
+                  beforeContent: event.beforeContent,
+                  afterContent: event.afterContent,
+                  deleted: event.deleted,
+                  acceptedAt: appliedAt,
+                },
+              ]);
+              patchSession(sessionWithPrompt.id, (current) => ({
+                ...current,
+                filesChanged: Array.from(new Set([...current.filesChanged, event.filePath])),
+                agentChangesets: [
+                  ...current.agentChangesets.filter((item) => item.filePath !== event.filePath),
+                  {
+                    filePath: event.filePath,
+                    beforeContent: event.beforeContent,
+                    afterContent: event.afterContent,
+                    deleted: event.deleted,
+                    acceptedAt: appliedAt,
+                  },
+                ],
+                updatedAt: Date.now(),
+              }));
+              if (activeProject) void refreshGitStatus(activeProject);
+            } else if (event.type === 'agent_reasoning_delta') {
+              if (!liveReasoningMessageId) {
+                liveReasoningMessageId = nowId('msg');
+                appendSessionMessage(sessionWithPrompt.id, {
+                  id: liveReasoningMessageId,
+                  role: 'reasoning',
+                  content: event.delta,
+                  createdAt: Date.now(),
+                });
+              } else {
+                updateSessionMessage(sessionWithPrompt.id, liveReasoningMessageId, (message) => ({
+                  ...message,
+                  content: `${message.content}${event.delta}`,
+                }));
+              }
+            } else if (event.type === 'tool_budget_warning') {
+              appendSessionMessage(sessionWithPrompt.id, {
+                id: nowId('msg'),
+                role: 'system',
+                content: `⚠ Approaching tool budget (${event.used}/${event.max}). The agent will try to converge.`,
+                createdAt: Date.now(),
+              });
             } else if (event.type === 'plan_markdown_created') {
               patchSession(sessionWithPrompt.id, (current) => ({
                 ...current,
@@ -2411,7 +2466,11 @@ export function CodeSpaceWorkspace() {
             toolBudget={activeSession?.toolBudget ?? 50}
             pendingDiffs={pendingDiffs}
             appliedDiffs={agentChangesets}
-            providerSummary={`${provider.provider}/${provider.provider === 'foundry' ? provider.customModel ?? provider.model : provider.model}`}
+            providerSummary={`${provider.provider}/${
+              provider.provider === 'foundry' || provider.provider === 'deepseek' || provider.provider === 'nvidia'
+                ? provider.customModel ?? provider.model
+                : provider.model
+            }`}
             agentMode={agentMode}
             executionPolicy={executionPolicy}
             onExecutionPolicyChange={handleExecutionPolicyChange}

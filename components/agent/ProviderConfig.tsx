@@ -7,6 +7,8 @@ import {
   ANTHROPIC_MODELS,
   GEMINI_MODELS,
   GROK_MODELS,
+  MISTRAL_MODELS,
+  DEEPSEEK_MODELS,
   getProviderDefaultModel,
 } from '@/lib/agent/utils/provider-models';
 import type { ProviderId } from '@/lib/agent/providers/types';
@@ -16,6 +18,14 @@ const PROVIDERS: Array<{ id: ProviderId; label: string; envVar: string; note: st
   { id: 'anthropic', label: 'Anthropic', envVar: 'CLAUDE_API_KEY', note: 'Models degrade in capability from top to bottom.' },
   { id: 'gemini', label: 'Gemini', envVar: 'GEMINI_API_KEY', note: 'Models degrade in capability from top to bottom.' },
   { id: 'grok', label: 'xAI Grok', envVar: 'GROK_API_KEY', note: 'Fast multi-modal chat with Grok-family defaults.' },
+  { id: 'mistral', label: 'Mistral', envVar: 'MISTRAL_API_KEY', note: 'High-throughput Mistral models with the same chat contract.' },
+  {
+    id: 'deepseek',
+    label: 'DeepSeek',
+    envVar: 'DEEPSEEK_API_KEY',
+    note: 'Pick a DeepSeek model; endpoint defaults to https://api.deepseek.com.',
+  },
+  { id: 'nvidia', label: 'NVIDIA NIM', envVar: 'NVIDIA_API_KEY', note: 'Endpoint + model required (NIM API).' },
   { id: 'foundry', label: 'Azure Foundry', envVar: 'FOUNDRY_API_KEY', note: 'Provide the deployment name for your custom model.' },
   { id: 'local', label: 'Local Model', envVar: '', note: 'OpenAI-compatible API — works with Ollama, LM Studio, llama.cpp, Jan.' },
 ];
@@ -26,7 +36,11 @@ const MODELS_BY_PROVIDER: Record<string, readonly string[]> = {
   gemini: GEMINI_MODELS,
   foundry: [],
   grok: GROK_MODELS,
+  mistral: MISTRAL_MODELS,
+  deepseek: DEEPSEEK_MODELS,
 };
+
+const CUSTOM_ENDPOINT_PROVIDERS: ProviderId[] = ['foundry', 'nvidia'];
 
 function LocalModelTestButton({ baseUrl, apiKey }: { baseUrl: string; apiKey: string }) {
   const [status, setStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
@@ -87,6 +101,15 @@ export function ProviderConfig() {
   const setProvider = useDiagramStore((s) => s.setProvider);
   const [validating, setValidating] = useState(false);
   const [validation, setValidation] = useState<{ ok: boolean; error?: string } | null>(null);
+  const showModelSelect = !CUSTOM_ENDPOINT_PROVIDERS.includes(provider.provider) && provider.provider !== 'local';
+  const customModelPlaceholder =
+    provider.provider === 'nvidia' ? 'e.g. meta/llama-3.1-70b-instruct' : 'e.g. my-gpt-deployment';
+  const endpointPlaceholder =
+    provider.provider === 'foundry'
+      ? 'https://<your-resource>.openai.azure.com'
+      : 'https://nvidia.com';
+  const summaryUsesCustomModel = CUSTOM_ENDPOINT_PROVIDERS.includes(provider.provider);
+  const summaryModel = summaryUsesCustomModel ? provider.customModel ?? '?' : provider.model;
 
   const onProviderChange = (id: typeof provider.provider) => {
     setProvider({ provider: id, model: getProviderDefaultModel(id) });
@@ -145,7 +168,7 @@ export function ProviderConfig() {
         ))}
       </div>
 
-      {provider.provider !== 'foundry' && provider.provider !== 'local' && (
+      {showModelSelect && (
         <div>
           <div className="mb-1 text-[10px] uppercase tracking-widest text-ink-400">Model</div>
           <select
@@ -165,27 +188,40 @@ export function ProviderConfig() {
         </div>
       )}
 
-      {provider.provider === 'foundry' && (
+      {CUSTOM_ENDPOINT_PROVIDERS.includes(provider.provider) && (
         <>
           <div>
-            <div className="mb-1 text-[10px] uppercase tracking-widest text-ink-400">Endpoint</div>
-            <input
-              value={provider.endpoint ?? ''}
-              onChange={(e) => setProvider({ endpoint: e.target.value })}
-              placeholder="https://<your-resource>.openai.azure.com"
-              className="w-full rounded-md border border-ink-700 bg-ink-900 px-2 py-1.5"
-            />
+          <div className="mb-1 text-[10px] uppercase tracking-widest text-ink-400">Endpoint</div>
+          <input
+            value={provider.endpoint ?? ''}
+            onChange={(e) => setProvider({ endpoint: e.target.value })}
+            placeholder={endpointPlaceholder}
+            className="w-full rounded-md border border-ink-700 bg-ink-900 px-2 py-1.5"
+          />
+        </div>
+        <div>
+          <div className="mb-1 text-[10px] uppercase tracking-widest text-ink-400">
+            {provider.provider === 'foundry'
+              ? 'Deployment (model name)'
+              : provider.provider === 'deepseek'
+              ? 'DeepSeek model name'
+              : 'Model name'}
           </div>
-          <div>
-            <div className="mb-1 text-[10px] uppercase tracking-widest text-ink-400">Deployment (model name)</div>
-            <input
-              value={provider.customModel ?? ''}
-              onChange={(e) => setProvider({ customModel: e.target.value, model: e.target.value })}
-              placeholder="e.g. my-gpt-deployment"
-              className="w-full rounded-md border border-ink-700 bg-ink-900 px-2 py-1.5"
-            />
+          <input
+            value={provider.customModel ?? provider.model}
+            onChange={(e) => setProvider({ customModel: e.target.value, model: e.target.value })}
+            placeholder={customModelPlaceholder}
+            className="w-full rounded-md border border-ink-700 bg-ink-900 px-2 py-1.5"
+          />
+          <div className="mt-1 text-[10px] text-ink-400">
+            {provider.provider === 'foundry'
+              ? 'Point to an Azure deployment (e.g. my-gpt-deployment).'
+              : provider.provider === 'deepseek'
+              ? 'Enter the DeepSeek model you want to use (e.g. deepseek-v4-pro).'
+              : 'Provide the NVIDIA NIM model path (e.g. meta/llama-3.1-70b-instruct).'}
           </div>
-        </>
+        </div>
+      </>
       )}
 
       {provider.provider === 'local' && (

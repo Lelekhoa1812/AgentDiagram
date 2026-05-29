@@ -62,11 +62,8 @@ export function buildCodeCompletionResponse(input: CodeResponseInput): string {
       `Updated ${input.files.length} file${input.files.length === 1 ? '' : 's'} in ${input.projectName}: ${formatList(fileList)}${suffix}. Code changes are written through the checkpointed patch pipeline when accepted or auto-apply succeeds.`,
     );
   } else {
-    // Root Cause vs Logic: empty Code responses should only appear in defensive unit tests or hard
-    // provider failures. The runtime now creates a recovery artifact instead of ending with a zero-file
-    // completion, so this copy must not encourage users to attach files manually or accept a no-op run.
     lines.push(
-      `Code mode did not receive a patch artifact for ${input.projectName}. The runtime should continue by recalling more repository context or creating an autonomous recovery artifact rather than treating this as complete.`,
+      `No code changes were applied in ${input.projectName}. The agent could not complete the task autonomously — see the summary above for what it found and why it stopped.`,
     );
   }
 

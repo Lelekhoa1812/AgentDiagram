@@ -173,6 +173,9 @@ AgentDiagram supports multiple providers and lets you switch between them in the
 | Anthropic | `CLAUDE_API_KEY` | `opus-4.7` |
 | Gemini | `GEMINI_API_KEY` | `gemini-3.1-pro` |
 | Grok (xAI) | `GROK_API_KEY` | `grok-3` |
+| Mistral | `MISTRAL_API_KEY` | `mistral-large` |
+| DeepSeek NLU | `DEEPSEEK_API_KEY` | `deepseek-v4-pro` |
+| NVIDIA NIM | `NVIDIA_API_KEY` | `meta/llama-3.1-70b-instruct` |
 | Azure AI Foundry | `FOUNDRY_API_KEY` | custom deployment name |
 
 Optional model overrides are also supported through `.env.local`:
@@ -181,13 +184,19 @@ Optional model overrides are also supported through `.env.local`:
 - `CLAUDE_MODEL`
 - `GEMINI_MODEL`
 - `GROK_MODEL`
+- `MISTRAL_MODEL`
+- `DEEPSEEK_MODEL`
+- `NVIDIA_MODEL`
 - `FOUNDRY_MODEL`
 
 Additional provider settings:
 
+- `MISTRAL_ENDPOINT` - override the Mistral base URL (default `https://api.mistral.ai/v1`).
+- `DEEPSEEK_ENDPOINT` - override the DeepSeek base URL (default `https://api.deepseek.com`).
+- `NVIDIA_ENDPOINT` - override the NVIDIA NIM endpoint (default `https://nvidia.com`).
 - `GROK_API_BASE` - override the Grok base URL when needed.
 - `FOUNDRY_ENDPOINT` - required Azure AI Foundry endpoint.
-- `AGENTDIAGRAM_DEFAULT_PROVIDER` - choose the default provider shown in the UI.
+- `AGENTDIAGRAM_DEFAULT_PROVIDER` - choose the default provider shown in the UI (`openai`, `anthropic`, `gemini`, `grok`, `mistral`, `deepseek`, `nvidia`, `foundry`).
 
 Provider details, retry behavior, and validation flow are documented in [docs/providers.md](docs/providers.md).
 
@@ -206,6 +215,15 @@ The most commonly used settings are listed below. See [docs/local-setup.md](docs
 | `GROK_API_KEY` | xAI Grok provider key |
 | `GROK_MODEL` | Optional Grok model override |
 | `GROK_API_BASE` | Optional Grok API base URL |
+| `MISTRAL_API_KEY` | Mistral provider key |
+| `MISTRAL_MODEL` | Optional Mistral model override |
+| `MISTRAL_ENDPOINT` | Optional Mistral endpoint URL |
+| `DEEPSEEK_API_KEY` | DeepSeek provider key |
+| `DEEPSEEK_MODEL` | DeepSeek model override |
+| `DEEPSEEK_ENDPOINT` | DeepSeek endpoint URL |
+| `NVIDIA_API_KEY` | NVIDIA NIM provider key |
+| `NVIDIA_MODEL` | NVIDIA model override |
+| `NVIDIA_ENDPOINT` | NVIDIA NIM endpoint URL |
 | `FOUNDRY_API_KEY` | Azure AI Foundry provider key |
 | `FOUNDRY_ENDPOINT` | Azure AI Foundry endpoint URL |
 | `FOUNDRY_MODEL` | Azure deployment name |

@@ -9,7 +9,7 @@ The multi-layer subsystem is a set of cooperating modules that let the applicati
 1. One **Overview** diagram — all layers shown as top-level DSL groups with representative surface nodes and cross-layer edges between them.
 2. One **sub-diagram per layer** — internal components of that layer at full detail, with one-hop boundary nodes from adjacent layers shown as dashed pass-throughs.
 
-The AI provider system is a five-adapter abstraction (`openai`, `anthropic`, `gemini`, `grok`, `foundry`) behind a single `Provider` interface. Every adapter supports plain chat calls and structured JSON output. All calls are wrapped in an infinite-retry loop with exponential backoff, Retry-After header respect, and per-attempt UI notifications via a `RetryListener` callback.
+The AI provider system is an eight-adapter abstraction (`openai`, `anthropic`, `gemini`, `grok`, `mistral`, `deepseek`, `nvidia`, `foundry`) behind a single `Provider` interface. Every adapter supports plain chat calls and structured JSON output. All calls are wrapped in an infinite-retry loop with exponential backoff, Retry-After header respect, and per-attempt UI notifications via a `RetryListener` callback.
 
 All pipelines communicate with their callers via **Server-Sent Events (SSE)** streamed over HTTP. This allows the UI to animate progress in real time while the LLM calls are in flight.
 
@@ -873,6 +873,9 @@ export const PROVIDER_ENV: Record<ProviderId, string> = {
   gemini: 'GEMINI_API_KEY',
   foundry: 'FOUNDRY_API_KEY',
   grok: 'GROK_API_KEY',
+  mistral: 'MISTRAL_API_KEY',
+  deepseek: 'DEEPSEEK_API_KEY',
+  nvidia: 'NVIDIA_API_KEY',
 };
 ```
 

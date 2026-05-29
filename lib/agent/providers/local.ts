@@ -4,7 +4,17 @@
  * an OpenAI-compatible /v1 endpoint.
  */
 import OpenAI from 'openai';
-import type { Provider, ChatParams, ValidationResult, ProviderConfig } from './types';
+import type {
+  AssistantTurn,
+  ChatParams,
+  ChatWithToolsParams,
+  Provider,
+  ProviderConfig,
+  ValidationResult,
+} from './types';
+import { resolveMaxTokens, withMaxTokenKeyRetry } from './maxTokens';
+import { buildOpenAIToolMessages, buildOpenAIToolSpecs, parseOpenAIToolResponse } from './openaiCompat';
+import { runToolShimTurn } from './toolShim';
 
 export class LocalModelProvider implements Provider {
   id = 'local' as const;
@@ -49,5 +59,40 @@ export class LocalModelProvider implements Provider {
       signal: params.signal,
     });
     return res.choices[0]?.message?.content ?? '';
+  }
+
+  async chatWithTools(params: ChatWithToolsParams): Promise<AssistantTurn> {
+    const maxTokens = resolveMaxTokens({ provider: 'local', requested: params.maxTokens });
+    if (params.tools.length) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const baseBody: any = {
+          model: params.model,
+          messages: buildOpenAIToolMessages(params.messages),
+          tools: buildOpenAIToolSpecs(params.tools),
+          tool_choice:
+            params.toolChoice === 'required' ? 'required' : params.toolChoice === 'none' ? 'none' : 'auto',
+        };
+        const res = await withMaxTokenKeyRetry(maxTokens, (key) =>
+          this.client.chat.completions.create({ ...baseBody, [key]: maxTokens }, { signal: params.signal }),
+        );
+        return parseOpenAIToolResponse(res);
+      } catch {
+        // Tool-less local servers reject the `tools` field; fall back to the prompt shim.
+      }
+    }
+    return runToolShimTurn(params.messages, params.tools, async (flattened) => {
+      const res = await withMaxTokenKeyRetry(maxTokens, (key) =>
+        this.client.chat.completions.create(
+          {
+            model: params.model,
+            messages: flattened.map((m) => ({ role: m.role as 'system' | 'user' | 'assistant', content: m.content })),
+            [key]: maxTokens,
+          },
+          { signal: params.signal },
+        ),
+      );
+      return res.choices[0]?.message?.content ?? '';
+    });
   }
 }

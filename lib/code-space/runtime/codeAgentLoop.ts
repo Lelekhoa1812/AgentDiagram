@@ -1,0 +1,246 @@
+import type { AssistantTurn, ChatMessage, ProviderSession, ToolSpec } from '@/lib/agent/providers';
+import { chatTurnWithTools } from '@/lib/agent/providers';
+import type { ContextGraphResult } from './contextGraphEngine';
+import { listRepositoryFiles } from './repoMap';
+import { ToolBudget, isReadOnlyTool } from './toolBudget';
+import { CODE_MODE_TOOL_SPECS, ToolExecutor, type CodeAgentContext } from './toolExecutor';
+
+export interface CodeAgentLoopResult {
+  /** attempt_completion was called (the model declared the task done). */
+  completed: boolean;
+  /** attempt_completion success flag; false on dead-ends or forced stops. */
+  success: boolean;
+  /** Final summary text the model produced (or a forced-stop reason). */
+  summary: string;
+  stopReason: 'completed' | 'provider_end' | 'turns_exhausted' | 'aborted';
+}
+
+export interface CodeAgentLoopOptions {
+  session: ProviderSession;
+  budget: ToolBudget;
+  tools?: ToolSpec[];
+  maxTokens?: number;
+  signal?: AbortSignal;
+}
+
+const MAX_INDEX_ENTRIES = 800;
+const MAX_EVIDENCE_FILES = 24;
+const MAX_EVIDENCE_CHARS = 16_000;
+
+/**
+ * The agentic Code-mode loop. Holds a single conversation thread that the model
+ * drives with native tool calls (read → search → edit → run → fix). Read-only
+ * exploration is free; only mutating tools spend the budget. The same instance is
+ * reused by the repair loop so failures feed back into the live thread.
+ */
+export class CodeAgentLoop {
+  readonly messages: ChatMessage[] = [];
+  private budgetWarned = false;
+
+  constructor(private readonly executor: ToolExecutor = new ToolExecutor()) {}
+
+  /** Seed the thread with the system contract and the task brief. */
+  seed(systemPrompt: string, userPrompt: string): void {
+    this.messages.length = 0;
+    this.messages.push({ role: 'system', content: systemPrompt });
+    this.messages.push({ role: 'user', content: userPrompt });
+  }
+
+  /** Run the loop from the current thread state until the model is quiescent. */
+  async run(ctx: CodeAgentContext, opts: CodeAgentLoopOptions): Promise<CodeAgentLoopResult> {
+    return this.continueUntilQuiescent(ctx, opts);
+  }
+
+  /** Inject feedback (e.g. validation failures) and continue the live thread. */
+  async continueWith(feedback: string, ctx: CodeAgentContext, opts: CodeAgentLoopOptions): Promise<CodeAgentLoopResult> {
+    this.messages.push({ role: 'user', content: feedback });
+    return this.continueUntilQuiescent(ctx, opts);
+  }
+
+  private async continueUntilQuiescent(ctx: CodeAgentContext, opts: CodeAgentLoopOptions): Promise<CodeAgentLoopResult> {
+    const tools = opts.tools ?? CODE_MODE_TOOL_SPECS;
+
+    while (true) {
+      if (opts.signal?.aborted) return { completed: false, success: false, summary: 'Run aborted.', stopReason: 'aborted' };
+      if (opts.budget.turnsExhausted()) {
+        return { completed: false, success: false, summary: 'Reached the maximum number of agent turns before completing the task.', stopReason: 'turns_exhausted' };
+      }
+
+      if (opts.budget.nearExhaustion() && !this.budgetWarned) {
+        this.budgetWarned = true;
+        await ctx.emit({ type: 'tool_budget_warning', used: opts.budget.mutationsUsed, max: opts.budget.max });
+        this.messages.push({
+          role: 'user',
+          content:
+            'You are close to the tool budget. Stop exploring, make only the edits strictly required to finish the task, run validation once, and then call attempt_completion. Do not start new investigations.',
+        });
+      }
+
+      opts.budget.recordTurn();
+      const turn = await chatTurnWithTools(opts.session, this.messages, tools, {
+        signal: opts.signal,
+        toolChoice: 'auto',
+        maxTokens: opts.maxTokens,
+      });
+
+      await this.recordAssistantTurn(turn, ctx);
+
+      if (!turn.toolCalls.length) {
+        return {
+          completed: false,
+          success: turn.stopReason === 'end_turn',
+          summary: turn.text || 'The model ended its turn without calling a tool or producing a summary.',
+          stopReason: 'provider_end',
+        };
+      }
+
+      const completion = await this.executeToolCalls(turn, ctx, opts);
+      if (completion) return completion;
+    }
+  }
+
+  private async recordAssistantTurn(turn: AssistantTurn, ctx: CodeAgentContext): Promise<void> {
+    this.messages.push({ role: 'assistant', content: turn.text, toolCalls: turn.toolCalls });
+    if (turn.text.trim()) {
+      // In-loop model prose is INTERNAL reasoning — never the final answer.
+      await ctx.emit({ type: 'agent_reasoning_delta', delta: turn.text });
+    }
+  }
+
+  /**
+   * Execute every tool call in the turn, append one `tool` message answering all of
+   * them (providers require each call answered), and return a completion result if
+   * the model called attempt_completion.
+   */
+  private async executeToolCalls(
+    turn: AssistantTurn,
+    ctx: CodeAgentContext,
+    opts: CodeAgentLoopOptions,
+  ): Promise<CodeAgentLoopResult | null> {
+    const toolResults: ChatMessage['toolResults'] = [];
+    let completion: CodeAgentLoopResult | null = null;
+
+    for (const call of turn.toolCalls) {
+      if (call.name === 'attempt_completion') {
+        const success = call.input?.success !== false;
+        const summary = typeof call.input?.summary === 'string' ? call.input.summary : '';
+        completion = { completed: true, success, summary: summary || (success ? 'Task completed.' : 'Task could not be completed.'), stopReason: 'completed' };
+        toolResults.push({ toolCallId: call.id, content: 'Completion recorded.' });
+        continue;
+      }
+
+      await ctx.emit({ type: 'tool_start', toolCallId: call.id, tool: call.name, input: call.input });
+      await ctx.emitRuntime('tool.started', { tool: call.name, input: call.input });
+      const startedAt = Date.now();
+
+      const mutating = !isReadOnlyTool(call.name);
+      let result: { content: string; isError?: boolean };
+      if (mutating && opts.budget.mutationBudgetExhausted()) {
+        result = { content: `Mutation budget exhausted (${opts.budget.mutationsUsed}/${opts.budget.max}). Stop editing and call attempt_completion with what you have.`, isError: true };
+      } else {
+        if (mutating) opts.budget.charge(call.name);
+        result = await this.executor.execute(call, ctx);
+      }
+
+      await ctx.emit({ type: 'tool_result', toolCallId: call.id, tool: call.name, output: result.content, durationMs: Date.now() - startedAt, error: result.isError ? result.content : undefined });
+      await ctx.emitRuntime(result.isError ? 'tool.failed' : 'tool.completed', { tool: call.name });
+      toolResults.push({ toolCallId: call.id, content: result.content, isError: result.isError });
+    }
+
+    this.messages.push({ role: 'tool', content: '', toolResults });
+    return completion;
+  }
+}
+
+/** The Cursor / Claude-Code-style operating contract for Code mode. */
+export function buildCodeSystemPrompt(projectName: string, instructionFiles: string[]): string {
+  return [
+    `You are Code Space, an autonomous software engineer working in the "${projectName}" repository.`,
+    'Operate like a senior engineer pairing in a real editor: investigate first, then make precise edits, then prove they work.',
+    '',
+    'Workflow you must follow:',
+    '1. Understand the task. Read the relevant files with read_file and search the repo with search_text before editing anything. Reading is free — explore thoroughly; never guess.',
+    '2. Make focused edits with edit_file using exact SEARCH/REPLACE blocks. The "search" text must match the current file content exactly and uniquely. Re-read a file if an edit is rejected, then retry with a corrected block.',
+    '3. After editing, run the project validation commands with run_command (typecheck, lint, tests, build as available). Read the output.',
+    '4. If validation fails, read the failing output, fix the root cause with more edits, and run validation again. Repeat until it passes or you are confident no further automated fix is possible.',
+    '5. When the work is done (or genuinely cannot be done), call attempt_completion with an honest success flag and a concise summary of what changed.',
+    '',
+    'Hard rules:',
+    '- Never fabricate a result. If you cannot complete the task, call attempt_completion with success=false and explain why. Do NOT write planning notes, recovery files, or markdown summaries into the workspace as a substitute for real code.',
+    '- Only edit files that the task requires. Do not refactor unrelated code, add speculative abstractions, or leave half-finished work.',
+    '- Prefer the smallest change that correctly solves the problem.',
+    '- Edits are applied to disk immediately and checkpointed, so they are reversible. Use restore_checkpoint if an edit made things worse.',
+    '- Your prose between tool calls is internal reasoning shown only as collapsed activity. The user sees the applied diffs, validation results, and your final attempt_completion summary.',
+    instructionFiles.length ? `\nProject instruction files in effect: ${instructionFiles.join(', ')}. Honor their conventions.` : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+/** The opening task brief: the request, ranked evidence with content, the file index, and validation commands. */
+export async function buildCodeSeedMessage(
+  root: string,
+  prompt: string,
+  context: ContextGraphResult,
+  validationCommands: Array<{ command: string; args: string[]; reason: string }>,
+): Promise<string> {
+  const evidence = selectEvidenceFiles(context, prompt)
+    .map((file) => {
+      const body = file.content.length > MAX_EVIDENCE_CHARS ? `${file.content.slice(0, MAX_EVIDENCE_CHARS)}\n[TRUNCATED — read_file for the rest]` : file.content;
+      return [`--- FILE ${file.path} (${file.summary}) ---`, body, file.truncated ? '[TRUNCATED]' : ''].filter(Boolean).join('\n');
+    })
+    .join('\n\n');
+
+  const repositoryFiles = await listRepositoryFiles(root);
+  const fileIndex = repositoryFiles.slice(0, MAX_INDEX_ENTRIES).join('\n');
+  const validation = validationCommands.length
+    ? validationCommands.map((command) => `- ${[command.command, ...command.args].join(' ')} (${command.reason})`).join('\n')
+    : '- No validation command auto-detected. After editing, choose an appropriate check (e.g. run the test or typecheck command) with run_command.';
+
+  return [
+    'Task:',
+    prompt,
+    '',
+    'You will be evaluated by running these validation commands after your changes:',
+    validation,
+    '',
+    'Repository file index (read any of these with read_file; this is not the full tree if truncated):',
+    fileIndex || '(empty)',
+    '',
+    'Initial evidence already gathered for you (read more as needed):',
+    evidence || '(none — start by exploring with list_files / search_text)',
+  ].join('\n');
+}
+
+/**
+ * Rank the context-graph evidence so the most task-relevant files seed the thread
+ * first. Moved here from the old patch planner; explicit/attached files and files
+ * matching the task domain are boosted.
+ */
+export function selectEvidenceFiles(context: ContextGraphResult, prompt: string, limit = MAX_EVIDENCE_FILES): ContextGraphResult['files'] {
+  const lowerPrompt = prompt.toLowerCase();
+  const isCodeSpacePageWork = /\bcode\s*space\b/.test(lowerPrompt) && /\b(page|workspace|sidebar|editor|diff|patch|accept|reject|changes?)\b/.test(lowerPrompt);
+  const isAgentCapabilityWork = /\b(agent|tool|grep|shell|terminal|context|evidence|explor|self[-\s]?explor|analy[sz]e?|harness|workflow|patch|planner|runtime|apply|edit)\b/.test(lowerPrompt);
+
+  const weighted = context.files.map((file, originalIndex) => {
+    const lowerPath = file.path.toLowerCase();
+    let weight = file.score;
+    if (file.reasons.some((reason) => reason === 'explicit_file' || reason === 'explicit_folder' || reason === 'open_tab' || reason === 'current_editor')) weight += 1000;
+    if (isCodeSpacePageWork && /^components\/code-space\//.test(lowerPath)) weight += 500;
+    if (isCodeSpacePageWork && /components\/code-space\/(codespaceworkspace|agentpanel)/i.test(file.path)) weight += 450;
+    if (isCodeSpacePageWork && /components\/code-space\/__tests__/.test(lowerPath)) weight += 260;
+    if (isCodeSpacePageWork && lowerPath === 'app/page.tsx') weight += 220;
+    if (isCodeSpacePageWork && /patch|diff|terminal|toolregistry|agentruntime|permissionmanager/.test(lowerPath)) weight += 120;
+    if (isAgentCapabilityWork && /lib\/code-space\/runtime\/(agentruntime|contextgraphengine|toolregistry|terminalpolicy|permissionmanager|terminalrunner)/.test(lowerPath)) weight += 360;
+    if (isAgentCapabilityWork && /app\/api\/code-space\/(agent|terminal)/.test(lowerPath)) weight += 300;
+    if (/(__tests__|\.test\.|\.spec\.)/.test(lowerPath)) weight += 80;
+    if (file.reasons.includes('project_rule')) weight += 180;
+    if (file.reasons.includes('package_config')) weight += 80;
+    return { file, weight, originalIndex };
+  });
+
+  return weighted
+    .sort((a, b) => b.weight - a.weight || a.originalIndex - b.originalIndex)
+    .slice(0, Math.max(1, limit))
+    .map((item) => item.file);
+}

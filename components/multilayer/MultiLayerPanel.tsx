@@ -64,7 +64,10 @@ export function MultiLayerPanel() {
         headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             provider: provider.provider,
-            model: provider.provider === 'foundry' ? provider.customModel ?? '' : provider.model,
+            model:
+              provider.provider === 'foundry' || provider.provider === 'deepseek' || provider.provider === 'nvidia'
+                ? provider.customModel ?? ''
+                : provider.model,
             apiKey: provider.apiKey || undefined,
             endpoint: provider.endpoint || undefined,
             rootPath,
@@ -189,7 +192,11 @@ export function MultiLayerPanel() {
                 Ready · <span className="font-mono text-ink-200">{scanInfo.resolved}</span>{' '}
                 ({scanInfo.fileCount} files)
                 {ignoredFolders.length ? ` · ${ignoredFolders.length} ignored folder${ignoredFolders.length === 1 ? '' : 's'}` : ''} · provider {provider.provider}/
-                {provider.provider === 'foundry' ? provider.customModel ?? '?' : provider.model}
+                {(provider.provider === 'foundry' ||
+                  provider.provider === 'deepseek' ||
+                  provider.provider === 'nvidia'
+                  ? provider.customModel ?? '?'
+                  : provider.model)}
                 {quickMode ? <> · <span className="text-accent">Quick Mode</span></> : null}
                 {maxMode ? <> · <span className="text-coral">MAX</span></> : null}
                 {instructionMode ? <> · <span className="text-accent">Document Mode</span></> : null}

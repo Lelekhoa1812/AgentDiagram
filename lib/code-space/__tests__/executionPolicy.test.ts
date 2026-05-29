@@ -24,7 +24,10 @@ describe('Code Space execution policy', () => {
   it('recognizes auto mode and auto-applied diffs', () => {
     expect(isCodeSpaceAutoExecutionPolicy('auto')).toBe(true);
     expect(isCodeSpaceAutoExecutionPolicy('manual')).toBe(false);
-    expect(shouldAutoApplyCodeSpaceDiffs('auto')).toBe(true);
+    // Auto-apply is gated on the server's explicit autoApplied flag, not on the UI policy alone,
+    // so a proposed diff stays visible until the runtime confirms it was already applied safely.
+    expect(shouldAutoApplyCodeSpaceDiffs('auto')).toBe(false);
+    expect(shouldAutoApplyCodeSpaceDiffs('auto', true)).toBe(true);
     expect(shouldAutoApplyCodeSpaceDiffs('manual', true)).toBe(true);
     expect(shouldAutoApplyCodeSpaceDiffs('manual', false)).toBe(false);
   });

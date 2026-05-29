@@ -43,9 +43,9 @@ describe('Code Space agent route mode helpers', () => {
       ],
     });
     expect(plan).toEqual([
-      'Map Code Space runtime entrypoints',
-      'Diagnose patch lifecycle and validation seams',
-      'Write implementation plan artifact',
+      'Ground the plan in `components/code-space/AgentPanel.tsx`',
+      'Identify the minimal implementation path',
+      'Write a task-specific plan artifact',
       'Define validation gates',
     ]);
 
@@ -183,10 +183,11 @@ describe('Code Space agent route mode helpers', () => {
     expect(content).not.toMatch(/\bMCQ\s*\d+\s*:/i);
     expect(content).not.toMatch(/Which boundary should this implementation stay within/i);
     expect(content).not.toMatch(/^\s*[-*]\s*[A-E]\)\s+/im);
-    expect(content).toContain('## Request Understanding');
-    expect(content).toContain('## Repository Evidence Reviewed');
-    expect(content).toContain('## Validation and Test Plan');
-    expect(content).toContain('## Build Instructions');
+    expect(content).toContain('## Summary');
+    expect(content).toContain('## Key Changes');
+    expect(content).toContain('## Evidence Reviewed');
+    expect(content).toContain('## Test Plans');
+    expect(content).toContain('## Assumptions');
     expect(content).toContain('app/api/code-space/agent/route.ts');
     expect(content).toContain('npm run test');
   });

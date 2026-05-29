@@ -34,7 +34,7 @@
 1. **No cloud dependency** — the DSL compiler, layout engines, renderer, exporter, and AI pipeline all run locally on the user's machine.
 2. **SVG-first rendering** — the same `buildScene()` function drives both the interactive viewport and PNG/SVG exports, guaranteeing pixel-perfect identity.
 3. **DSL as source of truth** — all edits (AI-generated, inspector, manual) round-trip through a deterministic text DSL stored in the Monaco editor.
-4. **Multi-provider AI** — five AI providers (OpenAI, Anthropic, Gemini, xAI Grok, Azure Foundry) share a single retry-wrapped abstraction; user can switch at any time.
+4. **Multi-provider AI** — eight AI providers (OpenAI, Anthropic, Gemini, xAI Grok, Mistral, DeepSeek, NVIDIA NIM, Azure Foundry) share a single retry-wrapped abstraction; user can switch at any time.
 5. **Agentic repo analysis** — a 10-stage pipeline scans any local or GitHub repo and produces an architecture diagram without any manual work.
 
 ---

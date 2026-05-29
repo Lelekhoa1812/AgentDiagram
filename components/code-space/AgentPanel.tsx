@@ -2,6 +2,8 @@
 
 import React, { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Bot, Loader2, Zap } from 'lucide-react';
+import { addSessionTokens, estimateTokens } from '@/lib/code-space/tokenUsage';
+import { TokenUsageSpinbar } from './TokenUsageSpinbar';
 import type { CodeSpaceAgentSession, CodeSpaceMessage } from '@/lib/code-space/core';
 import type { CodeSpaceAgentMode } from '@/lib/code-space/agentModes';
 import { getCodeSpaceExecutionPolicyMeta, type CodeSpaceExecutionPolicy } from '@/lib/code-space/executionPolicy';
@@ -166,6 +168,8 @@ export function AgentPanel({
   const [prompt, setPrompt] = useState('');
   const [promptMentions, setPromptMentions] = useState<SelectedMention[]>([]);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const prevMessageCountRef = useRef(0);
+  const prevSessionIdRef = useRef<string | null>(null);
 
   const effectiveIndex = useMemo<FileMentionIndex>(() => {
     if (mentionIndex) return mentionIndex;
@@ -217,6 +221,29 @@ export function AgentPanel({
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [session?.messages, isRunning, session?.planMarkdown?.filePath]);
+
+  // Estimate token usage from new messages and record to the usage tracker
+  useEffect(() => {
+    const sessionId = session?.id ?? null;
+    const messages = session?.messages ?? [];
+
+    if (sessionId !== prevSessionIdRef.current) {
+      prevSessionIdRef.current = sessionId;
+      prevMessageCountRef.current = 0;
+    }
+
+    const prevCount = prevMessageCountRef.current;
+    if (messages.length <= prevCount) return;
+
+    const newMessages = messages.slice(prevCount);
+    const combined = newMessages.map((m) => m.content).join('');
+    const estimated = estimateTokens(combined);
+    if (estimated > 0) {
+      const providerId = providerSummary.split('/')[0] ?? 'unknown';
+      addSessionTokens(estimated, providerId);
+    }
+    prevMessageCountRef.current = messages.length;
+  }, [session?.messages, session?.id, providerSummary]);
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -303,9 +330,9 @@ export function AgentPanel({
           ) : (
             <div className="space-y-2">
               {chatEntries.map(({ key, message }) => (
-                <div key={key} className={`rounded border px-2 py-1.5 ${message.role === 'user' ? 'border-[#1f6feb55] bg-[#1f6feb1f] text-[#e6edf3]' : message.role === 'assistant' ? 'border-[#30363d] bg-[#161b22] text-[#e6edf3]' : 'border-[#30363d] bg-[#151515] text-[#8b949e]'}`}>
+                <div key={key} className={`rounded border px-2 py-1.5 ${message.role === 'user' ? 'border-[#1f6feb55] bg-[#1f6feb1f] text-[#e6edf3]' : message.role === 'assistant' ? 'border-[#30363d] bg-[#161b22] text-[#e6edf3]' : message.role === 'reasoning' ? 'border-[#30363d33] bg-[#0d1117] text-[#6e7681] italic' : 'border-[#30363d] bg-[#151515] text-[#8b949e]'}`}>
                   <div className="mb-1 flex items-center gap-1 text-[9px] uppercase tracking-widest text-[#6e7681]">
-                    {message.role === 'user' ? 'You' : message.role === 'assistant' ? 'Agent' : message.role}
+                    {message.role === 'user' ? 'You' : message.role === 'assistant' ? 'Agent' : message.role === 'reasoning' ? 'Thinking' : message.role}
                   </div>
                   <div className="whitespace-pre-wrap break-words text-[11px] leading-5">{renderMessageText(message)}</div>
                 </div>
@@ -393,6 +420,7 @@ export function AgentPanel({
             <button type="button" onClick={onGenerateDiagram} disabled={!canGenerateDiagram || isRunning} title={canGenerateDiagram ? 'Open the current project in Multi Layer mode' : 'Open a project first'} className="text-[#58a6ff] underline underline-offset-2 hover:text-[#79b8ff] disabled:cursor-not-allowed disabled:text-[#6e7681] disabled:no-underline">Generate Diagram</button>
             <button type="button" onClick={onOpenAppPlanner} className="text-[#58a6ff] underline underline-offset-2 hover:text-[#79b8ff]">App Planner</button>
           </div>
+          <TokenUsageSpinbar />
           <div className="flex items-center gap-2 whitespace-nowrap">
             <ExecutionPolicySelector policy={executionPolicy} disabled={isRunning} onChange={onExecutionPolicyChange} />
             <AgentModeSelector mode={agentMode} disabled={isRunning} onChange={onAgentModeChange} />

@@ -40,6 +40,7 @@ export class AgentOrchestrator {
         openTabs: options.openTabs ?? [],
         mode: run.mode === 'ask' || run.mode === 'plan' || run.mode === 'code' ? run.mode : 'code',
         toolBudget: 50,
+        autonomy: 'auto_safe_tools',
         attachments: [],
       },
       emit,

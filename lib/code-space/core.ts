@@ -98,7 +98,7 @@ export interface CodeSpaceToolCall {
 
 export interface CodeSpaceMessage {
   id: string;
-  role: 'user' | 'assistant' | 'system' | 'tool';
+  role: 'user' | 'assistant' | 'system' | 'tool' | 'reasoning';
   content: string;
   createdAt: number;
 }

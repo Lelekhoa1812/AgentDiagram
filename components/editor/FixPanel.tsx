@@ -110,7 +110,10 @@ export function FixPanel({ onFixApplied }: Props) {
     });
   }, [changeDescription, step, clarify, answers]);
 
-  const currentModel = provider.provider === 'foundry' ? (provider.customModel ?? '?') : provider.model;
+  const currentModel =
+    provider.provider === 'foundry' || provider.provider === 'deepseek' || provider.provider === 'nvidia'
+      ? (provider.customModel ?? '?')
+      : provider.model;
 
   const runClarify = async () => {
     if (!changeDescription.trim()) return;

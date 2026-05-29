@@ -74,3 +74,66 @@ export async function createFileCheckpoint({
   await fs.writeFile(checkpoint.snapshotRef, JSON.stringify(checkpoint, null, 2), 'utf8');
   return checkpoint;
 }
+
+/**
+ * Persist a checkpoint from explicit file snapshots rather than reading current
+ * disk state. The Code loop uses this to capture each touched file's *original*
+ * content (before any edit) so a single run-level checkpoint can revert all
+ * changes at once.
+ */
+export async function createCheckpointFromSnapshots({
+  projectId,
+  projectRoot,
+  runId,
+  reason,
+  snapshots,
+  createdAt = Date.now(),
+}: {
+  projectId: string;
+  projectRoot: string;
+  runId?: string;
+  reason: string;
+  snapshots: CheckpointFileSnapshot[];
+  createdAt?: number;
+}): Promise<FileCheckpoint> {
+  const guarded = guardPath(projectRoot);
+  if (!guarded.ok) throw new Error(guarded.reason ?? 'Invalid project root');
+  const checkpoint: FileCheckpoint = {
+    id: `checkpoint:${createdAt}:${Math.random().toString(36).slice(2, 10)}`,
+    projectId,
+    runId,
+    reason,
+    snapshotRef: '',
+    files: snapshots,
+    createdAt,
+  };
+  const checkpointDir = path.join(os.tmpdir(), 'code-space-checkpoints');
+  await fs.mkdir(checkpointDir, { recursive: true });
+  checkpoint.snapshotRef = path.join(checkpointDir, `${checkpoint.id.replace(/[:/]/g, '-')}.json`);
+  await fs.writeFile(checkpoint.snapshotRef, JSON.stringify(checkpoint, null, 2), 'utf8');
+  return checkpoint;
+}
+
+/** Load a persisted checkpoint snapshot from disk. */
+export async function loadFileCheckpoint(snapshotRef: string): Promise<FileCheckpoint> {
+  return JSON.parse(await fs.readFile(snapshotRef, 'utf8')) as FileCheckpoint;
+}
+
+/**
+ * Rewind every file captured by a checkpoint back to its snapshot. Files that did
+ * not exist when the snapshot was taken are removed. Returns the affected paths.
+ */
+export async function restoreFileCheckpoint(projectRoot: string, checkpoint: FileCheckpoint): Promise<string[]> {
+  const guarded = guardPath(projectRoot);
+  if (!guarded.ok) throw new Error(guarded.reason ?? 'Invalid project root');
+  for (const file of checkpoint.files) {
+    const target = resolveInside(guarded.resolved, file.path);
+    if (!file.existed) {
+      await fs.rm(target, { force: true });
+      continue;
+    }
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.writeFile(target, file.content ?? '', 'utf8');
+  }
+  return checkpoint.files.map((file) => file.path);
+}

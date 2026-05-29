@@ -102,6 +102,9 @@ export function CustomPromptPanel() {
   const [activeStages, setActiveStages] = useState(CLARIFY_STAGES);
   const [animTitle, setAnimTitle] = useState('Generating questions…');
   const abortRef = useRef<AbortController | null>(null);
+  const summaryUsesCustomModel =
+    provider.provider === 'foundry' || provider.provider === 'deepseek' || provider.provider === 'nvidia';
+  const summaryModel = summaryUsesCustomModel ? provider.customModel ?? '?' : provider.model;
 
   // Restore persisted state on mount
   useEffect(() => {
@@ -161,8 +164,10 @@ export function CustomPromptPanel() {
     const ac = new AbortController();
     abortRef.current = ac;
 
+    const clarifyUsesCustomModel =
+      provider.provider === 'foundry' || provider.provider === 'deepseek' || provider.provider === 'nvidia';
     const clarifyModel =
-      provider.provider === 'foundry'
+      clarifyUsesCustomModel
         ? (provider.customModel ?? provider.model)
         : provider.provider === 'local'
           ? (provider.localModelName ?? '')
@@ -289,8 +294,10 @@ export function CustomPromptPanel() {
 
     const apiEndpoint = isMulti ? '/api/agent/custom-multilayer' : '/api/agent/custom';
 
+    const genUsesCustomModel =
+      provider.provider === 'foundry' || provider.provider === 'deepseek' || provider.provider === 'nvidia';
     const genModel =
-      provider.provider === 'foundry'
+      genUsesCustomModel
         ? (provider.customModel ?? provider.model)
         : provider.provider === 'local'
           ? (provider.localModelName ?? '')
@@ -534,9 +541,7 @@ export function CustomPromptPanel() {
                   Provider:{' '}
                   <span className="text-ink-200">{provider.provider}</span>
                   {' · '}Model:{' '}
-                  <span className="font-mono text-ink-200">
-                    {provider.provider === 'foundry' ? provider.customModel ?? '?' : provider.model}
-                  </span>
+                  <span className="font-mono text-ink-200">{summaryModel}</span>
                 </div>
                 <button
                   onClick={onAskQuestions}

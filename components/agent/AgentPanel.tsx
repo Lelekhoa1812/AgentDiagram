@@ -67,7 +67,10 @@ export function AgentPanel() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider: provider.provider,
-          model: provider.provider === 'foundry' ? provider.customModel ?? '' : provider.model,
+          model:
+            provider.provider === 'foundry' || provider.provider === 'deepseek' || provider.provider === 'nvidia'
+              ? provider.customModel ?? ''
+              : provider.model,
           apiKey: provider.apiKey || undefined,
           endpoint: provider.endpoint || undefined,
           rootPath,
@@ -182,7 +185,12 @@ export function AgentPanel() {
                 <span className="capitalize">{kind}</span>
                 {' · '}
                 <span>
-                  {provider.provider}/{provider.provider === 'foundry' ? provider.customModel ?? '?' : provider.model}
+                  {provider.provider}/
+                  {(provider.provider === 'foundry' ||
+                    provider.provider === 'deepseek' ||
+                    provider.provider === 'nvidia'
+                    ? provider.customModel ?? '?'
+                    : provider.model)}
                 </span>
                 {quickMode ? <> · <span className="text-accent">Quick Mode</span></> : null}
                 {maxMode ? <> · <span className="text-coral">MAX</span></> : null}

@@ -1,26 +1,31 @@
-import type { AssistantTurn, ChatParams, ChatWithToolsParams, Provider, ProviderConfig, ValidationResult } from './types';
-import { makeRetryError } from './retry';
-import { resolveMaxTokens, withMaxTokenKeyRetry } from './maxTokens';
+import type {
+  AssistantTurn,
+  ChatParams,
+  ChatWithToolsParams,
+  Provider,
+  ProviderConfig,
+  ProviderId,
+  ValidationResult,
+} from './types';
+import { resolveMaxTokens } from './maxTokens';
 import { buildOpenAIToolMessages, buildOpenAIToolSpecs, parseOpenAIToolResponse } from './openaiCompat';
-
-const DEFAULT_BASE_URL = 'https://api.x.ai/v1';
+import { makeRetryError } from './retry';
 
 function normalizeUrl(value?: string): string {
   const trimmed = value?.trim();
-  return trimmed ? trimmed.replace(/\/$/, '') : '';
+  if (!trimmed) return '';
+  return trimmed.replace(/\/+$/, '');
 }
 
-export class GrokProvider implements Provider {
-  id = 'grok' as const;
-  private apiKey: string;
-  private baseUrl: string;
+export abstract class OpenAICompatibleProvider implements Provider {
+  abstract id: ProviderId;
+  protected readonly apiKey: string;
+  protected readonly baseUrl: string;
 
-  constructor(cfg: ProviderConfig) {
+  constructor(cfg: ProviderConfig, defaultBase: string, envBase?: string) {
     this.apiKey = cfg.apiKey;
-    this.baseUrl =
-      normalizeUrl(cfg.endpoint) ||
-      normalizeUrl(process.env.GROK_API_BASE) ||
-      normalizeUrl(DEFAULT_BASE_URL);
+    const override = normalizeUrl(cfg.endpoint) || (envBase ? normalizeUrl(process.env[envBase]) : '');
+    this.baseUrl = override || defaultBase;
   }
 
   async validate(model: string): Promise<ValidationResult> {
@@ -38,8 +43,8 @@ export class GrokProvider implements Provider {
   }
 
   private async callChat(params: ChatParams): Promise<string> {
+    // Motivation vs Logic: These providers expose an OpenAI-compatible chat endpoint, so reuse one fetch path instead of duplicating schema handling.
     const url = `${this.baseUrl}/chat/completions`;
-    // Motivation vs Logic: Grok follows OpenAI-style payloads, so keep the body minimal to avoid unsupported sampling knobs.
     const body: Record<string, unknown> = {
       model: params.model,
       messages: params.messages,
@@ -59,41 +64,33 @@ export class GrokProvider implements Provider {
       body: JSON.stringify(body),
       signal: params.signal,
     });
-    if (!res.ok) {
-      throw await makeRetryError(res);
-    }
+    if (!res.ok) throw await makeRetryError(res);
     const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
     return json.choices?.[0]?.message?.content ?? '';
   }
 
   async chatWithTools(params: ChatWithToolsParams): Promise<AssistantTurn> {
     const url = `${this.baseUrl}/chat/completions`;
-    const baseBody: Record<string, unknown> = {
+    const body: Record<string, unknown> = {
       model: params.model,
       messages: buildOpenAIToolMessages(params.messages),
+      max_tokens: resolveMaxTokens({ provider: this.id, requested: params.maxTokens }),
     };
     if (params.tools.length) {
-      baseBody.tools = buildOpenAIToolSpecs(params.tools);
-      baseBody.tool_choice =
+      body.tools = buildOpenAIToolSpecs(params.tools);
+      body.tool_choice =
         params.toolChoice === 'required' ? 'required' : params.toolChoice === 'none' ? 'none' : 'auto';
     }
-    const maxTokens = resolveMaxTokens({ provider: 'grok', requested: params.maxTokens });
-    const res = await withMaxTokenKeyRetry(maxTokens, async (key) => {
-      const body = { ...baseBody, [key]: maxTokens };
-      const attempt = await fetch(url, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${this.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
-        signal: params.signal,
-      });
-      if (!attempt.ok) {
-        throw await makeRetryError(attempt);
-      }
-      return attempt;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: params.signal,
     });
+    if (!res.ok) throw await makeRetryError(res);
     return parseOpenAIToolResponse(await res.json());
   }
 }

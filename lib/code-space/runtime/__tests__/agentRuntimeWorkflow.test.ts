@@ -33,6 +33,7 @@ describe('AgentRuntime workflow contracts', () => {
         apiKey: '',
         openTabs: [],
         toolBudget: 20,
+        autonomy: 'auto_safe_tools',
         attachments: [{ kind: 'file', relativePath: 'src.ts', displayName: 'src.ts' }],
       },
       (event) => {
@@ -64,6 +65,7 @@ describe('AgentRuntime workflow contracts', () => {
         apiKey: '',
         openTabs: ['app.ts'],
         toolBudget: 20,
+        autonomy: 'auto_safe_tools',
         attachments: [],
       },
       (event) => {
@@ -73,10 +75,11 @@ describe('AgentRuntime workflow contracts', () => {
 
     const planEvent = events.find((event) => event.type === 'plan_markdown_created');
     expect(planEvent?.filePath).toBe('.agent/plans/session-plan.md');
-    expect(planEvent?.content).toContain('## Request Understanding');
-    expect(planEvent?.content).toContain('## Repository Evidence Reviewed');
-    expect(planEvent?.content).toContain('## Runtime State Machine');
-    expect(planEvent?.content).toContain('## Build Instructions');
+    expect(planEvent?.content).toContain('## Summary');
+    expect(planEvent?.content).toContain('## Key Changes');
+    expect(planEvent?.content).toContain('## Evidence Reviewed');
+    expect(planEvent?.content).toContain('## Test Plans');
+    expect(planEvent?.content).toContain('## Assumptions');
     expect(planEvent?.content).not.toMatch(/\bMCQ\s*\d+\s*:/i);
   });
 

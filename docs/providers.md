@@ -54,6 +54,33 @@ on your account, switch down — the API call will fail with a clear
 | Base URL   | `https://api.x.ai/v1` (override with `GROK_API_BASE`)           |
 | JSON mode  | `response_format: json_schema` with `strict: true`              |
 
+## Mistral
+
+| Setting    | Value                                                       |
+|------------|-------------------------------------------------------------|
+| Env var    | `MISTRAL_API_KEY`                                           |
+| Models     | `mistral-large`, `mistral-medium`, `mistral-small`          |
+| Base URL   | `https://api.mistral.ai/v1` (override with `MISTRAL_ENDPOINT`) |
+| JSON mode  | OpenAI-compatible `response_format` payloads (strict schema) |
+
+## DeepSeek NLU
+
+| Setting    | Value                                                       |
+|------------|-------------------------------------------------------------|
+| Env var    | `DEEPSEEK_API_KEY`                                          |
+| Models     | `deepseek-v4-pro`, `deepseek-v4-mini`                       |
+| Endpoint   | `https://api.deepseek.com` (override with `DEEPSEEK_ENDPOINT`) |
+| JSON mode  | OpenAI-compatible `response_format` payloads (strict schema) |
+
+## NVIDIA NIM
+
+| Setting    | Value                                                       |
+|------------|-------------------------------------------------------------|
+| Env var    | `NVIDIA_API_KEY`                                            |
+| Models     | `meta/llama-3.1-70b-instruct`, `meta/llama-3.1-34b-instruct` |
+| Endpoint   | `https://nvidia.com` (override with `NVIDIA_ENDPOINT`)     |
+| JSON mode  | OpenAI-compatible `response_format` payloads (strict schema) |
+
 ## Azure AI Foundry
 
 | Setting    | Value                                                        |

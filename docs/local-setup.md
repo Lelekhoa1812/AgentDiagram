@@ -41,10 +41,19 @@ The dev server runs on http://localhost:3000.
 | `GROK_API_KEY`                    | xAI Grok provider key                  |
 | `GROK_MODEL`                      | Default Grok model                     |
 | `GROK_API_BASE`                   | Optional Grok API base (default https://api.x.ai/v1) |
+| `MISTRAL_API_KEY`                 | Mistral provider key                   |
+| `MISTRAL_MODEL`                   | Default Mistral model                  |
+| `MISTRAL_ENDPOINT`                | Optional Mistral API base (default https://api.mistral.ai/v1) |
+| `DEEPSEEK_API_KEY`                | DeepSeek provider key                  |
+| `DEEPSEEK_MODEL`                  | DeepSeek model                         |
+| `DEEPSEEK_ENDPOINT`               | DeepSeek API base (default https://api.deepseek.com) |
+| `NVIDIA_API_KEY`                  | NVIDIA NIM provider key                |
+| `NVIDIA_MODEL`                    | NVIDIA model                           |
+| `NVIDIA_ENDPOINT`                 | NVIDIA NIM endpoint (default https://nvidia.com) |
 | `FOUNDRY_API_KEY`                 | Azure AI Foundry provider key          |
 | `FOUNDRY_ENDPOINT`                | Azure AI Foundry endpoint URL          |
 | `FOUNDRY_MODEL`                   | Azure deployment name                  |
-| `AGENTDIAGRAM_DEFAULT_PROVIDER`   | `openai` / `anthropic` / `gemini` / `foundry` / `grok` |
+| `AGENTDIAGRAM_DEFAULT_PROVIDER`   | `openai` / `anthropic` / `gemini` / `grok` / `mistral` / `deepseek` / `nvidia` / `foundry` |
 | `AGENTDIAGRAM_DEFAULT_REPO_PATH`  | Override the parent-directory default  |
 
 Any single provider key is sufficient — switch between them in the UI.

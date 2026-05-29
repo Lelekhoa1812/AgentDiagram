@@ -2,8 +2,10 @@
  * Azure AI Foundry provider — uses Azure OpenAI deployment chat completions.
  * User supplies endpoint and custom model deployment name.
  */
-import type { Provider, ChatParams, ValidationResult, ProviderConfig } from './types';
+import type { AssistantTurn, ChatParams, ChatWithToolsParams, Provider, ProviderConfig, ValidationResult } from './types';
 import { makeRetryError } from './retry';
+import { resolveMaxTokens, withMaxTokenKeyRetry } from './maxTokens';
+import { buildOpenAIToolMessages, buildOpenAIToolSpecs, parseOpenAIToolResponse } from './openaiCompat';
 
 export class FoundryProvider implements Provider {
   id = 'foundry' as const;
@@ -58,6 +60,36 @@ export class FoundryProvider implements Provider {
     }
     const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
     return json.choices?.[0]?.message?.content ?? '';
+  }
+
+  async chatWithTools(params: ChatWithToolsParams): Promise<AssistantTurn> {
+    const url = buildFoundryChatUrl(this.endpoint, params.model);
+    const baseBody: Record<string, unknown> = {
+      messages: buildOpenAIToolMessages(params.messages),
+    };
+    if (params.tools.length) {
+      baseBody.tools = buildOpenAIToolSpecs(params.tools);
+      baseBody.tool_choice =
+        params.toolChoice === 'required' ? 'required' : params.toolChoice === 'none' ? 'none' : 'auto';
+    }
+    const maxTokens = resolveMaxTokens({ provider: 'foundry', requested: params.maxTokens });
+    const res = await withMaxTokenKeyRetry(maxTokens, async (key) => {
+      const body = { ...baseBody, [key]: maxTokens };
+      const attempt = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'api-key': this.apiKey,
+        },
+        body: JSON.stringify(body),
+        signal: params.signal,
+      });
+      if (!attempt.ok) {
+        throw await makeRetryError(attempt);
+      }
+      return attempt;
+    });
+    return parseOpenAIToolResponse(await res.json());
   }
 }
 
