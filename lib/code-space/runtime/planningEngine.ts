@@ -7,6 +7,11 @@ import {
 } from '@/lib/code-space/agent/planTemplate';
 import type { ContextGraphFile, ContextGraphResult } from './contextGraphEngine';
 import type { TerminalCommand } from './terminalPolicy';
+import {
+  assessContextSufficiency,
+  formatContextSufficiencyMarkdown,
+  formatWorkflowDodMarkdown,
+} from './workflowPolicy';
 
 export interface WorkflowOutline {
   intentSummary: string;
@@ -14,8 +19,22 @@ export interface WorkflowOutline {
   clarifyingQuestions: CodeSpaceClarifyingQuestion[];
 }
 
-const REQUIRED_PLAN_SECTIONS = ['Summary', 'Key Changes', 'Test Plans', 'Assumptions'];
-const MAX_PLAN_FILES = 12;
+const REQUIRED_PLAN_SECTIONS = [
+  'Summary',
+  'Intent, Scope, and Non-Goals',
+  'Context Sufficiency Gate',
+  'Repository Evidence Reviewed',
+  'Current-State Diagnosis to Verify',
+  'Target Design Direction',
+  'Implementation Milestones',
+  'File-Level Change Plan',
+  'Validation Plan',
+  'Safety and Change Control',
+  'Repair Policy',
+  'Definition of Done',
+  'Final Response Format',
+];
+const MAX_PLAN_FILES = 14;
 
 function formatList(items: string[]): string {
   if (!items.length) return '';
@@ -48,10 +67,10 @@ function filesByGroup(files: ContextGraphFile[]): Record<string, ContextGraphFil
   };
 
   for (const file of files) {
-    if (file.reasons.includes('explicit_file')) groups['Primary target files']?.push(file);
-    else if (/route|controller|handler|main|app\.|server|runtime|chatbot|retrieval|database/i.test(file.path)) groups['Call sites and runtime entrypoints']?.push(file);
-    else if (/config|settings|env|package\.json|pyproject|requirements|docker|compose/i.test(file.path)) groups['Configuration and startup']?.push(file);
-    else if (/test|spec|pytest|vitest|playwright/i.test(file.path)) groups['Tests and validation']?.push(file);
+    if (file.reasons.includes('explicit_file') || file.reasons.includes('explicit_folder')) groups['Primary target files']?.push(file);
+    else if (/route|controller|handler|main|app\.|server|runtime|chatbot|retrieval|database|workspace|panel|agent|planner|tool|context/i.test(file.path)) groups['Call sites and runtime entrypoints']?.push(file);
+    else if (/config|settings|env|package\.json|pyproject|requirements|docker|compose|tsconfig|vitest|playwright/i.test(file.path)) groups['Configuration and startup']?.push(file);
+    else if (/test|spec|pytest|vitest|playwright|__tests__/i.test(file.path)) groups['Tests and validation']?.push(file);
     else groups['Supporting files']?.push(file);
   }
 
@@ -60,6 +79,7 @@ function filesByGroup(files: ContextGraphFile[]): Record<string, ContextGraphFil
 
 function summarizeAction(prompt: string): string {
   const lower = prompt.toLowerCase();
+  if (/workflow|planning|agentic|agent|code\s*space|cursor|codex|claude\s*code/.test(lower)) return 'Upgrade the Code Space agent workflow so planning, context recall, execution, validation, repair, and verdicts are evidence-first and auditable.';
   if (/disable|turn off|remove|bypass/.test(lower)) return 'Disable or bypass only the requested functionality while keeping the rest of the application path intact.';
   if (/fix|bug|error|traceback|exception|fail/.test(lower)) return 'Fix the reported failure at the smallest responsible implementation surface.';
   if (/refactor|cleanup|simplify/.test(lower)) return 'Refactor the relevant implementation path without changing unrelated behavior.';
@@ -70,26 +90,29 @@ function summarizeAction(prompt: string): string {
 function buildFilePlan(file: ContextGraphFile, prompt: string): string {
   const lowerPath = file.path.toLowerCase();
   const lowerPrompt = prompt.toLowerCase();
+  if (/workflowpolicy|planningengine|agentruntime|codeagentloop|contextgraphengine|validationrunner|repairloop|tool/.test(lowerPath) && /workflow|agent|plan|code\s*space|validation|repair|context/.test(lowerPrompt)) {
+    return 'align this agent workflow surface with the shared v3.2 policy and keep state/validation boundaries typed.';
+  }
   if (/database|mongo|mongodb/.test(lowerPath) && /disable|mongo|mongodb|database/.test(lowerPrompt)) {
     return 'inspect startup/initialization paths and remove, bypass, or guard the database connection without breaking imports.';
   }
   if (/retrieval|rag|rerank|vector|faiss|search/.test(lowerPath) && /rag|retriev|clinical|passage|vector|faiss/.test(lowerPrompt)) {
     return 'disable clinical passage retrieval/RAG calls and preserve a direct non-RAG response path.';
   }
-  if (/chatbot|route|app|main/.test(lowerPath)) {
-    return 'update the call path so the requested behavior is actually used at runtime.';
+  if (/chatbot|route|app|main|runtime|workspace|panel/.test(lowerPath)) {
+    return 'update the runtime or UI call path so the requested behavior is actually used by users.';
   }
   if (/config|settings|env/.test(lowerPath)) {
-    return 'check whether a flag or setting is the safest way to disable the feature.';
+    return 'check whether a flag or setting is the safest way to control the feature.';
   }
   if (/test|spec/.test(lowerPath)) {
-    return 'add or update coverage for the changed runtime behavior.';
+    return 'add or update focused coverage for the changed workflow behavior.';
   }
   return 'review only if it is required by imports, call sites, or validation failures.';
 }
 
 function validationLines(validationCommands: TerminalCommand[]): string[] {
-  if (!validationCommands.length) return ['- Manual review — no project-specific validation command was detected; do not claim verification until a compile/test command is run.'];
+  if (!validationCommands.length) return ['- Manual review — no project-specific validation command was detected; do not claim verification until a compile/test command is run or the exact blocker is reported.'];
   return validationCommands.map((command) => `- ${[command.command, ...command.args].join(' ')} — ${command.reason}`);
 }
 
@@ -105,23 +128,57 @@ function evidenceLines(files: ContextGraphFile[]): string[] {
   });
 }
 
+function diagnosisLines(context: ContextGraphResult, prompt: string): string[] {
+  const selected = planCandidateFiles(context).slice(0, 6).map((file) => file.path);
+  const lowerPrompt = prompt.toLowerCase();
+  const workflowTask = /workflow|planning|agent|code\s*space|validation|repair|context|patch/.test(lowerPrompt);
+  return [
+    '- Verify the current flow from user prompt → mode selection → context graph → plan artifact/code loop → validation → final verdict.',
+    '- Confirm whether any existing implementation already owns the requested responsibility before adding new abstractions.',
+    workflowTask
+      ? '- Verify that context insufficiency, no-op patch outcomes, validation failures, and review/autonomy states terminate with explicit needs_review/verified verdicts.'
+      : '- Verify that the suspected runtime failure exists in the selected files before editing.',
+    selected.length ? `- Evidence to inspect first: ${formatList(selected.map((file) => `\`${file}\``))}.` : '- Evidence to inspect first: rerun repository context collection because no primary files were selected.',
+  ];
+}
+
+function milestoneLines(files: ContextGraphFile[], validationCommands: TerminalCommand[]): string[] {
+  const primary = files.slice(0, 5).map((file) => `\`${file.path}\``);
+  const validation = validationCommands[0] ? [validationCommands[0].command, ...validationCommands[0].args].join(' ') : 'focused inspection or nearest available validation command';
+  return [
+    '### Milestone 1 — Verify and map current behaviour',
+    primary.length ? `Files to inspect: ${formatList(primary)}.` : 'Files to inspect: rerun context recall to select primary files.',
+    'Tasks: trace the current data/control flow, identify duplicate or competing paths, and confirm the smallest owner module.',
+    'Acceptance: current behaviour is understood before implementation and no speculative path is created.',
+    '',
+    '### Milestone 2 — Implement the smallest coherent change',
+    'Tasks: edit only the owner module(s), reuse existing abstractions, preserve public APIs, and keep the patch reviewable.',
+    'Acceptance: requested behaviour is implemented in real code, not as documentation or a parallel unused path.',
+    '',
+    '### Milestone 3 — Consolidate, test, and remove drift',
+    'Tasks: update usages/imports, add or update focused tests, remove duplicate logic only when safe, and validate.',
+    `Validation: ${validation}.`,
+  ];
+}
+
 export class PlanningEngine {
   buildTodos(mode: 'ask' | 'plan' | 'code', context: ContextGraphResult): string[] {
     if (mode === 'ask') return ['Gather repository evidence for the question', 'Trace relevant references and tests', 'Answer directly from evidence'];
     const surfaces = planCandidateFiles(context).slice(0, 4).map((file) => file.path);
     if (mode === 'plan') {
       return [
+        'Resolve intent, scope, non-goals, assumptions, and risk',
         surfaces.length ? `Ground the plan in ${formatList(surfaces.map((file) => `\`${file}\``))}` : 'Ground the plan in selected repository evidence',
-        'Identify the minimal implementation path',
-        'Write a task-specific plan artifact',
-        'Define validation gates',
+        'Score context sufficiency and list recall targets',
+        'Write an implementation-grade plan artifact',
+        'Define validation, repair, rollback, and verdict gates',
       ];
     }
     return [
-      'Load target files and related call sites',
-      surfaces.length ? `Prepare the patch across ${formatList(surfaces.map((file) => `\`${file}\``))}` : 'Prepare the smallest coherent patch',
-      'Run validation',
-      'Repair failures or mark exact needs_review blockers',
+      'Load the approved plan and target files',
+      surfaces.length ? `Prepare the patch across ${formatList(surfaces.map((file) => `\`${file}\``))}` : 'Recall enough context, then prepare the smallest coherent patch',
+      'Run validation and inspect failures',
+      'Repair bounded failures or mark exact needs_review blockers',
     ];
   }
 
@@ -148,35 +205,94 @@ export class PlanningEngine {
     const topFiles = selectedFiles.slice(0, 6).map((file) => `\`${file.path}\``);
     const action = summarizeAction(prompt);
     const filePlans = selectedFiles.map((file) => `- ${file.path}: ${buildFilePlan(file, prompt)}`);
+    const sufficiency = assessContextSufficiency({ mode: 'plan', prompt, context, validationCommands });
 
     return [
-      `# Code Space Plan — ${projectName}`,
+      `# Plan: ${projectName} Code Space Task`,
+      '',
+      `Your task is to ${action.charAt(0).toLowerCase()}${action.slice(1)}`,
+      'Do not start by coding. First inspect the repository, verify the current implementation, identify the smallest safe change, then implement only what is required.',
       '',
       '## Summary',
       `- Request: ${normalizePrompt(prompt)}`,
       `- Implementation goal: ${action}`,
       topFiles.length ? `- Primary files to inspect/change: ${formatList(topFiles)}.` : '- Primary files to inspect/change: none selected yet; rerun context discovery before editing.',
-      '- Non-goal: do not change Code Space runtime, UI patch-review workflows, or prior `.agent/plans` artifacts unless the user explicitly asks for that project.',
+      `- Context gate: ${sufficiency.status} (${sufficiency.score}/100, ${sufficiency.confidence} confidence).`,
       '',
-      '## Key Changes',
-      '- Re-open the primary target files from disk before editing; do not rely on this plan artifact as source code evidence.',
-      ...filePlans,
-      '- Keep the patch narrow: modify only files required by the user request, direct imports/call sites, configuration, and tests.',
-      '- If the selected evidence does not contain the necessary target file, recall or rescore repository files and regenerate the plan before returning needs_review.',
+      '## Intent, Scope, and Non-Goals',
+      '### In scope',
+      '- Repository investigation and evidence-backed implementation planning.',
+      '- The smallest coherent code, test, and validation changes required by the user request.',
+      '- Honest final verdicts with exact blockers when validation or context is insufficient.',
       '',
-      '## Evidence Reviewed',
+      '### Out of scope',
+      '- Broad rewrites, new services, new dependencies, new databases, background jobs, or unrelated UI flows unless repository evidence proves they are required.',
+      '- Changing secrets, credentials, production data, deployment settings, or remote branches without explicit approval.',
+      '- Implementing non-goals hidden inside exploratory findings.',
+      '',
+      '### Assumptions',
+      '- Existing project conventions should be reused before adding new abstractions.',
+      '- Public APIs and user-visible flows should remain stable unless the request explicitly changes them.',
+      '- If these assumptions are wrong, stop and report `needs_review`.',
+      '',
+      '## Context Sufficiency Gate',
+      ...formatContextSufficiencyMarkdown(sufficiency).split('\n'),
+      '- If this gate is not ready, recall the listed files/surfaces before editing or finalising.',
+      '',
+      '## Repository Evidence Reviewed',
       ...evidenceLines(selectedFiles),
       '',
-      '## Test Plans',
-      ...validationLines(validationCommands),
-      '- After implementation, rerun the most specific failing validation command before broader gates.',
-      '- If validation cannot run because tooling is unavailable, record the exact command and failure output rather than marking the work verified.',
+      '## Current-State Diagnosis to Verify',
+      ...diagnosisLines(context, prompt),
+      'This matters because an ungrounded plan can create duplicate architecture, modify the wrong owner module, or claim validation without touching the real runtime path.',
       '',
-      '## Assumptions',
-      '- The plan is scoped to the user request above, not to improving the Code Space agent itself.',
-      '- Existing public API behavior should remain unchanged except for the requested feature disable/fix path.',
-      '- Database, retrieval, model-loading, and route startup changes should be guarded so imports and application startup still succeed.',
-      '- Stop only with an exact blocker: missing file, unsafe operation, provider/tool failure, or validation failure after bounded repair.',
+      '## Target Design Direction',
+      '- Prefer existing project conventions and typed boundaries.',
+      '- Refactor toward one source of truth per responsibility.',
+      '- Keep UI, transport, runtime orchestration, validation, persistence, and business logic clearly separated.',
+      '- Do not add dependencies unless there is no reasonable existing alternative.',
+      '',
+      'Expected ownership:',
+      ...filePlans,
+      '',
+      '## Implementation Milestones',
+      ...milestoneLines(selectedFiles, validationCommands),
+      '',
+      '## File-Level Change Plan',
+      ...filePlans,
+      selectedFiles.length ? '- Add or update focused tests at the closest existing test surface.' : '- No file-level change plan is valid until context recall selects target files.',
+      '',
+      '## Validation Plan',
+      ...validationLines(validationCommands),
+      '- Prefer targeted validation first, then broader typecheck/lint/test/build gates where available.',
+      '- If a command is unavailable, broken, or unsafe, report the exact reason and run the closest safe fallback.',
+      '- Do not mark the task complete if validation fails, is skipped, or cannot be run without explaining why.',
+      '',
+      '## Safety and Change Control',
+      '- Read target files from disk before editing.',
+      '- Check existing abstractions first and preserve public APIs unless migration is explicit.',
+      '- Avoid destructive changes and unrelated formatting churn.',
+      '- Require explicit approval before installing dependencies, changing schemas, deleting files, moving large folders, touching credentials/secrets, deploying, or pushing remote branches.',
+      '- Stop and report `needs_review` if repository state contradicts this plan, risky unapproved changes are required, validation repeatedly fails, or the fix expands beyond scope.',
+      '',
+      '## Repair Policy',
+      '1. Read the validation failure carefully.',
+      '2. Identify the smallest affected area.',
+      '3. Make the smallest safe repair.',
+      '4. Re-run the relevant validation.',
+      '5. Stop as `needs_review` if the same failure repeats or the repair becomes risky.',
+      'Do not make unrelated changes during repair.',
+      '',
+      '## Definition of Done',
+      ...formatWorkflowDodMarkdown().split('\n'),
+      '',
+      '## Final Response Format',
+      'When finished, respond with:',
+      '- what changed',
+      '- key files changed',
+      '- validation run and results',
+      '- unresolved issues, if any',
+      '- commit hash, if a commit was made',
       '',
     ].join('\n');
   }
