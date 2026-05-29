@@ -13,7 +13,7 @@ import {
   RotateCcw,
   Sun,
 } from 'lucide-react';
-import logo from '@/app/public/logo.png';
+import logo from '@/public/logo.png';
 import { ModeToggle } from './ModeToggle';
 import { useDiagramStore } from '@/lib/state/store';
 
