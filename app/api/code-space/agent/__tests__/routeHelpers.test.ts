@@ -43,10 +43,11 @@ describe('Code Space agent route mode helpers', () => {
       ],
     });
     expect(plan).toEqual([
+      'Resolve intent, scope, non-goals, assumptions, and risk',
       'Ground the plan in `components/code-space/AgentPanel.tsx`',
-      'Identify the minimal implementation path',
-      'Write a task-specific plan artifact',
-      'Define validation gates',
+      'Score context sufficiency and list recall targets',
+      'Write an implementation-grade plan artifact',
+      'Define validation, repair, rollback, and verdict gates',
     ]);
 
     const questions = await buildClarifyingQuestions('comprehensively improve the agent planning and Build button workflow', ['feature_build'], {
@@ -184,10 +185,10 @@ describe('Code Space agent route mode helpers', () => {
     expect(content).not.toMatch(/Which boundary should this implementation stay within/i);
     expect(content).not.toMatch(/^\s*[-*]\s*[A-E]\)\s+/im);
     expect(content).toContain('## Summary');
-    expect(content).toContain('## Key Changes');
-    expect(content).toContain('## Evidence Reviewed');
-    expect(content).toContain('## Test Plans');
-    expect(content).toContain('## Assumptions');
+    expect(content).toContain('## Context Sufficiency Gate');
+    expect(content).toContain('## Repository Evidence Reviewed');
+    expect(content).toContain('## Validation Plan');
+    expect(content).toContain('## Definition of Done');
     expect(content).toContain('app/api/code-space/agent/route.ts');
     expect(content).toContain('npm run test');
   });
